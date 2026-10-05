@@ -1,4 +1,4 @@
-import type { DiffRequest, DiffResponse } from './types.ts';
+import type { DiffRequest, DiffResponse, Timestamp } from './types.ts';
 
 export const DEFAULT_BASE_URL = 'https://api.zenmoney.ru/v8';
 
@@ -50,11 +50,16 @@ export class ZenMoneyClient {
     return (await response.json()) as DiffResponse;
   }
 
-  /** Full snapshot of all user data. */
-  fetchAll(): Promise<DiffResponse> {
+  /** Everything changed on the server after `serverTimestamp`, including edits to old transactions. */
+  changesSince(serverTimestamp: Timestamp): Promise<DiffResponse> {
     return this.diff({
       currentClientTimestamp: Math.floor(Date.now() / 1000),
-      serverTimestamp: 0,
+      serverTimestamp,
     });
+  }
+
+  /** Full snapshot of all user data. */
+  fetchAll(): Promise<DiffResponse> {
+    return this.changesSince(0);
   }
 }

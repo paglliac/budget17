@@ -1,13 +1,26 @@
+import { fileURLToPath } from 'node:url';
 import { summarizeBalances } from './balances.ts';
-import { renderBalances } from './format.ts';
+import { renderBalances, renderSyncResult } from './format.ts';
+import { Store } from './store.ts';
+import { sync } from './sync.ts';
 import { ZenMoneyClient, ZenMoneyError } from './zenmoney/client.ts';
+
+const DB_PATH = fileURLToPath(new URL('../data/zenmoney.db', import.meta.url));
 
 class UsageError extends Error {}
 
 const commands: Record<string, () => Promise<void>> = {
+  async sync() {
+    const client = createClient();
+    using store = new Store(DB_PATH);
+    console.log(renderSyncResult(await sync(client, store)));
+  },
+
   async balances() {
-    const data = await createClient().fetchAll();
-    console.log(renderBalances(summarizeBalances(data)));
+    const client = createClient();
+    using store = new Store(DB_PATH);
+    await sync(client, store);
+    console.log(renderBalances(summarizeBalances(store.load())));
   },
 };
 

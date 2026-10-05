@@ -29,6 +29,15 @@ describe('ZenMoneyClient', () => {
     assert.ok(Math.abs(body.currentClientTimestamp - Date.now() / 1000) < 5);
   });
 
+  it('requests changes since the given server timestamp', async () => {
+    const { fetch, calls } = fakeFetch(Response.json({ serverTimestamp: 200 }));
+    const client = new ZenMoneyClient('t', { fetch });
+
+    await client.changesSince(100);
+
+    assert.equal(JSON.parse(String(calls[0]?.init.body)).serverTimestamp, 100);
+  });
+
   it('explains how to get a new token on 401', async () => {
     const { fetch } = fakeFetch(new Response('Unauthorized', { status: 401 }));
     const client = new ZenMoneyClient('expired', { fetch });
