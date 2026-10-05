@@ -7,12 +7,12 @@ import { html, type Content, type Html } from '../html.ts';
 import { icon, type IconName } from '../icons.ts';
 import { toneColor, type Tone } from '../tones.ts';
 
-/** The main action. With `action` it submits a POST form to that URL. */
-export function button(options: { label: string; icon?: IconName; action?: string }): Html {
+/** The main action. With `action` it submits a POST form to that URL; with `submit`, the form it is in. */
+export function button(options: { label: string; icon?: IconName; action?: string; submit?: boolean }): Html {
   const inner = html`${options.icon ? icon(options.icon, 14) : null}${options.label}`;
   return options.action
     ? html`<form class="button-form" method="post" action="${options.action}"><button class="button" type="submit">${inner}</button></form>`
-    : html`<button class="button" type="button">${inner}</button>`;
+    : html`<button class="button" type="${options.submit ? 'submit' : 'button'}">${inner}</button>`;
 }
 
 /** An icon on a coloured square, marking what a card is about. */
@@ -102,4 +102,35 @@ export function filterTag(options: { label: string; href: string; color?: string
   return html`<a class="filter-tag" href="${options.href}" title="Убрать фильтр">${
     options.color ? html`<i style="background:${options.color}"></i>` : null
   }${options.label}${icon('x', 13)}</a>`;
+}
+
+/**
+ * A labelled input of a form. `decimal` and `integer` bring up a number keyboard on phones.
+ * Without `width` the field takes the free space of its row. An error shows under it and marks it invalid.
+ */
+export function field(options: {
+  label: string;
+  name: string;
+  value?: string;
+  type?: 'text' | 'decimal' | 'integer';
+  min?: number;
+  max?: number;
+  maxLength?: number;
+  placeholder?: string;
+  required?: boolean;
+  width?: number;
+  error?: string;
+}): Html {
+  const type = options.type ?? 'text';
+  return html`<label class="field${options.width ? ' fixed' : ''}"${options.width ? html` style="--field-width:${options.width}px"` : null}>
+    <span class="field-label">${options.label}</span>
+    <input class="field-input" name="${options.name}" value="${options.value ?? ''}" autocomplete="off"${
+      type === 'integer' ? html` type="number" inputmode="numeric" step="1"` : html` type="text"${type === 'decimal' ? html` inputmode="decimal"` : null}`
+    }${options.min === undefined ? null : html` min="${options.min}"`}${options.max === undefined ? null : html` max="${options.max}"`}${
+      options.maxLength === undefined ? null : html` maxlength="${options.maxLength}"`
+    }${options.placeholder ? html` placeholder="${options.placeholder}"` : null}${options.required ? html` required` : null}${
+      options.error ? html` aria-invalid="true"` : null
+    }>
+    ${options.error ? html`<small class="field-error">${options.error}</small>` : null}
+  </label>`;
 }

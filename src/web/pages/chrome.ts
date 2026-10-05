@@ -22,7 +22,7 @@ export function createHref(keep: Record<string, string> = {}): Href {
   };
 }
 
-export type Section = 'overview' | 'operations';
+export type Section = 'overview' | 'operations' | 'regular';
 
 export function appRail(active: Section, userName: string | null, href: Href): Html {
   return rail({
@@ -32,6 +32,7 @@ export function appRail(active: Section, userName: string | null, href: Href): H
         items: [
           { icon: 'home', label: 'Обзор', href: href('/'), active: active === 'overview' },
           { icon: 'list', label: 'Операции', href: href('/operations'), active: active === 'operations' },
+          { icon: 'repeat', label: 'Регулярные траты', href: href('/regular'), active: active === 'regular' },
           { icon: 'layers', label: 'Виджеты', href: '/storyboard' },
         ],
       },

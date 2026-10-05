@@ -1,12 +1,15 @@
-// Web UI on localhost: the overview at /, operations at /operations, the widget storyboard at /storyboard.
-// Reads the local ZenMoney copy (data/zenmoney.db) and syncs it on start and on POST /sync when ZENMONEY_TOKEN
-// is set. Without a local copy, or with ?demo, it shows demo data.
+// Web UI on localhost: the overview at /, operations at /operations, regular expenses at /regular,
+// the widget storyboard at /storyboard. Reads the local ZenMoney copy (data/zenmoney.db) and syncs it on start
+// and on POST /sync when ZENMONEY_TOKEN is set. Without a local copy, or with ?demo, it shows demo data.
+// Regular expenses are the app's own data (data/settings.db), so demo mode leaves them as they are.
 
 import { existsSync, readFileSync } from 'node:fs';
-import { createServer, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { localDate } from '../dates.ts';
 import { renderSyncResult } from '../format.ts';
+import type { RegularExpense } from '../regular.ts';
+import { Settings } from '../settings.ts';
 import { Store } from '../store.ts';
 import { sync } from '../sync.ts';
 import { ZenMoneyClient } from '../zenmoney/client.ts';
@@ -16,10 +19,12 @@ import { escape } from './html.ts';
 import { createHref } from './pages/chrome.ts';
 import { loadDashboard, renderDashboard } from './pages/dashboard.ts';
 import { loadOperations, renderOperations } from './pages/operations.ts';
+import { loadRegular, renderRegular, submitRegular } from './pages/regular.ts';
 import { renderStoryboard } from './pages/storyboard.ts';
 import { WIDGET_DOCS } from './stories.ts';
 
 const DB_PATH = fileURLToPath(new URL('../../data/zenmoney.db', import.meta.url));
+const SETTINGS_PATH = fileURLToPath(new URL('../../data/settings.db', import.meta.url));
 const STYLES_PATH = fileURLToPath(new URL('./styles.css', import.meta.url));
 const PORT = Number(process.env.PORT ?? 4317);
 const token = process.env.ZENMONEY_TOKEN;
@@ -36,6 +41,28 @@ function loadCollections(demo: boolean, today: string): EntityCollections {
   return store.load();
 }
 
+function loadRegularExpenses(): RegularExpense[] {
+  using settings = new Settings(SETTINGS_PATH);
+  return settings.regularExpenses();
+}
+
+/** Browsers send Origin with every POST, so a page of another site cannot change data here. */
+function isSameOrigin(request: IncomingMessage): boolean {
+  const origin = request.headers.origin;
+  return origin === undefined || origin === `http://${request.headers.host}`;
+}
+
+async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (size > 65_536) throw new Error('Слишком большая форма');
+    chunks.push(chunk);
+  }
+  return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+}
+
 function send(response: ServerResponse, status: number, type: string, body: string): void {
   response.writeHead(status, { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-store' }).end(body);
 }
@@ -48,21 +75,39 @@ try {
 
 createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost');
+  const params = url.searchParams;
+  const today = localDate();
+  const demo = params.has('demo') || !existsSync(DB_PATH);
+  const href = createHref(params.has('demo') ? { demo: '1' } : {});
   try {
+    if (request.method === 'POST' && !isSameOrigin(request)) {
+      send(response, 403, 'text/plain', 'Запрос с другого сайта');
+      return;
+    }
     if (request.method === 'POST' && url.pathname === '/sync') {
       await syncNow();
       const back = new URL(request.headers.referer ?? '/', 'http://localhost');
       response.writeHead(303, { location: `${back.pathname}${back.search}` }).end();
       return;
     }
+    if (request.method === 'POST' && url.pathname.startsWith('/regular')) {
+      const body = await readForm(request);
+      using settings = new Settings(SETTINGS_PATH);
+      const result = submitRegular(settings, url.pathname, body);
+      if (result.status === 'saved') {
+        response.writeHead(303, { location: href('/regular') }).end();
+      } else if (result.status === 'missing') {
+        send(response, 404, 'text/plain', 'Такой регулярной траты нет');
+      } else {
+        const page = loadRegular(loadCollections(demo, today), settings.regularExpenses(), { today, form: result.form });
+        send(response, 422, 'text/html', renderRegular(page, href).toString());
+      }
+      return;
+    }
     if (request.method !== 'GET') {
       send(response, 405, 'text/plain', 'Метод не поддерживается');
       return;
     }
-    const params = url.searchParams;
-    const today = localDate();
-    const demo = params.has('demo') || !existsSync(DB_PATH);
-    const href = createHref(params.has('demo') ? { demo: '1' } : {});
     switch (url.pathname) {
       case '/': {
         const dashboard = loadDashboard(loadCollections(demo, today), {
@@ -71,6 +116,7 @@ createServer(async (request, response) => {
           hour: new Date().getHours(),
           source: demo ? 'demo' : 'zenmoney',
           canSync: Boolean(token) && !demo,
+          regular: loadRegularExpenses(),
         });
         send(response, 200, 'text/html', renderDashboard(dashboard, href).toString());
         return;
@@ -84,6 +130,11 @@ createServer(async (request, response) => {
           query: params.get('q'),
         });
         send(response, 200, 'text/html', renderOperations(operations, href).toString());
+        return;
+      }
+      case '/regular': {
+        const page = loadRegular(loadCollections(demo, today), loadRegularExpenses(), { today, edit: params.get('edit') });
+        send(response, 200, 'text/html', renderRegular(page, href).toString());
         return;
       }
       case '/storyboard':
@@ -101,8 +152,9 @@ createServer(async (request, response) => {
     send(response, 500, 'text/html', `<p>Не удалось показать страницу: ${escape(message)}</p>`);
   }
 }).listen(PORT, () => {
-  console.log(`Обзор:    http://localhost:${PORT}/`);
-  console.log(`Операции: http://localhost:${PORT}/operations`);
-  console.log(`Виджеты:  http://localhost:${PORT}/storyboard`);
+  console.log(`Обзор:      http://localhost:${PORT}/`);
+  console.log(`Операции:   http://localhost:${PORT}/operations`);
+  console.log(`Регулярные: http://localhost:${PORT}/regular`);
+  console.log(`Виджеты:    http://localhost:${PORT}/storyboard`);
   if (!existsSync(DB_PATH)) console.log('Локальной копии ZenMoney нет, показываю демо-данные. Запустите make sync.');
 });

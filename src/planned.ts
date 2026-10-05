@@ -45,5 +45,10 @@ export function upcomingOperations(
         UNTITLED[kind],
     });
   }
-  return planned.sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title, 'ru'));
+  return planned.sort(soonestFirst);
+}
+
+/** Orders planned operations by date, then by title. */
+export function soonestFirst(a: PlannedOperation, b: PlannedOperation): number {
+  return a.date.localeCompare(b.date) || a.title.localeCompare(b.title, 'ru');
 }

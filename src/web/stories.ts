@@ -9,6 +9,7 @@ import {
   button,
   chip,
   emptyState,
+  field,
   filterTag,
   footnote,
   iconBadge,
@@ -22,6 +23,7 @@ import {
 import { monthCalendar } from './widgets/calendar.ts';
 import { categoryTile, paymentCard, statCard } from './widgets/cards.ts';
 import { categoryList, dayGroup, operationRow } from './widgets/operations.ts';
+import { regularForm, regularList, regularRow } from './widgets/regular.ts';
 import { appShell, grid, rail, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
 
 export interface Story {
@@ -44,7 +46,7 @@ export interface WidgetDoc {
   stories: Story[];
 }
 
-export const GROUPS = ['Каркас', 'Основа', 'Фильтры', 'Карточки', 'Операции', 'Календарь', 'Счета'] as const;
+export const GROUPS = ['Каркас', 'Основа', 'Фильтры', 'Формы', 'Карточки', 'Операции', 'Регулярные траты', 'Календарь', 'Счета'] as const;
 
 function doc<P>(
   widget: (props: P) => Html,
@@ -178,6 +180,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
   doc(button, { group: 'Основа', description: 'Главное действие. С action отправляет POST-форму по этому адресу.' }, [
     { width: 160, name: 'С иконкой', props: { label: 'Обновить', icon: 'refresh' } },
     { width: 160, name: 'Только текст', props: { label: 'Сохранить' } },
+    { width: 160, name: 'Отправляет свою форму', props: { label: 'Добавить', submit: true } },
   ]),
   doc(iconBadge, { group: 'Основа', description: 'Иконка на цветном квадрате: о чём карточка.' }, [
     { width: 80, name: 'Расходы', props: { icon: 'wallet', tone: 'yellow' } },
@@ -211,7 +214,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
   ]),
   doc(avatar, { group: 'Основа', description: 'Первая буква имени в круге.' }, [{ width: 80, name: 'Буква', props: { name: 'Мои финансы' } }]),
   doc(emptyState, { group: 'Основа', description: 'Когда показать нечего: почему и что сделать.' }, [
-    { name: 'Нет платежей', width: 420, props: { text: 'Плановых платежей нет. Добавьте регулярные платежи в ZenMoney, и они появятся здесь.' } },
+    { name: 'Нет платежей', width: 420, props: { text: 'Плановых платежей нет. Добавьте регулярные траты или плановые платежи в ZenMoney, и они появятся здесь.' } },
   ]),
   doc(footnote, { group: 'Основа', description: 'Тихий текст внизу панели, например откуда данные.' }, [
     { width: 260, name: 'Источник', props: { text: 'Данные из ZenMoney.' } },
@@ -239,6 +242,12 @@ export const WIDGET_DOCS: WidgetDoc[] = [
   doc(filterTag, { group: 'Фильтры', description: 'Действующий фильтр; ссылка убирает его.' }, [
     { name: 'Категория', width: 160, props: { label: 'Продукты', href: '#', color: '#4FAE7F' } },
     { name: 'Поиск', width: 160, props: { label: '«кофе»', href: '#' } },
+  ]),
+
+  doc(field, { group: 'Формы', description: 'Поле формы с подписью. Без ширины занимает свободное место в строке; ошибка видна под полем.' }, [
+    { name: 'Текст', width: 260, props: { label: 'Название', name: 'title', placeholder: 'Например, аренда', required: true } },
+    { name: 'Сумма', width: 160, props: { label: 'Сумма, ₽', name: 'amount', type: 'decimal', value: '13 000', width: 130 } },
+    { name: 'Число с ошибкой', width: 160, props: { label: 'Число', name: 'day', type: 'integer', min: 1, max: 31, value: '32', width: 84, error: 'От 1 до 31' } },
   ]),
 
   doc(statCard, { group: 'Карточки', description: 'Одна цифра месяца и полоска прогресса.' }, [
@@ -329,6 +338,66 @@ export const WIDGET_DOCS: WidgetDoc[] = [
           { title: 'Жильё', icon: 'home', color: '#9479E6', amount: 61_640, share: 0.76, href: '#' },
           { title: 'Продукты', icon: 'cart', color: '#4FAE7F', amount: 8_832, share: 0.11, href: '#', active: true },
           { title: 'Без категории', icon: 'tag', color: 'var(--gray)', amount: 420, share: 0.005, href: '#' },
+        ],
+      },
+    },
+  ]),
+
+  doc(regularRow, { group: 'Регулярные траты', description: 'Регулярная трата: что, когда и сколько. Строка открывает её для правки.' }, [
+    {
+      name: 'Платёж',
+      width: 520,
+      props: { title: 'Офис аренда', details: '25-го числа · через 20 дней', icon: 'home', color: 'var(--violet)', amount: 13_000, symbol: '₽', href: '#' },
+    },
+    {
+      name: 'Сегодня',
+      width: 520,
+      props: { title: 'Машина', details: '5-го числа · сегодня', icon: 'car', color: 'var(--blue)', amount: 91_000, symbol: '₽', href: '#' },
+    },
+  ]),
+  doc(regularForm, {
+    group: 'Регулярные траты',
+    description: 'Новая или открытая для правки трата: название, сумма и число месяца. У существующей есть «Удалить» и «Отмена».',
+  }, [
+    { name: 'Новая', width: 640, props: { action: '#', submitLabel: 'Добавить', icon: 'plus', color: 'var(--gray)', symbol: '₽' } },
+    {
+      name: 'Правка',
+      width: 640,
+      props: {
+        action: '#',
+        submitLabel: 'Сохранить',
+        icon: 'book',
+        color: 'var(--teal)',
+        symbol: '₽',
+        values: { title: 'Школа', amount: '45000', day: '30' },
+        deleteAction: '#',
+        cancelHref: '#',
+      },
+    },
+    {
+      name: 'С ошибками',
+      width: 640,
+      props: {
+        action: '#',
+        submitLabel: 'Добавить',
+        icon: 'plus',
+        color: 'var(--gray)',
+        symbol: '₽',
+        values: { title: '', amount: 'дорого', day: '32' },
+        errors: { title: 'Укажите название', amount: 'Сумма в рублях, например 13 000', day: 'От 1 до 31' },
+      },
+    },
+  ]),
+  doc(regularList, { group: 'Регулярные траты', description: 'Регулярные траты друг под другом: строки и формы в заданном порядке.' }, [
+    {
+      name: 'Строки и форма',
+      width: 640,
+      props: {
+        label: 'Регулярные траты',
+        items: [
+          regularRow({ title: 'Интернет', details: '1-го числа · через 27 дней', icon: 'phone', color: 'var(--orange)', amount: 1_100, symbol: '₽', href: '#' }),
+          regularRow({ title: 'Машина', details: '5-го числа · сегодня', icon: 'car', color: 'var(--blue)', amount: 91_000, symbol: '₽', href: '#' }),
+          regularForm({ action: '#', submitLabel: 'Добавить', icon: 'plus', color: 'var(--gray)', symbol: '₽' }),
         ],
       },
     },

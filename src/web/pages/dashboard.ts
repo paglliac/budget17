@@ -4,7 +4,8 @@
 import { summarizeBalances, type AccountBalance, type BalanceSummary } from '../../balances.ts';
 import { monthOf, shiftMonth, type MonthString } from '../../dates.ts';
 import { summarizeMonth, type MonthSummary } from '../../month.ts';
-import { upcomingOperations, type PlannedOperation } from '../../planned.ts';
+import { soonestFirst, upcomingOperations, type PlannedOperation } from '../../planned.ts';
+import { upcomingRegular, type RegularExpense } from '../../regular.ts';
 import type { AccountType, DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { capitalize, greeting, money, monthName, num, percent, plural } from '../format.ts';
@@ -35,7 +36,15 @@ export interface DashboardData {
 
 export function loadDashboard(
   data: EntityCollections,
-  options: { today: DateString; month: string | null; hour: number; source: DashboardData['source']; canSync: boolean },
+  options: {
+    today: DateString;
+    month: string | null;
+    hour: number;
+    source: DashboardData['source'];
+    canSync: boolean;
+    /** Regular expenses set up in the app; they join the planned operations from ZenMoney. */
+    regular: RegularExpense[];
+  },
 ): DashboardData {
   const current = monthOf(options.today);
   const month = parseMonth(options.month, current);
@@ -45,7 +54,10 @@ export function loadDashboard(
     months: recentMonths(current),
     balances: summarizeBalances(data),
     month: summarizeMonth(data, { month, today: options.today }),
-    planned: upcomingOperations(data, { today: options.today }),
+    planned: [
+      ...upcomingOperations(data, { today: options.today }),
+      ...upcomingRegular(options.regular, { today: options.today }),
+    ].sort(soonestFirst),
     userName: userName(data),
     source: options.source,
     canSync: options.canSync,
@@ -188,7 +200,7 @@ const PAYMENT_TONES: Tone[] = ['blue', 'yellow', 'violet', 'teal'];
 
 function upcoming(d: DashboardData, symbol: string): Html {
   if (d.planned.length === 0) {
-    return emptyState({ text: 'Плановых платежей нет. Добавьте регулярные платежи в ZenMoney, и они появятся здесь.' });
+    return emptyState({ text: 'Плановых платежей нет. Добавьте регулярные траты или плановые платежи в ZenMoney, и они появятся здесь.' });
   }
   return grid({
     columns: 2,
