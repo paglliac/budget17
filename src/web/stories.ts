@@ -343,7 +343,10 @@ export const WIDGET_DOCS: WidgetDoc[] = [
     },
   ]),
 
-  doc(entryRow, { group: 'Настройка', description: 'Запись, которую настраивают: что, когда и сколько. Строка открывает её для правки.' }, [
+  doc(entryRow, {
+    group: 'Настройка',
+    description: 'Запись, которую настраивают: что, когда и сколько. Строка открывает её для правки, кнопки рядом делают частое действие сразу.',
+  }, [
     {
       name: 'Регулярная трата',
       width: 520,
@@ -353,6 +356,36 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       name: 'Доход',
       width: 520,
       props: { title: 'Зарплата', details: 'аванс 20-го, остальное 5-го · через 15 дней', icon: 'briefcase', color: 'var(--teal)', amount: 200_000, symbol: '₽', href: '#' },
+    },
+    {
+      name: 'Покупка с действием',
+      width: 520,
+      props: {
+        title: 'Ботинки Савве',
+        details: 'ждёт покупки · обычные',
+        icon: 'shirt',
+        color: 'var(--blue)',
+        amount: 8_000,
+        symbol: '₽',
+        href: '#',
+        actions: [{ label: 'Куплено', action: '#' }],
+      },
+    },
+    {
+      name: 'Без правки, с выбором',
+      width: 520,
+      props: {
+        title: 'Александр А.',
+        details: '5 октября, Запас · в неделе',
+        icon: 'tag',
+        color: 'var(--gray)',
+        amount: 40_000,
+        symbol: '₽',
+        actions: [
+          { label: 'В дополнительные', action: '#' },
+          { label: 'Вне бюджета', action: '#' },
+        ],
+      },
     },
   ]),
   doc(entryForm, {
@@ -387,6 +420,23 @@ export const WIDGET_DOCS: WidgetDoc[] = [
           field({ label: 'Сумма, ₽', name: 'amount', type: 'decimal', value: 'дорого', width: 130, error: 'Сумма в рублях, например 13 000' }),
           field({ label: 'Число', name: 'day', type: 'integer', value: '30', width: 84 }),
         ],
+        deleteAction: '#',
+        cancelHref: '#',
+      },
+    },
+    {
+      name: 'Правка с переносом',
+      width: 640,
+      props: {
+        action: '#',
+        submitLabel: 'Сохранить',
+        icon: 'gift',
+        color: 'var(--violet)',
+        fields: [
+          field({ label: 'Что', name: 'title', value: 'Подарок Серёге В.', required: true }),
+          field({ label: 'Сумма, ₽', name: 'amount', type: 'decimal', value: '5000', width: 130, required: true }),
+        ],
+        extraActions: [{ label: 'В дополнительные', action: '#' }],
         deleteAction: '#',
         cancelHref: '#',
       },

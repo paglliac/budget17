@@ -251,8 +251,11 @@ a { color: inherit; text-decoration: none; }
 
 /* entryList, entryRow, entryForm */
 .entries { display: grid; gap: 2px; list-style: none; }
+.entry { display: flex; flex-wrap: wrap; align-items: center; column-gap: 4px; }
+.entry > .entry-row { flex: 1 1 240px; min-width: 0; }
 .entry-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 14px; }
-.entry-row:hover { background: var(--fill); }
+a.entry-row:hover { background: var(--fill); }
+.entry-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; margin-left: auto; }
 .entry-icon { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: var(--radius-control); background: color-mix(in srgb, var(--color) 12%, white); color: var(--color); }
 .entry-text { display: grid; min-width: 0; margin-right: auto; }
 .entry-text b { overflow: hidden; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }

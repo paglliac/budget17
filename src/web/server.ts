@@ -1,7 +1,8 @@
-// Web UI on localhost: the overview at /, operations at /operations, incomes at /income, regular expenses at /regular,
-// the widget storyboard at /storyboard. Reads the local ZenMoney copy (data/zenmoney.db) and syncs it on start
-// and on POST /sync when ZENMONEY_TOKEN is set. Without a local copy, or with ?demo, it shows demo data.
-// Incomes and regular expenses are the app's own data (data/settings.db), so demo mode leaves them as they are.
+// Web UI on localhost: the week's budget at /, operations at /operations, incomes at /income, regular expenses at
+// /regular, the widget storyboard at /storyboard. Reads the local ZenMoney copy (data/zenmoney.db) and syncs it on
+// start and on POST /sync when ZENMONEY_TOKEN is set. Without a local copy, or with ?demo, it shows demo data.
+// Purchases, wishes, spending marks, incomes and regular expenses are the app's own data (data/settings.db),
+// so demo mode leaves them as they are.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -16,7 +17,7 @@ import type { EntityCollections } from '../zenmoney/types.ts';
 import { demoCollections } from './demo.ts';
 import { escape } from './html.ts';
 import { createHref } from './pages/chrome.ts';
-import { loadDashboard, renderDashboard } from './pages/dashboard.ts';
+import { budgetOf, loadDashboard, renderDashboard, submitDashboard, type DashboardForm, type SavedBudget } from './pages/dashboard.ts';
 import { loadIncome, renderIncome, submitIncome } from './pages/income.ts';
 import { loadOperations, renderOperations } from './pages/operations.ts';
 import { loadRegular, renderRegular, submitRegular } from './pages/regular.ts';
@@ -46,6 +47,17 @@ function loadSettings<T>(read: (settings: Settings) => T): T {
   return read(settings);
 }
 
+function savedBudget(settings: Settings): SavedBudget {
+  return { purchases: settings.purchases(), wishes: settings.wishes(), marks: settings.spendingMarks(), regular: settings.regularExpenses() };
+}
+
+/** The page a form was sent from, without the entry it had open, so saving closes the form. */
+function backTo(request: IncomingMessage): URL {
+  const back = new URL(request.headers.referer ?? '/', 'http://localhost');
+  back.searchParams.delete('edit');
+  return back;
+}
+
 /** Browsers send Origin with every POST, so a page of another site cannot change data here. */
 function isSameOrigin(request: IncomingMessage): boolean {
   const origin = request.headers.origin;
@@ -65,6 +77,27 @@ async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
 
 function send(response: ServerResponse, status: number, type: string, body: string): void {
   response.writeHead(status, { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-store' }).end(body);
+}
+
+function dashboardPage(
+  collections: EntityCollections,
+  saved: SavedBudget,
+  params: URLSearchParams,
+  today: string,
+  demo: boolean,
+  href: ReturnType<typeof createHref>,
+  form?: DashboardForm,
+): string {
+  const dashboard = loadDashboard(collections, saved, {
+    today,
+    view: params.get('view'),
+    week: params.get('week'),
+    edit: params.get('edit'),
+    form,
+    source: demo ? 'demo' : 'zenmoney',
+    canSync: Boolean(token) && !demo,
+  });
+  return renderDashboard(dashboard, href).toString();
 }
 
 try {
@@ -88,6 +121,24 @@ createServer(async (request, response) => {
       await syncNow();
       const back = new URL(request.headers.referer ?? '/', 'http://localhost');
       response.writeHead(303, { location: `${back.pathname}${back.search}` }).end();
+      return;
+    }
+    if (request.method === 'POST' && /^\/(purchases|wishes|spending)(\/|$)/.test(url.pathname)) {
+      const body = await readForm(request);
+      using settings = new Settings(SETTINGS_PATH);
+      const collections = loadCollections(demo, today);
+      const result = submitDashboard(settings, url.pathname, body, {
+        today,
+        budget: () => budgetOf(collections, savedBudget(settings), { today }),
+      });
+      const back = backTo(request);
+      if (result.status === 'saved') {
+        response.writeHead(303, { location: `${back.pathname}${back.search}` }).end();
+      } else if (result.status === 'missing') {
+        send(response, 404, 'text/plain', 'Такой записи нет');
+      } else {
+        send(response, 422, 'text/html', dashboardPage(collections, savedBudget(settings), back.searchParams, today, demo, href, result.form));
+      }
       return;
     }
     if (request.method === 'POST' && url.pathname.startsWith('/regular')) {
@@ -123,18 +174,9 @@ createServer(async (request, response) => {
       return;
     }
     switch (url.pathname) {
-      case '/': {
-        const dashboard = loadDashboard(loadCollections(demo, today), {
-          today,
-          month: params.get('month'),
-          hour: new Date().getHours(),
-          source: demo ? 'demo' : 'zenmoney',
-          canSync: Boolean(token) && !demo,
-          ...loadSettings((s) => ({ regular: s.regularExpenses(), incomes: s.incomes() })),
-        });
-        send(response, 200, 'text/html', renderDashboard(dashboard, href).toString());
+      case '/':
+        send(response, 200, 'text/html', dashboardPage(loadCollections(demo, today), loadSettings(savedBudget), params, today, demo, href));
         return;
-      }
       case '/operations': {
         const operations = loadOperations(loadCollections(demo, today), {
           today,

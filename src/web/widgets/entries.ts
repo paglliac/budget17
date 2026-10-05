@@ -1,4 +1,5 @@
 // Things the user sets up, such as regular expenses or incomes: a row per entry that opens for editing, and form rows.
+// A row can also carry quick actions, such as marking a purchase as bought.
 
 import { money } from '../format.ts';
 import { html, type Content, type Html } from '../html.ts';
@@ -10,7 +11,10 @@ export function entryList(options: { label: string; items: Html[] }): Html {
   return html`<ul class="entries" aria-label="${options.label}">${options.items}</ul>`;
 }
 
-/** One entry: what, when and how much. The row links to its editing. */
+/**
+ * One entry: what, when and how much. With `href` the row links to its editing.
+ * `actions` are buttons next to the row, each posting a form to its URL.
+ */
 export function entryRow(options: {
   title: string;
   /** When it comes, such as 25-го числа · через 20 дней. */
@@ -19,22 +23,31 @@ export function entryRow(options: {
   color: string;
   amount: number;
   symbol: string;
-  href: string;
+  href?: string;
+  actions?: Array<{ label: string; action: string }>;
 }): Html {
+  const inner = html`
+    <span class="entry-icon">${icon(options.icon, 16)}</span>
+    <span class="entry-text"><b>${options.title}</b><small>${options.details}</small></span>
+    <b class="entry-amount">${money(options.amount, options.symbol)}</b>`;
+  const actions = options.actions ?? [];
   return html`
-    <li>
-      <a class="entry-row" href="${options.href}" style="--color:${options.color}" title="Изменить">
-        <span class="entry-icon">${icon(options.icon, 16)}</span>
-        <span class="entry-text"><b>${options.title}</b><small>${options.details}</small></span>
-        <b class="entry-amount">${money(options.amount, options.symbol)}</b>
-        <span class="entry-edit">${icon('pencil', 14)}</span>
-      </a>
+    <li class="entry">
+      ${options.href
+        ? html`<a class="entry-row" href="${options.href}" style="--color:${options.color}" title="Изменить">${inner}<span class="entry-edit">${icon('pencil', 14)}</span></a>`
+        : html`<div class="entry-row" style="--color:${options.color}">${inner}</div>`}
+      ${actions.length > 0
+        ? html`<span class="entry-row-actions">${actions.map(
+            (a) => html`<form method="post" action="${a.action}"><button class="entry-quiet" type="submit">${a.label}</button></form>`,
+          )}</span>`
+        : null}
     </li>`;
 }
 
 /**
  * An entry being added or edited: its fields, posted to `action` with the `hidden` values.
  * An existing entry also gets Удалить, posted to `deleteAction`, and Отмена, leading to `cancelHref`.
+ * `extraActions` post the same form elsewhere, such as moving the entry.
  */
 export function entryForm(options: {
   action: string;
@@ -43,6 +56,7 @@ export function entryForm(options: {
   color: string;
   fields: Content;
   hidden?: Record<string, string>;
+  extraActions?: Array<{ label: string; action: string }>;
   deleteAction?: string;
   cancelHref?: string;
 }): Html {
@@ -54,6 +68,7 @@ export function entryForm(options: {
         <span class="entry-fields">${options.fields}</span>
         <span class="entry-actions">
           ${button({ label: options.submitLabel, submit: true })}
+          ${(options.extraActions ?? []).map((a) => html`<button class="entry-quiet" type="submit" formaction="${a.action}">${a.label}</button>`)}
           ${options.deleteAction ? html`<button class="entry-quiet danger" type="submit" formaction="${options.deleteAction}" formnovalidate>Удалить</button>` : null}
           ${options.cancelHref ? html`<a class="entry-quiet" href="${options.cancelHref}">Отмена</a>` : null}
         </span>

@@ -44,6 +44,46 @@ describe('Settings', () => {
     assert.deepEqual(settings.incomes().map((i) => i.title), ['Аренда']);
   });
 
+  it('keeps purchases by week, edits them, marks them bought and deletes them', () => {
+    using settings = new Settings(':memory:');
+
+    const boots = settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-10-12', envelope: 'week', done: false });
+    settings.addPurchase({ title: 'Ласты', amount: 5_000, week: '2026-10-05', envelope: 'extra', done: false });
+    assert.deepEqual(settings.purchases().map((p) => [p.title, p.envelope]), [['Ласты', 'extra'], ['Ботинки', 'week']]);
+
+    assert.equal(settings.updatePurchase(boots.id, { amount: 7_400, done: true }), true);
+    assert.deepEqual(settings.purchases()[1], { ...boots, amount: 7_400, done: true });
+
+    assert.equal(settings.deletePurchase(boots.id), true);
+    assert.equal(settings.updatePurchase(boots.id, { done: false }), false);
+    assert.deepEqual(settings.purchases().map((p) => p.title), ['Ласты']);
+  });
+
+  it('turns a wish into a purchase of a week', () => {
+    using settings = new Settings(':memory:');
+
+    const styler = settings.addWish({ title: 'Укладка', amount: 4_500 });
+    settings.addWish({ title: 'Пылесос', amount: 30_000 });
+    assert.equal(settings.updateWish(styler.id, { title: 'Укладка для волос', amount: 4_500 }), true);
+
+    const planned = settings.planWish(styler.id, { week: '2026-10-05', envelope: 'week' });
+    assert.deepEqual(planned && { ...planned, id: 0 }, { id: 0, title: 'Укладка для волос', amount: 4_500, week: '2026-10-05', envelope: 'week', done: false });
+    assert.deepEqual(settings.wishes().map((w) => w.title), ['Пылесос']);
+    assert.equal(settings.planWish(styler.id, { week: '2026-10-05', envelope: 'week' }), null);
+  });
+
+  it('remembers spending moved out of its week, and forgets it when moved back', () => {
+    using settings = new Settings(':memory:');
+
+    settings.markSpending('tx-1', 'extra');
+    settings.markSpending('tx-2', 'outside');
+    settings.markSpending('tx-1', 'outside');
+    assert.deepEqual([...settings.spendingMarks()], [['tx-1', 'outside'], ['tx-2', 'outside']]);
+
+    settings.markSpending('tx-1', 'week');
+    assert.deepEqual([...settings.spendingMarks()], [['tx-2', 'outside']]);
+  });
+
   it('keeps expenses in a file between runs', () => {
     const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
     try {

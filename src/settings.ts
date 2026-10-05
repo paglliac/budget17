@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { isIncomeModel, type Income, type IncomeInput } from './income.ts';
 import type { RegularExpense, RegularExpenseInput } from './regular.ts';
+import type { Envelope, Purchase, PurchaseInput, Wish, WishInput } from './week.ts';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS regular_expense (
@@ -19,11 +20,33 @@ const SCHEMA = `
     model TEXT NOT NULL,
     params TEXT NOT NULL
   ) STRICT;
+
+  -- week is the Monday of the week the purchase is planned for.
+  CREATE TABLE IF NOT EXISTS purchase (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    amount REAL NOT NULL CHECK (amount > 0),
+    week TEXT NOT NULL,
+    envelope TEXT NOT NULL CHECK (envelope IN ('week', 'extra')),
+    done INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1))
+  ) STRICT;
+
+  CREATE TABLE IF NOT EXISTS wish (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    amount REAL NOT NULL CHECK (amount > 0)
+  ) STRICT;
+
+  -- ZenMoney spending moved out of its week; spending without a mark counts towards the week.
+  CREATE TABLE IF NOT EXISTS spending_mark (
+    transaction_id TEXT PRIMARY KEY,
+    envelope TEXT NOT NULL CHECK (envelope IN ('extra', 'outside'))
+  ) STRICT;
 `;
 
 /**
- * What the user sets up in the app itself: regular expenses and incomes. It lives in its own SQLite file,
- * apart from the ZenMoney copy, so make resync never deletes it.
+ * What the user sets up in the app itself: regular expenses, incomes, the weeks' purchases, wishes and where
+ * spending counts. It lives in its own SQLite file, apart from the ZenMoney copy, so make resync never deletes it.
  */
 export class Settings {
   readonly #db: DatabaseSync;
@@ -97,6 +120,104 @@ export class Settings {
   /** False when there is no such income. */
   deleteIncome(id: number): boolean {
     return Number(this.#db.prepare('DELETE FROM income WHERE id = ?').run(id).changes) > 0;
+  }
+
+  /** Purchases by week, then in the order they were added. */
+  purchases(): Purchase[] {
+    return this.#db
+      .prepare('SELECT id, title, amount, week, envelope, done FROM purchase ORDER BY week, id')
+      .all()
+      .map((row) => ({
+        id: Number(row.id),
+        title: String(row.title),
+        amount: Number(row.amount),
+        week: String(row.week),
+        envelope: row.envelope === 'extra' ? 'extra' : 'week',
+        done: row.done === 1,
+      }));
+  }
+
+  addPurchase(purchase: PurchaseInput): Purchase {
+    const { lastInsertRowid } = this.#db
+      .prepare('INSERT INTO purchase (title, amount, week, envelope, done) VALUES (?, ?, ?, ?, ?)')
+      .run(purchase.title, purchase.amount, purchase.week, purchase.envelope, purchase.done ? 1 : 0);
+    return { id: Number(lastInsertRowid), ...purchase };
+  }
+
+  /** False when there is no such purchase. */
+  updatePurchase(id: number, changes: Partial<PurchaseInput>): boolean {
+    const purchase = this.purchases().find((p) => p.id === id);
+    if (!purchase) return false;
+    const next = { ...purchase, ...changes };
+    this.#db
+      .prepare('UPDATE purchase SET title = ?, amount = ?, week = ?, envelope = ?, done = ? WHERE id = ?')
+      .run(next.title, next.amount, next.week, next.envelope, next.done ? 1 : 0, id);
+    return true;
+  }
+
+  /** False when there is no such purchase. */
+  deletePurchase(id: number): boolean {
+    return Number(this.#db.prepare('DELETE FROM purchase WHERE id = ?').run(id).changes) > 0;
+  }
+
+  /** Wishes in the order they were added. */
+  wishes(): Wish[] {
+    return this.#db
+      .prepare('SELECT id, title, amount FROM wish ORDER BY id')
+      .all()
+      .map((row) => ({ id: Number(row.id), title: String(row.title), amount: Number(row.amount) }));
+  }
+
+  addWish(wish: WishInput): Wish {
+    const { lastInsertRowid } = this.#db.prepare('INSERT INTO wish (title, amount) VALUES (?, ?)').run(wish.title, wish.amount);
+    return { id: Number(lastInsertRowid), ...wish };
+  }
+
+  /** False when there is no such wish. */
+  updateWish(id: number, wish: WishInput): boolean {
+    return Number(this.#db.prepare('UPDATE wish SET title = ?, amount = ? WHERE id = ?').run(wish.title, wish.amount, id).changes) > 0;
+  }
+
+  /** False when there is no such wish. */
+  deleteWish(id: number): boolean {
+    return Number(this.#db.prepare('DELETE FROM wish WHERE id = ?').run(id).changes) > 0;
+  }
+
+  /** Turns a wish into a purchase of the given week, in one transaction; null when there is no such wish. */
+  planWish(id: number, target: Pick<Purchase, 'week' | 'envelope'>): Purchase | null {
+    const wish = this.wishes().find((w) => w.id === id);
+    if (!wish) return null;
+    this.#db.exec('BEGIN');
+    try {
+      this.deleteWish(id);
+      const purchase = this.addPurchase({ title: wish.title, amount: wish.amount, ...target, done: false });
+      this.#db.exec('COMMIT');
+      return purchase;
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /** Envelopes of spending moved out of its week, by ZenMoney transaction id. */
+  spendingMarks(): Map<string, Envelope> {
+    return new Map(
+      this.#db
+        .prepare('SELECT transaction_id, envelope FROM spending_mark')
+        .all()
+        .map((row) => [String(row.transaction_id), row.envelope === 'extra' ? 'extra' : 'outside']),
+    );
+  }
+
+  /** Moves spending to an envelope; 'week' removes the mark, since that is where spending counts by default. */
+  markSpending(transactionId: string, envelope: Envelope): void {
+    if (envelope === 'week') {
+      this.#db.prepare('DELETE FROM spending_mark WHERE transaction_id = ?').run(transactionId);
+    } else {
+      this.#db
+        .prepare('INSERT INTO spending_mark (transaction_id, envelope) VALUES (?, ?) ON CONFLICT (transaction_id) DO UPDATE SET envelope = excluded.envelope')
+        .run(transactionId, envelope);
+    }
   }
 
   [Symbol.dispose](): void {
