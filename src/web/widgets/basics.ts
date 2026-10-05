@@ -76,3 +76,30 @@ export function emptyState(options: { text: string }): Html {
 export function footnote(options: { text: string }): Html {
   return html`<p class="footnote">${options.text}</p>`;
 }
+
+/** Mutually exclusive choices as links, such as the kind of operations; the current one is highlighted. */
+export function segmentedLinks(options: { label: string; items: Array<{ label: string; href: string; active?: boolean; count?: number }> }): Html {
+  return html`<nav class="segmented" aria-label="${options.label}">${options.items.map(
+    (item) =>
+      html`<a class="segment" href="${item.href}"${item.active ? html` aria-current="page"` : null}>${item.label}${
+        item.count === undefined ? null : html`<span>${item.count}</span>`
+      }</a>`,
+  )}</nav>`;
+}
+
+/** A search box that submits a GET form; `params` keep the other filters. */
+export function searchField(options: { action: string; name: string; value?: string; placeholder: string; params?: Record<string, string> }): Html {
+  return html`
+    <form class="search" method="get" action="${options.action}" role="search">
+      ${icon('search', 15)}
+      <input type="search" name="${options.name}" value="${options.value ?? ''}" placeholder="${options.placeholder}" aria-label="${options.placeholder}">
+      ${Object.entries(options.params ?? {}).map(([name, value]) => html`<input type="hidden" name="${name}" value="${value}">`)}
+    </form>`;
+}
+
+/** A filter in effect; the link removes it. */
+export function filterTag(options: { label: string; href: string; color?: string }): Html {
+  return html`<a class="filter-tag" href="${options.href}" title="Убрать фильтр">${
+    options.color ? html`<i style="background:${options.color}"></i>` : null
+  }${options.label}${icon('x', 13)}</a>`;
+}

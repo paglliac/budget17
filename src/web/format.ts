@@ -1,6 +1,6 @@
 // Russian formatting for the web UI: money, months, plurals.
 
-import type { MonthString } from '../dates.ts';
+import { daysBetween, type MonthString } from '../dates.ts';
 import type { DateString } from '../zenmoney/types.ts';
 
 const integerFormat = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
@@ -75,4 +75,14 @@ export function greeting(hour: number): string {
   if (hour < 12) return 'Доброе утро';
   if (hour < 18) return 'Добрый день';
   return 'Добрый вечер';
+}
+
+export const WEEKDAYS_FULL = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'] as const;
+
+/** Сегодня, Вчера or 3 октября. */
+export function dayTitle(date: DateString, today: DateString): string {
+  const days = daysBetween(date, today);
+  if (days === 0) return 'Сегодня';
+  if (days === 1) return 'Вчера';
+  return dayMonth(date);
 }

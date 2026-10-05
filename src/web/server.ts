@@ -1,4 +1,4 @@
-// Web UI on localhost: the overview at /, the widget storyboard at /storyboard.
+// Web UI on localhost: the overview at /, operations at /operations, the widget storyboard at /storyboard.
 // Reads the local ZenMoney copy (data/zenmoney.db) and syncs it on start and on POST /sync when ZENMONEY_TOKEN
 // is set. Without a local copy, or with ?demo, it shows demo data.
 
@@ -13,7 +13,9 @@ import { ZenMoneyClient } from '../zenmoney/client.ts';
 import type { EntityCollections } from '../zenmoney/types.ts';
 import { demoCollections } from './demo.ts';
 import { escape } from './html.ts';
+import { createHref } from './pages/chrome.ts';
 import { loadDashboard, renderDashboard } from './pages/dashboard.ts';
+import { loadOperations, renderOperations } from './pages/operations.ts';
 import { renderStoryboard } from './pages/storyboard.ts';
 import { WIDGET_DOCS } from './stories.ts';
 
@@ -57,27 +59,31 @@ createServer(async (request, response) => {
       send(response, 405, 'text/plain', 'Метод не поддерживается');
       return;
     }
+    const params = url.searchParams;
+    const today = localDate();
+    const demo = params.has('demo') || !existsSync(DB_PATH);
+    const href = createHref(params.has('demo') ? { demo: '1' } : {});
     switch (url.pathname) {
       case '/': {
-        const today = localDate();
-        const demo = url.searchParams.has('demo') || !existsSync(DB_PATH);
         const dashboard = loadDashboard(loadCollections(demo, today), {
           today,
-          month: url.searchParams.get('month'),
+          month: params.get('month'),
           hour: new Date().getHours(),
           source: demo ? 'demo' : 'zenmoney',
           canSync: Boolean(token) && !demo,
         });
-        const link = (params: Record<string, string | null>) => {
-          const query = new URLSearchParams(url.searchParams);
-          for (const [key, value] of Object.entries(params)) {
-            if (value === null) query.delete(key);
-            else query.set(key, value);
-          }
-          const text = query.toString();
-          return text ? `/?${text}` : '/';
-        };
-        send(response, 200, 'text/html', renderDashboard(dashboard, link).toString());
+        send(response, 200, 'text/html', renderDashboard(dashboard, href).toString());
+        return;
+      }
+      case '/operations': {
+        const operations = loadOperations(loadCollections(demo, today), {
+          today,
+          month: params.get('month'),
+          kind: params.get('kind'),
+          category: params.get('category'),
+          query: params.get('q'),
+        });
+        send(response, 200, 'text/html', renderOperations(operations, href).toString());
         return;
       }
       case '/storyboard':
@@ -95,7 +101,8 @@ createServer(async (request, response) => {
     send(response, 500, 'text/html', `<p>Не удалось показать страницу: ${escape(message)}</p>`);
   }
 }).listen(PORT, () => {
-  console.log(`Обзор:   http://localhost:${PORT}/`);
-  console.log(`Виджеты: http://localhost:${PORT}/storyboard`);
+  console.log(`Обзор:    http://localhost:${PORT}/`);
+  console.log(`Операции: http://localhost:${PORT}/operations`);
+  console.log(`Виджеты:  http://localhost:${PORT}/storyboard`);
   if (!existsSync(DB_PATH)) console.log('Локальной копии ZenMoney нет, показываю демо-данные. Запустите make sync.');
 });

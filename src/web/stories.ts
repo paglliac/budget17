@@ -9,16 +9,20 @@ import {
   button,
   chip,
   emptyState,
+  filterTag,
   footnote,
   iconBadge,
   pageIntro,
   progressBar,
+  searchField,
   section,
+  segmentedLinks,
   shareBar,
 } from './widgets/basics.ts';
 import { monthCalendar } from './widgets/calendar.ts';
 import { categoryTile, paymentCard, statCard } from './widgets/cards.ts';
-import { appShell, grid, rail, tabs, topBar } from './widgets/shell.ts';
+import { categoryList, dayGroup, operationRow } from './widgets/operations.ts';
+import { appShell, grid, rail, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
 
 export interface Story {
   name: string;
@@ -40,7 +44,7 @@ export interface WidgetDoc {
   stories: Story[];
 }
 
-export const GROUPS = ['Каркас', 'Основа', 'Карточки', 'Календарь', 'Счета'] as const;
+export const GROUPS = ['Каркас', 'Основа', 'Фильтры', 'Карточки', 'Операции', 'Календарь', 'Счета'] as const;
 
 function doc<P>(
   widget: (props: P) => Html,
@@ -62,6 +66,21 @@ const cardAccounts = [
   { title: 'Доллары', subtitle: 'Наличные', balance: 1_250, symbol: '$', converted: { amount: 120_500, symbol: '₽' }, color: 'var(--violet)' },
   { title: 'Т-Банк Black', subtitle: 'Карта', balance: 86_412.4, symbol: '₽', color: 'var(--teal)' },
   { title: 'Т-Банк Platinum', subtitle: 'Карта', balance: -18_740, symbol: '₽', color: 'var(--blue)' },
+];
+
+const kindLinks = segmentedLinks({
+  label: 'Вид операций',
+  items: [
+    { label: 'Все', href: '#', active: true, count: 82 },
+    { label: 'Расходы', href: '#', count: 77 },
+    { label: 'Доходы', href: '#', count: 2 },
+    { label: 'Переводы', href: '#', count: 3 },
+  ],
+});
+
+const operationRows = [
+  operationRow({ title: 'Пятёрочка', details: 'Продукты, Т-Банк Black', icon: 'cart', color: '#4FAE7F', kind: 'expense', amount: 1_247.9, symbol: '₽' }),
+  operationRow({ title: 'Яндекс Go', details: 'Транспорт, Т-Банк Black', icon: 'bus', color: '#5B84F0', kind: 'expense', amount: 560, symbol: '₽', hold: true }),
 ];
 
 const accountChips = new Html(
@@ -119,6 +138,21 @@ export const WIDGET_DOCS: WidgetDoc[] = [
   doc(topBar, { group: 'Каркас', description: 'Верхняя полоса панели: где вы находитесь и действия справа.' }, [
     { name: 'Хлебные крошки', props: { crumbs: [{ label: 'Бюджет' }, { label: 'Обзор', icon: 'home' }] } },
     { name: 'С действием', width: 340, props: { crumbs: [{ label: 'Счета' }], actions: button({ label: 'Обновить', icon: 'refresh' }) } },
+  ]),
+  doc(toolbar, { group: 'Каркас', description: 'Элементы управления в одну строку, которая переносится на узком экране, например фильтры над списком.' }, [
+    {
+      name: 'Фильтры',
+      props: {
+        items: [
+          kindLinks,
+          searchField({ action: '#', name: 'q', placeholder: 'Найти операцию' }),
+          filterTag({ label: 'Продукты', href: '#', color: '#4FAE7F' }),
+        ],
+      },
+    },
+  ]),
+  doc(stack, { group: 'Каркас', description: 'Блоки друг под другом с ровным отступом, например дни в ленте.' }, [
+    { name: 'Три блока', width: 360, props: { gap: 12, items: [emptyState({ text: 'Первый' }), emptyState({ text: 'Второй' }), emptyState({ text: 'Третий' })] } },
   ]),
   doc(grid, { group: 'Каркас', description: 'Равные колонки, не больше заданного числа; переносятся, когда колонке становится тесно.' }, [
     {
@@ -183,6 +217,30 @@ export const WIDGET_DOCS: WidgetDoc[] = [
     { width: 260, name: 'Источник', props: { text: 'Данные из ZenMoney.' } },
   ]),
 
+  doc(segmentedLinks, { group: 'Фильтры', description: 'Взаимоисключающие варианты ссылками, например вид операций; текущий подсвечен.' }, [
+    {
+      name: 'Вид операций',
+      width: 420,
+      props: {
+        label: 'Вид операций',
+        items: [
+          { label: 'Все', href: '#', active: true, count: 82 },
+          { label: 'Расходы', href: '#', count: 77 },
+          { label: 'Доходы', href: '#', count: 2 },
+          { label: 'Переводы', href: '#', count: 3 },
+        ],
+      },
+    },
+  ]),
+  doc(searchField, { group: 'Фильтры', description: 'Поле поиска, отправляет GET-форму; params сохраняют остальные фильтры.' }, [
+    { name: 'Пустое', width: 300, props: { action: '#', name: 'q', placeholder: 'Найти операцию' } },
+    { name: 'С запросом', width: 300, props: { action: '#', name: 'q', value: 'кофе', placeholder: 'Найти операцию', params: { month: '2026-09' } } },
+  ]),
+  doc(filterTag, { group: 'Фильтры', description: 'Действующий фильтр; ссылка убирает его.' }, [
+    { name: 'Категория', width: 160, props: { label: 'Продукты', href: '#', color: '#4FAE7F' } },
+    { name: 'Поиск', width: 160, props: { label: '«кофе»', href: '#' } },
+  ]),
+
   doc(statCard, { group: 'Карточки', description: 'Одна цифра месяца и полоска прогресса.' }, [
     {
       name: 'Расходы',
@@ -232,6 +290,47 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       name: 'Перевод сегодня',
       width: 240,
       props: { title: 'Накопительный счёт', date: TODAY, today: TODAY, kind: 'transfer', amount: 30_000, symbol: '₽', tone: 'blue' },
+    },
+  ]),
+
+  doc(operationRow, {
+    group: 'Операции',
+    description: 'Одна операция: кто, за что, с какого счёта и сколько. У расхода минус, доход зелёный с плюсом, перевод приглушён.',
+  }, [
+    { name: 'Расход', width: 520, props: { title: 'Пятёрочка', details: 'Продукты, Т-Банк Black', icon: 'cart', color: '#4FAE7F', kind: 'expense', amount: 1_247.9, symbol: '₽' } },
+    {
+      name: 'Доход с комментарием',
+      width: 520,
+      props: { title: 'ООО «Северный ветер»', details: 'Зарплата, Т-Банк Black', icon: 'briefcase', color: '#3FA46A', kind: 'income', amount: 142_000, symbol: '₽', comment: 'Зарплата за сентябрь' },
+    },
+    {
+      name: 'Перевод',
+      width: 520,
+      props: { title: 'Т-Банк Black → Накопительный счёт', details: 'Т-Банк Black → Накопительный счёт', icon: 'arrows', color: 'var(--gray)', kind: 'transfer', amount: 30_000, symbol: '₽' },
+    },
+    {
+      name: 'В валюте, ещё не проведена',
+      width: 520,
+      props: { title: 'Steam', details: 'Развлечения, Доллары', icon: 'ticket', color: '#F2C14E', kind: 'expense', amount: 1_252.24, symbol: '₽', original: { amount: 12.99, symbol: '$' }, hold: true },
+    },
+  ]),
+  doc(dayGroup, { group: 'Операции', description: 'Операции одного дня под заголовком с итогом дня.' }, [
+    { name: 'Сегодня', width: 560, props: { date: TODAY, today: TODAY, net: { amount: -1_807.9, symbol: '₽' }, rows: operationRows } },
+    { name: 'Давно', width: 560, props: { date: '2026-09-12', today: TODAY, rows: operationRows.slice(0, 1) } },
+  ]),
+  doc(categoryList, { group: 'Операции', description: 'Траты по категориям с долей; категория ведёт к своим операциям, выбранная подсвечена.' }, [
+    {
+      name: 'С выбранной категорией',
+      width: 320,
+      props: {
+        label: 'Расходы по категориям',
+        symbol: '₽',
+        items: [
+          { title: 'Жильё', icon: 'home', color: '#9479E6', amount: 61_640, share: 0.76, href: '#' },
+          { title: 'Продукты', icon: 'cart', color: '#4FAE7F', amount: 8_832, share: 0.11, href: '#', active: true },
+          { title: 'Без категории', icon: 'tag', color: 'var(--gray)', amount: 420, share: 0.005, href: '#' },
+        ],
+      },
     },
   ]),
 

@@ -12,10 +12,11 @@ import { Html } from '../html.ts';
 import { categoryIcon, type IconName } from '../icons.ts';
 import { categoryColor, toneAt, toneColor, type Tone } from '../tones.ts';
 import { accountList, balanceTotal, type AccountItem } from '../widgets/accounts.ts';
-import { avatar, button, chip, emptyState, footnote, pageIntro, section, shareBar } from '../widgets/basics.ts';
+import { button, chip, emptyState, footnote, pageIntro, section, shareBar } from '../widgets/basics.ts';
 import { monthCalendar, type CalendarDay } from '../widgets/calendar.ts';
 import { categoryTile, paymentCard, statCard } from '../widgets/cards.ts';
-import { appShell, grid, rail, tabs, topBar } from '../widgets/shell.ts';
+import { appShell, grid, topBar } from '../widgets/shell.ts';
+import { appRail, monthTabs, parseMonth, recentMonths, userName, type Href } from './chrome.ts';
 
 export interface DashboardData {
   today: DateString;
@@ -37,54 +38,34 @@ export function loadDashboard(
   options: { today: DateString; month: string | null; hour: number; source: DashboardData['source']; canSync: boolean },
 ): DashboardData {
   const current = monthOf(options.today);
-  const requested = options.month ?? '';
-  const month = /^\d{4}-\d{2}$/.test(requested) && requested <= current ? requested : current;
-  const users = data.user ?? [];
+  const month = parseMonth(options.month, current);
   return {
     today: options.today,
     hour: options.hour,
-    months: [0, 1, 2].map((i) => shiftMonth(current, -i)),
+    months: recentMonths(current),
     balances: summarizeBalances(data),
     month: summarizeMonth(data, { month, today: options.today }),
     planned: upcomingOperations(data, { today: options.today }),
-    userName: (users.find((u) => u.parent === null) ?? users[0])?.login ?? null,
+    userName: userName(data),
     source: options.source,
     canSync: options.canSync,
   };
 }
 
-/** `link` builds a URL to this page with some query params replaced; null removes one. */
-export function renderDashboard(d: DashboardData, link: (params: Record<string, string | null>) => string): Html {
+export function renderDashboard(d: DashboardData, href: Href): Html {
   const symbol = d.balances.mainInstrument.symbol;
   const current = monthOf(d.today);
+  const month = d.month.month === current ? null : d.month.month;
+  const operations = (params: Record<string, string>) => href('/operations', { month, ...params });
 
   const body = appShell({
-    rail: rail({
-      groups: [
-        {
-          title: 'Меню',
-          items: [
-            { icon: 'home', label: 'Обзор', href: link({}), active: true },
-            { icon: 'layers', label: 'Виджеты', href: '/storyboard' },
-          ],
-        },
-      ],
-      footer: d.userName ? { title: 'Профиль', body: avatar({ name: d.userName }) } : undefined,
-    }),
-    tabs: tabs({
-      label: 'Месяц',
-      items: d.months.map((m) => ({
-        label: capitalize(monthName(m)),
-        icon: 'calendar' as const,
-        href: link({ month: m === current ? null : m }),
-        active: m === d.month.month,
-      })),
-    }),
+    rail: appRail('overview', d.userName, href),
+    tabs: monthTabs(current, d.month.month, (m) => href('/', { month: m })),
     main: [
       topBar({ crumbs: [{ label: 'Бюджет' }, { label: 'Обзор', icon: 'home' }] }),
       pageIntro({ title: greeting(d.hour), emoji: '👋', text: monthSentence(d.month, symbol) }),
-      grid({ columns: 3, min: 220, items: statCards(d.month, symbol) }),
-      section({ title: 'Больше всего тратите на', body: topCategories(d.month, symbol) }),
+      grid({ columns: 3, min: 220, items: statCards(d.month, symbol, operations) }),
+      section({ title: 'Больше всего тратите на', body: topCategories(d.month, symbol, operations) }),
       section({
         title: capitalize(monthName(d.month.month)),
         body: grid({ columns: 2, min: 300, items: [calendar(d), upcoming(d, symbol)] }),
@@ -113,7 +94,7 @@ function monthSentence(m: MonthSummary, symbol: string): string {
   return `В ${monthName(m.month, 'prepositional')} вы потратили ${money(m.expense, symbol)} и получили ${money(m.income, symbol)}.`;
 }
 
-function statCards(m: MonthSummary, symbol: string): Html[] {
+function statCards(m: MonthSummary, symbol: string, operations: (params: Record<string, string>) => string): Html[] {
   const plan = m.budget ?? (m.previous.expense > 0 ? m.previous.expense : null);
   const spent = plan === null ? null : m.expense / plan;
   return [
@@ -129,6 +110,7 @@ function statCards(m: MonthSummary, symbol: string): Html[] {
             : `${num(m.expense)} из ${money(plan, symbol)} в прошлом месяце`,
       value: spent === null ? money(m.expense, symbol) : percent(spent),
       progress: spent ?? 0,
+      action: { label: 'Операции', href: operations({ kind: 'expense' }) },
     }),
     statCard({
       icon: 'arrowDownLeft',
@@ -137,6 +119,7 @@ function statCards(m: MonthSummary, symbol: string): Html[] {
       label: 'Получено',
       value: money(m.income, symbol),
       progress: m.previous.income > 0 ? m.income / m.previous.income : 0,
+      action: { label: 'Операции', href: operations({ kind: 'income' }) },
     }),
     statCard({
       icon: 'clock',
@@ -149,7 +132,7 @@ function statCards(m: MonthSummary, symbol: string): Html[] {
   ];
 }
 
-function topCategories(m: MonthSummary, symbol: string): Html {
+function topCategories(m: MonthSummary, symbol: string, operations: (params: Record<string, string>) => string): Html {
   if (m.categories.length === 0) {
     return emptyState({ text: `В ${monthName(m.month, 'prepositional')} трат пока нет.` });
   }
@@ -157,7 +140,14 @@ function topCategories(m: MonthSummary, symbol: string): Html {
     columns: 4,
     min: 200,
     items: m.categories.slice(0, 4).map((c) =>
-      categoryTile({ icon: categoryIcon(c.title), color: categoryColor(c.id, c.color), title: c.title, amount: c.amount, symbol }),
+      categoryTile({
+        icon: categoryIcon(c.title),
+        color: categoryColor(c.id, c.color),
+        title: c.title,
+        amount: c.amount,
+        symbol,
+        href: operations({ category: c.id ?? 'none' }),
+      }),
     ),
   });
 }

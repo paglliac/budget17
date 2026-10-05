@@ -73,3 +73,13 @@ export function topBar(options: { crumbs: Array<{ label: string; icon?: IconName
 export function grid(options: { columns: number; min?: number; items: Content[] }): Html {
   return html`<div class="grid" style="--columns:${options.columns};--min:${options.min ?? 180}px">${options.items}</div>`;
 }
+
+/** Controls in one row that wraps when narrow, such as filters above a list. */
+export function toolbar(options: { items: Content[] }): Html {
+  return html`<div class="toolbar">${options.items}</div>`;
+}
+
+/** Blocks one under another with an even gap, such as days in a feed. */
+export function stack(options: { items: Content[]; gap?: number }): Html {
+  return html`<div class="stack" style="--stack-gap:${options.gap ?? 16}px">${options.items}</div>`;
+}

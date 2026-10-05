@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { demoCollections } from '../src/web/demo.ts';
+import { createHref } from '../src/web/pages/chrome.ts';
 import { loadDashboard, renderDashboard } from '../src/web/pages/dashboard.ts';
 import { account, reminderMarker, RUB, tag, transaction, user } from './fixtures.ts';
 
 const today = '2026-10-05';
 const options = { today, month: null, hour: 14, source: 'zenmoney' as const, canSync: true };
-const link = (params: Record<string, string | null>) => `/?${new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => e[1] !== null))}`;
+const link = createHref();
 
 function data(): EntityCollections {
   const food = tag({ title: 'Продукты' });
@@ -35,6 +36,14 @@ describe('dashboard', () => {
     assert.ok(page.includes('12 345<span>,60 ₽</span>'));
     assert.ok(page.includes('Не учитываются в балансе'));
     assert.ok(page.includes('action="/sync"'));
+  });
+
+  it('links categories and figures to the operations they come from', () => {
+    const page = String(renderDashboard(loadDashboard(data(), { ...options, month: '2026-09' }), link));
+
+    assert.ok(page.includes('href="/operations?month=2026-09&amp;kind=expense"'));
+    assert.ok(page.includes('href="/operations?month=2026-09&amp;kind=income"'));
+    assert.ok(page.includes('href="/operations"'), 'the rail links to operations');
   });
 
   it('falls back to the current month for a month in the future or a malformed one', () => {
