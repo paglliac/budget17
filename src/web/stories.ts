@@ -22,8 +22,8 @@ import {
 } from './widgets/basics.ts';
 import { monthCalendar } from './widgets/calendar.ts';
 import { categoryTile, paymentCard, statCard } from './widgets/cards.ts';
+import { entryForm, entryList, entryRow } from './widgets/entries.ts';
 import { categoryList, dayGroup, operationRow } from './widgets/operations.ts';
-import { regularForm, regularList, regularRow } from './widgets/regular.ts';
 import { appShell, grid, rail, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
 
 export interface Story {
@@ -46,7 +46,7 @@ export interface WidgetDoc {
   stories: Story[];
 }
 
-export const GROUPS = ['Каркас', 'Основа', 'Фильтры', 'Формы', 'Карточки', 'Операции', 'Регулярные траты', 'Календарь', 'Счета'] as const;
+export const GROUPS = ['Каркас', 'Основа', 'Фильтры', 'Формы', 'Карточки', 'Операции', 'Настройка', 'Календарь', 'Счета'] as const;
 
 function doc<P>(
   widget: (props: P) => Html,
@@ -214,7 +214,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
   ]),
   doc(avatar, { group: 'Основа', description: 'Первая буква имени в круге.' }, [{ width: 80, name: 'Буква', props: { name: 'Мои финансы' } }]),
   doc(emptyState, { group: 'Основа', description: 'Когда показать нечего: почему и что сделать.' }, [
-    { name: 'Нет платежей', width: 420, props: { text: 'Плановых платежей нет. Добавьте регулярные траты или плановые платежи в ZenMoney, и они появятся здесь.' } },
+    { name: 'Нет платежей', width: 420, props: { text: 'Плановых платежей нет. Добавьте доходы, регулярные траты или плановые платежи в ZenMoney, и они появятся здесь.' } },
   ]),
   doc(footnote, { group: 'Основа', description: 'Тихий текст внизу панели, например откуда данные.' }, [
     { width: 260, name: 'Источник', props: { text: 'Данные из ZenMoney.' } },
@@ -343,61 +343,71 @@ export const WIDGET_DOCS: WidgetDoc[] = [
     },
   ]),
 
-  doc(regularRow, { group: 'Регулярные траты', description: 'Регулярная трата: что, когда и сколько. Строка открывает её для правки.' }, [
+  doc(entryRow, { group: 'Настройка', description: 'Запись, которую настраивают: что, когда и сколько. Строка открывает её для правки.' }, [
     {
-      name: 'Платёж',
+      name: 'Регулярная трата',
       width: 520,
       props: { title: 'Офис аренда', details: '25-го числа · через 20 дней', icon: 'home', color: 'var(--violet)', amount: 13_000, symbol: '₽', href: '#' },
     },
     {
-      name: 'Сегодня',
+      name: 'Доход',
       width: 520,
-      props: { title: 'Машина', details: '5-го числа · сегодня', icon: 'car', color: 'var(--blue)', amount: 91_000, symbol: '₽', href: '#' },
+      props: { title: 'Зарплата', details: 'аванс 20-го, остальное 5-го · через 15 дней', icon: 'briefcase', color: 'var(--teal)', amount: 200_000, symbol: '₽', href: '#' },
     },
   ]),
-  doc(regularForm, {
-    group: 'Регулярные траты',
-    description: 'Новая или открытая для правки трата: название, сумма и число месяца. У существующей есть «Удалить» и «Отмена».',
+  doc(entryForm, {
+    group: 'Настройка',
+    description: 'Новая или открытая для правки запись: поля из field, кнопка и скрытые значения. У существующей есть «Удалить» и «Отмена».',
   }, [
-    { name: 'Новая', width: 640, props: { action: '#', submitLabel: 'Добавить', icon: 'plus', color: 'var(--gray)', symbol: '₽' } },
     {
-      name: 'Правка',
-      width: 640,
-      props: {
-        action: '#',
-        submitLabel: 'Сохранить',
-        icon: 'book',
-        color: 'var(--teal)',
-        symbol: '₽',
-        values: { title: 'Школа', amount: '45000', day: '30' },
-        deleteAction: '#',
-        cancelHref: '#',
-      },
-    },
-    {
-      name: 'С ошибками',
+      name: 'Новая',
       width: 640,
       props: {
         action: '#',
         submitLabel: 'Добавить',
         icon: 'plus',
         color: 'var(--gray)',
-        symbol: '₽',
-        values: { title: '', amount: 'дорого', day: '32' },
-        errors: { title: 'Укажите название', amount: 'Сумма в рублях, например 13 000', day: 'От 1 до 31' },
+        fields: [
+          field({ label: 'Название', name: 'title', placeholder: 'Например, аренда', required: true }),
+          field({ label: 'Сумма, ₽', name: 'amount', type: 'decimal', placeholder: '13 000', width: 130, required: true }),
+          field({ label: 'Число', name: 'day', type: 'integer', min: 1, max: 31, placeholder: '25', width: 84, required: true }),
+        ],
+      },
+    },
+    {
+      name: 'Правка с ошибкой',
+      width: 640,
+      props: {
+        action: '#',
+        submitLabel: 'Сохранить',
+        icon: 'book',
+        color: 'var(--teal)',
+        fields: [
+          field({ label: 'Название', name: 'title', value: 'Школа', required: true }),
+          field({ label: 'Сумма, ₽', name: 'amount', type: 'decimal', value: 'дорого', width: 130, error: 'Сумма в рублях, например 13 000' }),
+          field({ label: 'Число', name: 'day', type: 'integer', value: '30', width: 84 }),
+        ],
+        deleteAction: '#',
+        cancelHref: '#',
       },
     },
   ]),
-  doc(regularList, { group: 'Регулярные траты', description: 'Регулярные траты друг под другом: строки и формы в заданном порядке.' }, [
+  doc(entryList, { group: 'Настройка', description: 'Записи друг под другом: строки и формы в заданном порядке.' }, [
     {
       name: 'Строки и форма',
       width: 640,
       props: {
         label: 'Регулярные траты',
         items: [
-          regularRow({ title: 'Интернет', details: '1-го числа · через 27 дней', icon: 'phone', color: 'var(--orange)', amount: 1_100, symbol: '₽', href: '#' }),
-          regularRow({ title: 'Машина', details: '5-го числа · сегодня', icon: 'car', color: 'var(--blue)', amount: 91_000, symbol: '₽', href: '#' }),
-          regularForm({ action: '#', submitLabel: 'Добавить', icon: 'plus', color: 'var(--gray)', symbol: '₽' }),
+          entryRow({ title: 'Интернет', details: '1-го числа · через 27 дней', icon: 'phone', color: 'var(--orange)', amount: 1_100, symbol: '₽', href: '#' }),
+          entryRow({ title: 'Машина', details: '5-го числа · сегодня', icon: 'car', color: 'var(--blue)', amount: 91_000, symbol: '₽', href: '#' }),
+          entryForm({
+            action: '#',
+            submitLabel: 'Добавить',
+            icon: 'plus',
+            color: 'var(--gray)',
+            fields: [field({ label: 'Название', name: 'title' }), field({ label: 'Сумма, ₽', name: 'amount', type: 'decimal', width: 130 })],
+          }),
         ],
       },
     },

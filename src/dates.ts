@@ -34,6 +34,11 @@ export function dateOf(month: MonthString, day: number): DateString {
   return `${month}-${String(day).padStart(2, '0')}`;
 }
 
+/** The day of the month, or its last day when the month is shorter: day 31 of April is 30 April. */
+export function clampedDate(month: MonthString, day: number): DateString {
+  return dateOf(month, Math.min(day, daysInMonth(month)));
+}
+
 export function shiftMonth(month: MonthString, months: number): MonthString {
   const [year = 1970, m = 1] = month.split('-').map(Number);
   return new Date(Date.UTC(year, m - 1 + months, 1)).toISOString().slice(0, 7);
@@ -51,4 +56,15 @@ export function weekday(date: DateString): number {
 
 function utc(date: DateString): Date {
   return new Date(`${date}T00:00:00Z`);
+}
+
+const MONTHS = {
+  nominative: ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'],
+  genitive: ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'],
+  prepositional: ['январе', 'феврале', 'марте', 'апреле', 'мае', 'июне', 'июле', 'августе', 'сентябре', 'октябре', 'ноябре', 'декабре'],
+} as const;
+
+/** Month name of a 'yyyy-MM' or 'yyyy-MM-dd' string: октябрь, октября, (в) октябре. */
+export function monthName(date: MonthString | DateString, form: keyof typeof MONTHS = 'nominative'): string {
+  return MONTHS[form][Number(date.slice(5, 7)) - 1] ?? '';
 }

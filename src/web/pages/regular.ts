@@ -2,7 +2,7 @@
 // A row opens for editing by its link (?edit=id); forms post to /regular, /regular/:id and /regular/:id/delete.
 
 import { mainCurrency } from '../../balances.ts';
-import { dayOfMonth, daysBetween, monthOf } from '../../dates.ts';
+import { dayOfMonth, monthOf } from '../../dates.ts';
 import {
   nextPayment,
   parseRegularExpense,
@@ -16,14 +16,14 @@ import {
 import type { Settings } from '../../settings.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
-import { daysLeft, money, monthName, plural } from '../format.ts';
+import { fromToday, money, monthName, plural } from '../format.ts';
 import type { Html } from '../html.ts';
 import { categoryIcon } from '../icons.ts';
 import { categoryColor, toneColor } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
-import { footnote, pageIntro } from '../widgets/basics.ts';
+import { field, footnote, pageIntro } from '../widgets/basics.ts';
 import { monthCalendar, type CalendarDay } from '../widgets/calendar.ts';
-import { regularForm, regularList, regularRow } from '../widgets/regular.ts';
+import { entryForm, entryList, entryRow } from '../widgets/entries.ts';
 import { appShell, topBar } from '../widgets/shell.ts';
 import { appRail, userName, type Href } from './chrome.ts';
 
@@ -90,18 +90,16 @@ export function renderRegular(d: RegularData, href: Href): Html {
     main: [
       topBar({ crumbs: [{ label: 'Бюджет' }, { label: 'Регулярные траты', icon: 'repeat' }] }),
       pageIntro({ title: 'Регулярные траты', text: sentence(d) }),
-      regularList({
+      entryList({
         label: 'Регулярные траты',
         items: [
           ...d.expenses.map((e) => (d.form?.id === e.id ? editForm(e, d.form, d.symbol, href) : row(e, d, href))),
-          regularForm({
+          entryForm({
             action: href('/regular'),
             submitLabel: 'Добавить',
             icon: 'plus',
             color: toneColor('gray'),
-            symbol: d.symbol,
-            values: newForm?.values,
-            errors: newForm?.errors,
+            fields: fields(newForm ?? { values: { title: '', amount: '', day: '' }, errors: {} }, d.symbol),
           }),
         ],
       }),
@@ -128,20 +126,14 @@ function sentence(d: RegularData): string {
   const next = d.expenses
     .map((e) => ({ title: e.title, date: nextPayment(e, d.today) }))
     .reduce((a, b) => (b.date < a.date ? b : a));
-  text += ` В ${month} осталось заплатить ${money(ahead, d.symbol)}, ближайший платёж — «${next.title}», ${when(next.date, d.today)}.`;
+  text += ` В ${month} осталось заплатить ${money(ahead, d.symbol)}, ближайший платёж — «${next.title}», ${fromToday(next.date, d.today)}.`;
   return text;
 }
 
-/** сегодня, завтра, через 5 дней. */
-function when(date: DateString, today: DateString): string {
-  const days = daysBetween(today, date);
-  return days <= 1 ? daysLeft(days) : `через ${daysLeft(days)}`;
-}
-
 function row(e: RegularExpense, d: RegularData, href: Href): Html {
-  return regularRow({
+  return entryRow({
     title: e.title,
-    details: `${e.day}-го числа · ${when(nextPayment(e, d.today), d.today)}`,
+    details: `${e.day}-го числа · ${fromToday(nextPayment(e, d.today), d.today)}`,
     icon: categoryIcon(e.title),
     color: expenseColor(e),
     amount: e.amount,
@@ -151,17 +143,24 @@ function row(e: RegularExpense, d: RegularData, href: Href): Html {
 }
 
 function editForm(e: RegularExpense, form: RegularForm, symbol: string, href: Href): Html {
-  return regularForm({
+  return entryForm({
     action: href(`/regular/${e.id}`),
     submitLabel: 'Сохранить',
     icon: categoryIcon(e.title),
     color: expenseColor(e),
-    symbol,
-    values: form.values,
-    errors: form.errors,
+    fields: fields(form, symbol),
     deleteAction: href(`/regular/${e.id}/delete`),
     cancelHref: href('/regular'),
   });
+}
+
+function fields(form: Pick<RegularForm, 'values' | 'errors'>, symbol: string): Html[] {
+  const { values, errors } = form;
+  return [
+    field({ label: 'Название', name: 'title', value: values.title, placeholder: 'Например, аренда', maxLength: 80, required: true, error: errors.title }),
+    field({ label: `Сумма, ${symbol}`, name: 'amount', type: 'decimal', value: values.amount, placeholder: '13 000', width: 130, required: true, error: errors.amount }),
+    field({ label: 'Число', name: 'day', type: 'integer', min: 1, max: 31, value: values.day, placeholder: '25', width: 84, required: true, error: errors.day }),
+  ];
 }
 
 /** A tone picked by the id, so an expense keeps its colour when renamed. */

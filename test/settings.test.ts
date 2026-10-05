@@ -29,6 +29,21 @@ describe('Settings', () => {
     assert.equal(settings.deleteRegularExpense(42), false);
   });
 
+  it('keeps incomes with the numbers of their model', () => {
+    using settings = new Settings(':memory:');
+
+    const salary = settings.addIncome({ title: 'Зарплата', model: 'salary', params: { salary: 200_000, advanceDay: 20, payDay: 5 } });
+    settings.addIncome({ title: 'Аренда', model: 'fixed', params: { amount: 100_000, day: 5 } });
+    assert.deepEqual(settings.incomes().map((i) => [i.title, i.model]), [['Аренда', 'fixed'], ['Зарплата', 'salary']]);
+
+    assert.equal(settings.updateIncome(salary.id, { ...salary, params: { salary: 210_000, advanceDay: 20, payDay: 5 } }), true);
+    assert.deepEqual(settings.incomes()[1], { ...salary, params: { salary: 210_000, advanceDay: 20, payDay: 5 } });
+
+    assert.equal(settings.deleteIncome(salary.id), true);
+    assert.equal(settings.deleteIncome(salary.id), false);
+    assert.deepEqual(settings.incomes().map((i) => i.title), ['Аренда']);
+  });
+
   it('keeps expenses in a file between runs', () => {
     const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
     try {

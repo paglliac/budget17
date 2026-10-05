@@ -185,7 +185,7 @@ a { color: inherit; text-decoration: none; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 
 /* segmentedLinks */
-.segmented { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-control); background: var(--fill); }
+.segmented { display: inline-flex; justify-self: start; gap: 2px; padding: 3px; border-radius: var(--radius-control); background: var(--fill); }
 .segment { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 9px; font-size: 13px; color: var(--muted); white-space: nowrap; }
 .segment:hover { color: var(--ink); }
 .segment span { font-size: 12px; color: var(--soft); }
@@ -249,24 +249,24 @@ a { color: inherit; text-decoration: none; }
 .field-input::-webkit-inner-spin-button, .field-input::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .field-error { padding-left: 2px; font-size: 12px; color: var(--red); }
 
-/* regularList, regularRow, regularForm */
-.regular { display: grid; gap: 2px; list-style: none; }
-.regular-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 14px; }
-.regular-row:hover { background: var(--fill); }
-.regular-icon { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: var(--radius-control); background: color-mix(in srgb, var(--color) 12%, white); color: var(--color); }
-.regular-text { display: grid; min-width: 0; margin-right: auto; }
-.regular-text b { overflow: hidden; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
-.regular-text small { font-size: 12px; color: var(--muted); }
-.regular-amount { font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.regular-edit { color: var(--soft); }
-.regular-row:hover .regular-edit { color: var(--ink); }
-.regular-form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; margin: 6px 0; padding: 12px; border: 1px solid var(--line); border-radius: 16px; }
-.regular-form .regular-icon { margin-top: 19px; }
-.regular-fields { display: flex; flex-wrap: wrap; gap: 10px; flex: 1 1 360px; min-width: 0; }
-.regular-actions { display: flex; align-items: center; gap: 4px; margin-top: 22px; }
-.regular-quiet { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 999px; font-size: 12px; color: var(--muted); }
-.regular-quiet:hover { background: var(--fill); color: var(--ink); }
-.regular-quiet.danger:hover { color: var(--red); }
+/* entryList, entryRow, entryForm */
+.entries { display: grid; gap: 2px; list-style: none; }
+.entry-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 14px; }
+.entry-row:hover { background: var(--fill); }
+.entry-icon { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: var(--radius-control); background: color-mix(in srgb, var(--color) 12%, white); color: var(--color); }
+.entry-text { display: grid; min-width: 0; margin-right: auto; }
+.entry-text b { overflow: hidden; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+.entry-text small { font-size: 12px; color: var(--muted); }
+.entry-amount { font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.entry-edit { color: var(--soft); }
+.entry-row:hover .entry-edit { color: var(--ink); }
+.entry-form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; margin: 6px 0; padding: 12px; border: 1px solid var(--line); border-radius: 16px; }
+.entry-form .entry-icon { margin-top: 19px; }
+.entry-fields { display: flex; flex-wrap: wrap; gap: 10px; flex: 1 1 360px; min-width: 0; }
+.entry-actions { display: flex; align-items: center; gap: 4px; margin-top: 22px; }
+.entry-quiet { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 999px; font-size: 12px; color: var(--muted); }
+.entry-quiet:hover { background: var(--fill); color: var(--ink); }
+.entry-quiet.danger:hover { color: var(--red); }
 
 @media (max-width: 1240px) {
   .shell-columns.has-side { grid-template-columns: minmax(0, 1fr); }

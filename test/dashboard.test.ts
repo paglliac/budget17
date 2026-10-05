@@ -7,7 +7,7 @@ import { loadDashboard, renderDashboard } from '../src/web/pages/dashboard.ts';
 import { account, reminderMarker, RUB, tag, transaction, user } from './fixtures.ts';
 
 const today = '2026-10-05';
-const options = { today, month: null, hour: 14, source: 'zenmoney' as const, canSync: true, regular: [] };
+const options = { today, month: null, hour: 14, source: 'zenmoney' as const, canSync: true, regular: [], incomes: [] };
 const link = createHref();
 
 function data(): EntityCollections {
@@ -56,6 +56,21 @@ describe('dashboard', () => {
     const page = String(renderDashboard(dashboard, link));
     assert.ok(page.includes('Аренда'));
     assert.ok(page.includes('href="/regular"'), 'the rail links to regular expenses');
+  });
+
+  it('adds incomes to the planned payments', () => {
+    const incomes = [{ id: 1, title: 'Зарплата', model: 'salary' as const, params: { salary: 200_000, advanceDay: 20, payDay: 5 } }];
+    const dashboard = loadDashboard(data(), { ...options, incomes });
+
+    assert.deepEqual(
+      dashboard.planned.slice(0, 3).map((p) => [p.date, p.title, p.kind]),
+      [
+        ['2026-10-05', 'Зарплата за сентябрь', 'income'],
+        ['2026-10-07', 'Т-Мобайл', 'expense'],
+        ['2026-10-20', 'Аванс за октябрь', 'income'],
+      ],
+    );
+    assert.ok(String(renderDashboard(dashboard, link)).includes('href="/income"'), 'the rail links to incomes');
   });
 
   it('links categories and figures to the operations they come from', () => {

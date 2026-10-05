@@ -1,6 +1,6 @@
 // Russian formatting for the web UI: money, months, plurals.
 
-import { daysBetween, type MonthString } from '../dates.ts';
+import { daysBetween, monthName } from '../dates.ts';
 import type { DateString } from '../zenmoney/types.ts';
 
 const integerFormat = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
@@ -45,16 +45,8 @@ export function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-const MONTHS = {
-  nominative: ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'],
-  genitive: ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'],
-  prepositional: ['январе', 'феврале', 'марте', 'апреле', 'мае', 'июне', 'июле', 'августе', 'сентябре', 'октябре', 'ноябре', 'декабре'],
-} as const;
-
-/** Month name of a 'yyyy-MM' or 'yyyy-MM-dd' string: октябрь, октября, (в) октябре. */
-export function monthName(date: MonthString | DateString, form: keyof typeof MONTHS = 'nominative'): string {
-  return MONTHS[form][Number(date.slice(5, 7)) - 1] ?? '';
-}
+// Month names live with dates, since incomes name their payments by month too.
+export { monthName } from '../dates.ts';
 
 /** 5 октября. */
 export function dayMonth(date: DateString): string {
@@ -68,6 +60,12 @@ export function daysLeft(days: number): string {
   if (days <= 0) return 'сегодня';
   if (days === 1) return 'завтра';
   return `${days} ${plural(days, ['день', 'дня', 'дней'])}`;
+}
+
+/** When a date comes: сегодня, завтра, через 5 дней. */
+export function fromToday(date: DateString, today: DateString): string {
+  const days = daysBetween(today, date);
+  return days <= 1 ? daysLeft(days) : `через ${daysLeft(days)}`;
 }
 
 export function greeting(hour: number): string {

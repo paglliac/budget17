@@ -1,7 +1,8 @@
 // Regular expenses: payments that repeat every month on the same day, such as rent or a loan.
 // They are entered in the app rather than in ZenMoney and kept by src/settings.ts.
 
-import { addDays, dateOf, daysInMonth, monthOf, shiftMonth, type MonthString } from './dates.ts';
+import { addDays, clampedDate, monthOf, shiftMonth, type MonthString } from './dates.ts';
+import { amountText, parseAmount, parseDay, parseTitle } from './input.ts';
 import { soonestFirst, type PlannedOperation } from './planned.ts';
 import type { DateString } from './zenmoney/types.ts';
 
@@ -18,7 +19,7 @@ export type RegularExpenseInput = Omit<RegularExpense, 'id'>;
 
 /** The date of the payment in a month. */
 export function paymentDate(expense: Pick<RegularExpense, 'day'>, month: MonthString): DateString {
-  return dateOf(month, Math.min(expense.day, daysInMonth(month)));
+  return clampedDate(month, expense.day);
 }
 
 /** The first payment on or after `today`. */
@@ -62,30 +63,22 @@ export type RegularValues = Record<RegularField, string>;
 
 export type RegularErrors = Partial<Record<RegularField, string>>;
 
-const MAX_TITLE = 80;
-
-/** Checks what the user typed. Amounts may have spaces and a decimal comma: 13 000, 1500,50. */
+/** Checks what the user typed. */
 export function parseRegularExpense(values: RegularValues): { expense: RegularExpenseInput } | { errors: RegularErrors } {
-  const title = values.title.trim().replace(/\s+/g, ' ');
-  const amountText = values.amount.replace(/\s/g, '').replace(',', '.');
-  const dayText = values.day.trim();
+  const title = parseTitle(values.title);
+  const amount = parseAmount(values.amount);
+  const day = parseDay(values.day);
+  if ('value' in title && 'value' in amount && 'value' in day) {
+    return { expense: { title: title.value, amount: amount.value, day: day.value } };
+  }
   const errors: RegularErrors = {};
-
-  if (!title) errors.title = 'Укажите название';
-  else if (title.length > MAX_TITLE) errors.title = `Не длиннее ${MAX_TITLE} символов`;
-
-  const amount = Number(amountText);
-  if (!amountText) errors.amount = 'Укажите сумму';
-  else if (!/^\d{1,9}(\.\d{1,2})?$/.test(amountText) || amount <= 0) errors.amount = 'Сумма в рублях, например 13 000';
-
-  const day = Number(dayText);
-  if (!dayText) errors.day = 'Укажите число';
-  else if (!/^\d{1,2}$/.test(dayText) || day < 1 || day > 31) errors.day = 'От 1 до 31';
-
-  return Object.keys(errors).length > 0 ? { errors } : { expense: { title, amount, day } };
+  if ('error' in title) errors.title = title.error;
+  if ('error' in amount) errors.amount = amount.error;
+  if ('error' in day) errors.day = day.error;
+  return { errors };
 }
 
 /** The expense as form fields, for editing. */
 export function regularValues(expense: RegularExpenseInput): RegularValues {
-  return { title: expense.title, amount: String(expense.amount).replace('.', ','), day: String(expense.day) };
+  return { title: expense.title, amount: amountText(expense.amount), day: String(expense.day) };
 }

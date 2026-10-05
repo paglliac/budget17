@@ -4,6 +4,7 @@
 import { summarizeBalances, type AccountBalance, type BalanceSummary } from '../../balances.ts';
 import { monthOf, shiftMonth, type MonthString } from '../../dates.ts';
 import { summarizeMonth, type MonthSummary } from '../../month.ts';
+import { upcomingIncome, type Income } from '../../income.ts';
 import { soonestFirst, upcomingOperations, type PlannedOperation } from '../../planned.ts';
 import { upcomingRegular, type RegularExpense } from '../../regular.ts';
 import type { AccountType, DateString, EntityCollections } from '../../zenmoney/types.ts';
@@ -42,8 +43,9 @@ export function loadDashboard(
     hour: number;
     source: DashboardData['source'];
     canSync: boolean;
-    /** Regular expenses set up in the app; they join the planned operations from ZenMoney. */
+    /** Regular expenses and incomes set up in the app; they join the planned operations from ZenMoney. */
     regular: RegularExpense[];
+    incomes: Income[];
   },
 ): DashboardData {
   const current = monthOf(options.today);
@@ -57,6 +59,7 @@ export function loadDashboard(
     planned: [
       ...upcomingOperations(data, { today: options.today }),
       ...upcomingRegular(options.regular, { today: options.today }),
+      ...upcomingIncome(options.incomes, { today: options.today }),
     ].sort(soonestFirst),
     userName: userName(data),
     source: options.source,
@@ -200,7 +203,7 @@ const PAYMENT_TONES: Tone[] = ['blue', 'yellow', 'violet', 'teal'];
 
 function upcoming(d: DashboardData, symbol: string): Html {
   if (d.planned.length === 0) {
-    return emptyState({ text: 'Плановых платежей нет. Добавьте регулярные траты или плановые платежи в ZenMoney, и они появятся здесь.' });
+    return emptyState({ text: 'Плановых платежей нет. Добавьте доходы, регулярные траты или плановые платежи в ZenMoney, и они появятся здесь.' });
   }
   return grid({
     columns: 2,

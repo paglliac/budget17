@@ -1,14 +1,13 @@
-// Web UI on localhost: the overview at /, operations at /operations, regular expenses at /regular,
+// Web UI on localhost: the overview at /, operations at /operations, incomes at /income, regular expenses at /regular,
 // the widget storyboard at /storyboard. Reads the local ZenMoney copy (data/zenmoney.db) and syncs it on start
 // and on POST /sync when ZENMONEY_TOKEN is set. Without a local copy, or with ?demo, it shows demo data.
-// Regular expenses are the app's own data (data/settings.db), so demo mode leaves them as they are.
+// Incomes and regular expenses are the app's own data (data/settings.db), so demo mode leaves them as they are.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { localDate } from '../dates.ts';
 import { renderSyncResult } from '../format.ts';
-import type { RegularExpense } from '../regular.ts';
 import { Settings } from '../settings.ts';
 import { Store } from '../store.ts';
 import { sync } from '../sync.ts';
@@ -18,6 +17,7 @@ import { demoCollections } from './demo.ts';
 import { escape } from './html.ts';
 import { createHref } from './pages/chrome.ts';
 import { loadDashboard, renderDashboard } from './pages/dashboard.ts';
+import { loadIncome, renderIncome, submitIncome } from './pages/income.ts';
 import { loadOperations, renderOperations } from './pages/operations.ts';
 import { loadRegular, renderRegular, submitRegular } from './pages/regular.ts';
 import { renderStoryboard } from './pages/storyboard.ts';
@@ -41,9 +41,9 @@ function loadCollections(demo: boolean, today: string): EntityCollections {
   return store.load();
 }
 
-function loadRegularExpenses(): RegularExpense[] {
+function loadSettings<T>(read: (settings: Settings) => T): T {
   using settings = new Settings(SETTINGS_PATH);
-  return settings.regularExpenses();
+  return read(settings);
 }
 
 /** Browsers send Origin with every POST, so a page of another site cannot change data here. */
@@ -104,6 +104,20 @@ createServer(async (request, response) => {
       }
       return;
     }
+    if (request.method === 'POST' && url.pathname.startsWith('/income')) {
+      const body = await readForm(request);
+      using settings = new Settings(SETTINGS_PATH);
+      const result = submitIncome(settings, url.pathname, body);
+      if (result.status === 'saved') {
+        response.writeHead(303, { location: href('/income') }).end();
+      } else if (result.status === 'missing') {
+        send(response, 404, 'text/plain', 'Такого дохода нет');
+      } else {
+        const page = loadIncome(loadCollections(demo, today), settings.incomes(), { today, form: result.form });
+        send(response, 422, 'text/html', renderIncome(page, href).toString());
+      }
+      return;
+    }
     if (request.method !== 'GET') {
       send(response, 405, 'text/plain', 'Метод не поддерживается');
       return;
@@ -116,7 +130,7 @@ createServer(async (request, response) => {
           hour: new Date().getHours(),
           source: demo ? 'demo' : 'zenmoney',
           canSync: Boolean(token) && !demo,
-          regular: loadRegularExpenses(),
+          ...loadSettings((s) => ({ regular: s.regularExpenses(), incomes: s.incomes() })),
         });
         send(response, 200, 'text/html', renderDashboard(dashboard, href).toString());
         return;
@@ -133,8 +147,17 @@ createServer(async (request, response) => {
         return;
       }
       case '/regular': {
-        const page = loadRegular(loadCollections(demo, today), loadRegularExpenses(), { today, edit: params.get('edit') });
+        const page = loadRegular(loadCollections(demo, today), loadSettings((s) => s.regularExpenses()), { today, edit: params.get('edit') });
         send(response, 200, 'text/html', renderRegular(page, href).toString());
+        return;
+      }
+      case '/income': {
+        const page = loadIncome(loadCollections(demo, today), loadSettings((s) => s.incomes()), {
+          today,
+          edit: params.get('edit'),
+          add: params.get('add'),
+        });
+        send(response, 200, 'text/html', renderIncome(page, href).toString());
         return;
       }
       case '/storyboard':
@@ -154,6 +177,7 @@ createServer(async (request, response) => {
 }).listen(PORT, () => {
   console.log(`Обзор:      http://localhost:${PORT}/`);
   console.log(`Операции:   http://localhost:${PORT}/operations`);
+  console.log(`Доходы:     http://localhost:${PORT}/income`);
   console.log(`Регулярные: http://localhost:${PORT}/regular`);
   console.log(`Виджеты:    http://localhost:${PORT}/storyboard`);
   if (!existsSync(DB_PATH)) console.log('Локальной копии ZenMoney нет, показываю демо-данные. Запустите make sync.');
