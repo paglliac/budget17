@@ -3,7 +3,7 @@
 DB := data/zenmoney.db
 
 .DEFAULT_GOAL := help
-.PHONY: help install sync balances resync test typecheck check
+.PHONY: help install sync balances resync prototype test typecheck check
 
 help: ## Список команд
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-10s %s\n", $$1, $$2}'
@@ -20,6 +20,9 @@ balances: ## Синхронизация, затем счета и итоговы
 resync: ## Удалить локальную базу и скачать всё заново
 	rm -f $(DB)
 	@npm run --silent sync
+
+prototype: ## Прототип интерфейса: варианты главного экрана на localhost:4317
+	@npm run --silent prototype
 
 test: ## Тесты
 	npm test
