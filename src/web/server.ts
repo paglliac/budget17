@@ -16,9 +16,9 @@ import type { EntityCollections } from '../zenmoney/types.ts';
 import { demoCollections } from './demo.ts';
 import { escape } from './html.ts';
 import { createHref } from './pages/chrome.ts';
-import { loadDashboard, renderDashboard } from './pages/dashboard.ts';
 import { loadIncome, renderIncome, submitIncome } from './pages/income.ts';
 import { loadOperations, renderOperations } from './pages/operations.ts';
+import { prototypeAction, renderPrototype, submitPrototype } from './pages/prototype-week.ts';
 import { loadRegular, renderRegular, submitRegular } from './pages/regular.ts';
 import { renderStoryboard } from './pages/storyboard.ts';
 import { WIDGET_DOCS } from './stories.ts';
@@ -90,6 +90,10 @@ createServer(async (request, response) => {
       response.writeHead(303, { location: `${back.pathname}${back.search}` }).end();
       return;
     }
+    if (request.method === 'POST' && url.pathname.startsWith('/prototype/')) {
+      response.writeHead(303, { location: submitPrototype(url.pathname, await readForm(request)) }).end();
+      return;
+    }
     if (request.method === 'POST' && url.pathname.startsWith('/regular')) {
       const body = await readForm(request);
       using settings = new Settings(SETTINGS_PATH);
@@ -124,15 +128,21 @@ createServer(async (request, response) => {
     }
     switch (url.pathname) {
       case '/': {
-        const dashboard = loadDashboard(loadCollections(demo, today), {
+        // PROTOTYPE: the weekly overview variants replace the month overview while the question is open.
+        const collections = loadCollections(demo, today);
+        const back = prototypeAction(params, collections, today);
+        if (back) {
+          response.writeHead(303, { location: back }).end();
+          return;
+        }
+        const page = renderPrototype(collections, {
           today,
-          month: params.get('month'),
           hour: new Date().getHours(),
-          source: demo ? 'demo' : 'zenmoney',
+          params,
           canSync: Boolean(token) && !demo,
-          ...loadSettings((s) => ({ regular: s.regularExpenses(), incomes: s.incomes() })),
+          source: demo ? 'demo' : 'zenmoney',
         });
-        send(response, 200, 'text/html', renderDashboard(dashboard, href).toString());
+        send(response, 200, 'text/html', page);
         return;
       }
       case '/operations': {

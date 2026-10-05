@@ -224,7 +224,7 @@ const ACCOUNT_TYPES: Record<AccountType, { one: string; group: string; icon: Ico
   debt: { one: 'Долги', group: 'Долги', icon: 'arrows' },
 };
 
-function accountsPanel(d: DashboardData): Html[] {
+export function accountsPanel(d: Pick<DashboardData, 'balances' | 'canSync' | 'source'>): Html[] {
   const { balances } = d;
   const symbol = balances.mainInstrument.symbol;
   const counted = balances.accounts.filter((a) => a.inBalance);
