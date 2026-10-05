@@ -11,6 +11,7 @@
     "cli": "node --env-file-if-exists=.env src/cli.ts",
     "sync": "node --env-file-if-exists=.env src/cli.ts sync",
     "balances": "node --env-file-if-exists=.env src/cli.ts balances",
+    "web": "node --env-file-if-exists=.env src/web/server.ts",
     "test": "node --test 'test/**/*.test.ts'",
     "typecheck": "tsc"
   },
