@@ -96,8 +96,10 @@ export function summarizeWeek(budget: Budget, week: DateString): WeekSummary {
   const planned = sum(purchases.filter((p) => !p.done && p.envelope === 'week').map((p) => p.amount));
   const regular = [monthOf(week), monthOf(end)]
     .filter((month, i, months) => months.indexOf(month) === i)
-    .flatMap((month) => budget.regular.map((expense) => ({ expense, date: paymentDate(expense, month) })))
-    .filter(({ date }) => date >= week && date <= end)
+    .flatMap((month) => budget.regular.flatMap((expense) => {
+      const date = paymentDate(expense, month);
+      return date !== null && date >= week && date <= end ? [{ expense, date }] : [];
+    }))
     .sort((a, b) => a.date.localeCompare(b.date));
   return { week, spent, planned, free: WEEK_LIMIT - spent - planned, spending, purchases, regular };
 }

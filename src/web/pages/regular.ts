@@ -1,5 +1,6 @@
-// Regular expenses: the list to set them up, what they cost in a month and the payment days of this month.
-// A row opens for editing by its link (?edit=id); forms post to /regular, /regular/:id and /regular/:id/delete.
+// Regular expenses: the list to set them up, what they cost this month and its payment days.
+// A row opens for editing by its link (?edit=id); its dates and icon fold under «Даты и иконка».
+// Forms post to /regular, /regular/:id and /regular/:id/delete.
 
 import { mainCurrency } from '../../balances.ts';
 import { dayOfMonth, monthOf } from '../../dates.ts';
@@ -16,12 +17,12 @@ import {
 import type { Settings } from '../../settings.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
-import { fromToday, money, monthName, plural } from '../format.ts';
+import { dayMonthYear, fromToday, money, monthName, plural } from '../format.ts';
 import type { Html } from '../html.ts';
-import { categoryIcon } from '../icons.ts';
+import { categoryIcon, ENTRY_ICONS, entryIcon, isEntryIcon } from '../icons.ts';
 import { categoryColor, toneColor } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
-import { field, footnote, pageIntro } from '../widgets/basics.ts';
+import { field, footnote, iconPicker, pageIntro } from '../widgets/basics.ts';
 import { monthCalendar, type CalendarDay } from '../widgets/calendar.ts';
 import { entryForm, entryList, entryRow } from '../widgets/entries.ts';
 import { appShell, topBar } from '../widgets/shell.ts';
@@ -72,7 +73,15 @@ export function submitRegular(settings: Settings, path: string, body: URLSearchP
     return { status: 'saved' };
   }
 
-  const values: RegularValues = { title: body.get('title') ?? '', amount: body.get('amount') ?? '', day: body.get('day') ?? '' };
+  const icon = body.get('icon');
+  const values: RegularValues = {
+    title: body.get('title') ?? '',
+    amount: body.get('amount') ?? '',
+    day: body.get('day') ?? '',
+    start: body.get('start') ?? '',
+    end: body.get('end') ?? '',
+    icon: isEntryIcon(icon) ? icon : '',
+  };
   const parsed = parseRegularExpense(values);
   if ('errors' in parsed) return { status: 'invalid', form: { id, values, errors: parsed.errors } };
   if (id === null) settings.addRegularExpense(parsed.expense);
@@ -80,10 +89,12 @@ export function submitRegular(settings: Settings, path: string, body: URLSearchP
   return { status: 'saved' };
 }
 
+const EMPTY: RegularValues = { title: '', amount: '', day: '', start: '', end: '', icon: '' };
+
 export function renderRegular(d: RegularData, href: Href): Html {
-  const { total } = regularTotals(d.expenses, d.today);
-  const count = d.expenses.length;
+  const { count, total } = regularTotals(d.expenses, d.today);
   const newForm = d.form?.id === null ? d.form : null;
+  const month = monthName(d.today, 'prepositional');
 
   const body = appShell({
     rail: appRail('regular', d.userName, href),
@@ -99,14 +110,22 @@ export function renderRegular(d: RegularData, href: Href): Html {
             submitLabel: 'Добавить',
             icon: 'plus',
             color: toneColor('gray'),
-            fields: fields(newForm ?? { values: { title: '', amount: '', day: '' }, errors: {} }, d.symbol),
+            ...formFields(newForm ?? { values: EMPTY, errors: {} }, d.symbol),
           }),
         ],
       }),
     ],
     side: [
-      topBar({ crumbs: [{ label: 'В месяц' }] }),
-      balanceTotal({ amount: total, symbol: d.symbol, note: count ? `на ${count} ${plural(count, ['платёж', 'платежа', 'платежей'])}` : 'Регулярных трат пока нет' }),
+      topBar({ crumbs: [{ label: `В ${month}` }] }),
+      balanceTotal({
+        amount: total,
+        symbol: d.symbol,
+        note: count
+          ? `на ${count} ${plural(count, ['платёж', 'платежа', 'платежей'])}`
+          : d.expenses.length
+            ? `В ${month} платежей нет`
+            : 'Регулярных трат пока нет',
+      }),
       calendar(d),
       footnote({ text: 'Регулярные траты хранятся в приложении, в data/settings.db, а не в ZenMoney.' }),
     ],
@@ -121,20 +140,26 @@ function sentence(d: RegularData): string {
   }
   const { total, ahead } = regularTotals(d.expenses, d.today);
   const month = monthName(d.today, 'prepositional');
-  let text = `Каждый месяц на них уходит ${money(total, d.symbol)}.`;
-  if (ahead === 0) return `${text} В ${month} все платежи уже позади.`;
   const next = d.expenses
-    .map((e) => ({ title: e.title, date: nextPayment(e, d.today) }))
-    .reduce((a, b) => (b.date < a.date ? b : a));
-  text += ` В ${month} осталось заплатить ${money(ahead, d.symbol)}, ближайший платёж — «${next.title}», ${fromToday(next.date, d.today)}.`;
-  return text;
+    .flatMap((e) => {
+      const date = nextPayment(e, d.today);
+      return date === null ? [] : [{ title: e.title, date }];
+    })
+    .reduce<{ title: string; date: DateString } | null>((a, b) => (a === null || b.date < a.date ? b : a), null);
+  if (total === 0) {
+    const text = `В ${month} регулярных платежей нет.`;
+    return next ? `${text} Ближайший — «${next.title}», ${dayMonthYear(next.date, d.today)}.` : text;
+  }
+  const text = `В ${month} на них уходит ${money(total, d.symbol)}.`;
+  if (ahead === 0 || next === null) return `${text} Все платежи этого месяца уже позади.`;
+  return `${text} Осталось заплатить ${money(ahead, d.symbol)}, ближайший платёж — «${next.title}», ${fromToday(next.date, d.today)}.`;
 }
 
 function row(e: RegularExpense, d: RegularData, href: Href): Html {
   return entryRow({
     title: e.title,
-    details: `${e.day}-го числа · ${fromToday(nextPayment(e, d.today), d.today)}`,
-    icon: categoryIcon(e.title),
+    details: schedule(e, d.today),
+    icon: entryIcon(e.icon, e.title),
     color: expenseColor(e),
     amount: e.amount,
     symbol: d.symbol,
@@ -146,21 +171,52 @@ function editForm(e: RegularExpense, form: RegularForm, symbol: string, href: Hr
   return entryForm({
     action: href(`/regular/${e.id}`),
     submitLabel: 'Сохранить',
-    icon: categoryIcon(e.title),
+    icon: entryIcon(e.icon, e.title),
     color: expenseColor(e),
-    fields: fields(form, symbol),
+    ...formFields(form, symbol),
     deleteAction: href(`/regular/${e.id}/delete`),
     cancelHref: href('/regular'),
   });
 }
 
-function fields(form: Pick<RegularForm, 'values' | 'errors'>, symbol: string): Html[] {
-  const { values, errors } = form;
+/** When it is paid: 25-го числа · по 31 мая 2027 · через 20 дней. */
+function schedule(e: RegularExpense, today: DateString): string {
+  const next = nextPayment(e, today);
   return [
-    field({ label: 'Название', name: 'title', value: values.title, placeholder: 'Например, аренда', maxLength: 80, required: true, error: errors.title }),
-    field({ label: `Сумма, ${symbol}`, name: 'amount', type: 'decimal', value: values.amount, placeholder: '13 000', width: 130, required: true, error: errors.amount }),
-    field({ label: 'Число', name: 'day', type: 'integer', min: 1, max: 31, value: values.day, placeholder: '25', width: 84, required: true, error: errors.day }),
-  ];
+    `${e.day}-го числа`,
+    e.start !== null && e.start > today ? `с ${dayMonthYear(e.start, today)}` : null,
+    e.end !== null ? `по ${dayMonthYear(e.end, today)}` : null,
+    next === null ? 'платежи закончились' : fromToday(next, today),
+  ]
+    .filter((part) => part !== null)
+    .join(' · ');
+}
+
+/** The main fields, and the dates and icon folded under them until opened or wrong. */
+function formFields(form: Pick<RegularForm, 'values' | 'errors'>, symbol: string): { fields: Html[]; more: { label: string; fields: Html[]; open: boolean } } {
+  const { values, errors } = form;
+  return {
+    fields: [
+      field({ label: 'Название', name: 'title', value: values.title, placeholder: 'Например, аренда', maxLength: 80, required: true, error: errors.title }),
+      field({ label: `Сумма, ${symbol}`, name: 'amount', type: 'decimal', value: values.amount, placeholder: '13 000', width: 130, required: true, error: errors.amount }),
+      field({ label: 'Число', name: 'day', type: 'integer', min: 1, max: 31, value: values.day, placeholder: '25', width: 84, required: true, error: errors.day }),
+    ],
+    more: {
+      label: 'Даты и иконка',
+      open: Boolean(errors.start || errors.end),
+      fields: [
+        field({ label: 'Дата начала', name: 'start', type: 'date', value: values.start, width: 160, error: errors.start }),
+        field({ label: 'Дата окончания', name: 'end', type: 'date', value: values.end, width: 160, error: errors.end }),
+        iconPicker({
+          label: 'Иконка',
+          name: 'icon',
+          value: values.icon,
+          icons: ENTRY_ICONS,
+          auto: { icon: categoryIcon(values.title), label: 'По названию' },
+        }),
+      ],
+    },
+  };
 }
 
 /** A tone picked by the id, so an expense keeps its colour when renamed. */
@@ -173,7 +229,9 @@ function calendar(d: RegularData): Html {
   const month = monthOf(d.today);
   const payments = new Map<number, string[]>();
   for (const e of d.expenses) {
-    const day = dayOfMonth(paymentDate(e, month));
+    const date = paymentDate(e, month);
+    if (date === null) continue;
+    const day = dayOfMonth(date);
     payments.set(day, [...(payments.get(day) ?? []), `${e.title} ${money(e.amount, d.symbol)}`]);
   }
   const days = Array.from({ length: 31 }, (_, i): CalendarDay => {

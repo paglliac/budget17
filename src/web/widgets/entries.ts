@@ -46,6 +46,7 @@ export function entryRow(options: {
 
 /**
  * An entry being added or edited: its fields, posted to `action` with the `hidden` values.
+ * `more` are fields folded under their label until opened, such as dates; they are posted folded too.
  * An existing entry also gets Удалить, posted to `deleteAction`, and Отмена, leading to `cancelHref`.
  * `extraActions` post the same form elsewhere, such as moving the entry.
  */
@@ -55,6 +56,8 @@ export function entryForm(options: {
   icon: IconName;
   color: string;
   fields: Content;
+  /** `open` unfolds them, such as when one of them has an error. */
+  more?: { label: string; fields: Content; open?: boolean };
   hidden?: Record<string, string>;
   extraActions?: Array<{ label: string; action: string }>;
   deleteAction?: string;
@@ -65,7 +68,11 @@ export function entryForm(options: {
       <form class="entry-form" method="post" action="${options.action}" style="--color:${options.color}">
         ${Object.entries(options.hidden ?? {}).map(([name, value]) => html`<input type="hidden" name="${name}" value="${value}">`)}
         <span class="entry-icon">${icon(options.icon, 16)}</span>
-        <span class="entry-fields">${options.fields}</span>
+        <span class="entry-fields">${options.fields}${
+          options.more
+            ? html`<details class="entry-more"${options.more.open ? html` open` : null}><summary class="entry-quiet">${options.more.label}${icon('chevronDown', 14)}</summary><span class="entry-more-fields">${options.more.fields}</span></details>`
+            : null
+        }</span>
         <span class="entry-actions">
           ${button({ label: options.submitLabel, submit: true })}
           ${(options.extraActions ?? []).map((a) => html`<button class="entry-quiet" type="submit" formaction="${a.action}">${a.label}</button>`)}

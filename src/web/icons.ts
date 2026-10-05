@@ -86,3 +86,36 @@ const CATEGORY_ICONS: Array<[RegExp, IconName]> = [
 export function categoryIcon(title: string): IconName {
   return CATEGORY_ICONS.find(([pattern]) => pattern.test(title))?.[1] ?? 'tag';
 }
+
+/** Icons to pick for an entry, such as a regular expense, with what each stands for. */
+export const ENTRY_ICONS: ReadonlyArray<{ icon: IconName; label: string }> = [
+  { icon: 'home', label: 'Жильё' },
+  { icon: 'zap', label: 'Коммунальные' },
+  { icon: 'phone', label: 'Связь' },
+  { icon: 'repeat', label: 'Подписка' },
+  { icon: 'card', label: 'Кредит' },
+  { icon: 'book', label: 'Учёба' },
+  { icon: 'heart', label: 'Здоровье и спорт' },
+  { icon: 'car', label: 'Машина' },
+  { icon: 'bus', label: 'Транспорт' },
+  { icon: 'cart', label: 'Продукты' },
+  { icon: 'coffee', label: 'Кафе' },
+  { icon: 'bag', label: 'Покупки' },
+  { icon: 'shirt', label: 'Одежда' },
+  { icon: 'ticket', label: 'Развлечения' },
+  { icon: 'gift', label: 'Подарки' },
+  { icon: 'piggy', label: 'Накопления' },
+  { icon: 'banknote', label: 'Наличные' },
+  { icon: 'receipt', label: 'Счёт' },
+  { icon: 'briefcase', label: 'Работа' },
+  { icon: 'tag', label: 'Прочее' },
+];
+
+export function isEntryIcon(name: string | null): name is IconName {
+  return ENTRY_ICONS.some((e) => e.icon === name);
+}
+
+/** The icon the user picked for an entry, or one by its title when they picked none. */
+export function entryIcon(picked: string | null, title: string): IconName {
+  return isEntryIcon(picked) ? picked : categoryIcon(title);
+}

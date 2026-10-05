@@ -249,6 +249,17 @@ a { color: inherit; text-decoration: none; }
 .field-input::-webkit-inner-spin-button, .field-input::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .field-error { padding-left: 2px; font-size: 12px; color: var(--red); }
 
+/* iconPicker */
+.icon-picker { display: grid; gap: 5px; flex: 1 1 100%; min-width: 0; border: 0; }
+.icon-choices { display: flex; flex-wrap: wrap; gap: 4px; }
+.icon-choice { position: relative; cursor: pointer; }
+.icon-choice input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.icon-choice span { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); }
+.icon-choice.wide span { padding: 0 10px; font-size: 13px; }
+.icon-choice:hover span { color: var(--ink); }
+.icon-choice input:checked + span { border-color: transparent; background: color-mix(in srgb, var(--color, var(--violet)) 12%, white); color: var(--color, var(--violet)); }
+.icon-choice input:focus-visible + span { outline: 2px solid var(--violet); outline-offset: 2px; }
+
 /* entryList, entryRow, entryForm */
 .entries { display: grid; gap: 2px; list-style: none; }
 .entry { display: flex; flex-wrap: wrap; align-items: center; column-gap: 4px; }
@@ -270,6 +281,11 @@ a.entry-row:hover { background: var(--fill); }
 .entry-quiet { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 999px; font-size: 12px; color: var(--muted); }
 .entry-quiet:hover { background: var(--fill); color: var(--ink); }
 .entry-quiet.danger:hover { color: var(--red); }
+.entry-more { flex: 1 1 100%; }
+.entry-more > summary { gap: 4px; width: fit-content; margin-left: -10px; list-style: none; cursor: pointer; }
+.entry-more > summary::-webkit-details-marker { display: none; }
+.entry-more[open] > summary .icon { transform: rotate(180deg); }
+.entry-more-fields { display: flex; flex-wrap: wrap; gap: 10px; padding: 6px 0 4px; }
 
 @media (max-width: 1240px) {
   .shell-columns.has-side { grid-template-columns: minmax(0, 1fr); }

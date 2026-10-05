@@ -1,8 +1,8 @@
-// Regular expenses: payments that repeat every month on the same day, such as rent or a loan.
-// They are entered in the app rather than in ZenMoney and kept by src/settings.ts.
+// Regular expenses: payments that repeat every month on the same day, such as rent or a loan, optionally only
+// between a start and an end date. They are entered in the app rather than in ZenMoney and kept by src/settings.ts.
 
 import { addDays, clampedDate, monthOf, shiftMonth, type MonthString } from './dates.ts';
-import { amountText, parseAmount, parseDay, parseTitle } from './input.ts';
+import { amountText, parseAmount, parseDay, parseOptionalDate, parseTitle } from './input.ts';
 import { soonestFirst, type PlannedOperation } from './planned.ts';
 import type { DateString } from './zenmoney/types.ts';
 
@@ -13,20 +13,33 @@ export interface RegularExpense {
   amount: number;
   /** Day of the month from 1 to 31; in a shorter month the payment falls on its last day. */
   day: number;
+  /** No payment falls before this date; null when there is no start. */
+  start: DateString | null;
+  /** No payment falls after this date; null when the payments go on. */
+  end: DateString | null;
+  /** The icon the user picked by its name; null leaves it to the title. */
+  icon: string | null;
 }
 
 export type RegularExpenseInput = Omit<RegularExpense, 'id'>;
 
-/** The date of the payment in a month. */
-export function paymentDate(expense: Pick<RegularExpense, 'day'>, month: MonthString): DateString {
-  return clampedDate(month, expense.day);
+/** When an expense is paid. */
+export type RegularSchedule = Pick<RegularExpense, 'day' | 'start' | 'end'>;
+
+/** The date of the payment in a month; null when the month is before the start or after the end. */
+export function paymentDate(expense: RegularSchedule, month: MonthString): DateString | null {
+  const date = clampedDate(month, expense.day);
+  if (expense.start !== null && date < expense.start) return null;
+  if (expense.end !== null && date > expense.end) return null;
+  return date;
 }
 
-/** The first payment on or after `today`. */
-export function nextPayment(expense: Pick<RegularExpense, 'day'>, today: DateString): DateString {
-  const month = monthOf(today);
-  const date = paymentDate(expense, month);
-  return date >= today ? date : paymentDate(expense, shiftMonth(month, 1));
+/** The first payment on or after `today`; null when the payments are over. */
+export function nextPayment(expense: RegularSchedule, today: DateString): DateString | null {
+  const from = expense.start !== null && expense.start > today ? expense.start : today;
+  let date = clampedDate(monthOf(from), expense.day);
+  if (date < from) date = clampedDate(shiftMonth(monthOf(from), 1), expense.day);
+  return expense.end === null || date <= expense.end ? date : null;
 }
 
 /** Payments from today through the next `days` days as planned operations, soonest first. */
@@ -37,48 +50,67 @@ export function upcomingRegular(expenses: RegularExpense[], options: { today: Da
   for (let month = monthOf(today); month <= monthOf(until); month = shiftMonth(month, 1)) {
     for (const expense of expenses) {
       const date = paymentDate(expense, month);
-      if (date < today || date > until) continue;
+      if (date === null || date < today || date > until) continue;
       planned.push({ id: `regular:${expense.id}:${date}`, date, kind: 'expense', amount: expense.amount, title: expense.title });
     }
   }
   return planned.sort(soonestFirst);
 }
 
-/** What the expenses cost in a month, and how much of the current month is still ahead, today included. */
-export function regularTotals(expenses: RegularExpense[], today: DateString): { total: number; ahead: number } {
+/** The payments of the current month: how many, what they cost and how much is still ahead, today included. */
+export function regularTotals(expenses: RegularExpense[], today: DateString): { count: number; total: number; ahead: number } {
   const month = monthOf(today);
+  let count = 0;
   let total = 0;
   let ahead = 0;
   for (const expense of expenses) {
+    const date = paymentDate(expense, month);
+    if (date === null) continue;
+    count += 1;
     total += expense.amount;
-    if (paymentDate(expense, month) >= today) ahead += expense.amount;
+    if (date >= today) ahead += expense.amount;
   }
-  return { total, ahead };
+  return { count, total, ahead };
 }
 
-export type RegularField = 'title' | 'amount' | 'day';
+export type RegularField = 'title' | 'amount' | 'day' | 'start' | 'end' | 'icon';
 
-/** Fields of a form as the user typed them. */
+/** Fields of a form as the user typed them; empty start, end and icon mean none. */
 export type RegularValues = Record<RegularField, string>;
 
 export type RegularErrors = Partial<Record<RegularField, string>>;
 
-/** Checks what the user typed. */
+/** Checks what the user typed. The icon is taken as it is: which icons there are is up to the page. */
 export function parseRegularExpense(values: RegularValues): { expense: RegularExpenseInput } | { errors: RegularErrors } {
   const title = parseTitle(values.title);
   const amount = parseAmount(values.amount);
   const day = parseDay(values.day);
-  if ('value' in title && 'value' in amount && 'value' in day) {
-    return { expense: { title: title.value, amount: amount.value, day: day.value } };
+  const start = parseOptionalDate(values.start);
+  let end = parseOptionalDate(values.end);
+  if ('value' in start && 'value' in end && start.value !== null && end.value !== null && end.value < start.value) {
+    end = { error: 'Раньше даты начала' };
+  }
+  if ('value' in title && 'value' in amount && 'value' in day && 'value' in start && 'value' in end) {
+    const icon = values.icon.trim() || null;
+    return { expense: { title: title.value, amount: amount.value, day: day.value, start: start.value, end: end.value, icon } };
   }
   const errors: RegularErrors = {};
   if ('error' in title) errors.title = title.error;
   if ('error' in amount) errors.amount = amount.error;
   if ('error' in day) errors.day = day.error;
+  if ('error' in start) errors.start = start.error;
+  if ('error' in end) errors.end = end.error;
   return { errors };
 }
 
 /** The expense as form fields, for editing. */
 export function regularValues(expense: RegularExpenseInput): RegularValues {
-  return { title: expense.title, amount: amountText(expense.amount), day: String(expense.day) };
+  return {
+    title: expense.title,
+    amount: amountText(expense.amount),
+    day: String(expense.day),
+    start: expense.start ?? '',
+    end: expense.end ?? '',
+    icon: expense.icon ?? '',
+  };
 }

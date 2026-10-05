@@ -1,5 +1,8 @@
 // What the user types into forms, checked and turned into values; an error says what to fix.
 
+import { daysInMonth } from './dates.ts';
+import type { DateString } from './zenmoney/types.ts';
+
 export type Parsed<T> = { value: T } | { error: string };
 
 const MAX_TITLE = 80;
@@ -26,6 +29,17 @@ export function parseDay(text: string): Parsed<number> {
   if (!day) return { error: 'Укажите число' };
   if (!/^\d{1,2}$/.test(day) || Number(day) < 1 || Number(day) > 31) return { error: 'От 1 до 31' };
   return { value: Number(day) };
+}
+
+/** A date as a date field sends it, 2026-10-25; an empty field means no date. */
+export function parseOptionalDate(text: string): Parsed<DateString | null> {
+  const date = text.trim();
+  if (!date) return { value: null };
+  const [, year, month, day] = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date) ?? [];
+  if (!year || !month || !day || Number(month) < 1 || Number(month) > 12 || Number(day) < 1 || Number(day) > daysInMonth(`${year}-${month}`)) {
+    return { error: 'Такой даты нет' };
+  }
+  return { value: date };
 }
 
 /** An amount as the user would type it: 1100,5. */

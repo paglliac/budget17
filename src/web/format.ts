@@ -53,6 +53,11 @@ export function dayMonth(date: DateString): string {
   return `${Number(date.slice(8, 10))} ${monthName(date, 'genitive')}`;
 }
 
+/** 5 октября, or 5 марта 2027 when the year is not the one of `today`. */
+export function dayMonthYear(date: DateString, today: DateString): string {
+  return date.slice(0, 4) === today.slice(0, 4) ? dayMonth(date) : `${dayMonth(date)} ${date.slice(0, 4)}`;
+}
+
 export const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] as const;
 
 /** сегодня, завтра, 3 дня. */

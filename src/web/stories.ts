@@ -2,6 +2,7 @@
 // A new widget gets its stories here; test/storyboard.test.ts fails while any widget has none.
 
 import { Html } from './html.ts';
+import { ENTRY_ICONS } from './icons.ts';
 import { accountList, balanceTotal } from './widgets/accounts.ts';
 import {
   avatar,
@@ -13,6 +14,7 @@ import {
   filterTag,
   footnote,
   iconBadge,
+  iconPicker,
   pageIntro,
   progressBar,
   searchField,
@@ -248,6 +250,22 @@ export const WIDGET_DOCS: WidgetDoc[] = [
     { name: 'Текст', width: 260, props: { label: 'Название', name: 'title', placeholder: 'Например, аренда', required: true } },
     { name: 'Сумма', width: 160, props: { label: 'Сумма, ₽', name: 'amount', type: 'decimal', value: '13 000', width: 130 } },
     { name: 'Число с ошибкой', width: 160, props: { label: 'Число', name: 'day', type: 'integer', min: 1, max: 31, value: '32', width: 84, error: 'От 1 до 31' } },
+    { name: 'Дата', width: 190, props: { label: 'Дата окончания', name: 'end', type: 'date', value: '2027-03-20', width: 160 } },
+  ]),
+  doc(iconPicker, {
+    group: 'Формы',
+    description: 'Выбор иконки в цвете формы вокруг. Первый вариант, «авто», отправляет пустое значение: иконку подберут сами, например по названию.',
+  }, [
+    {
+      name: 'Своя иконка',
+      width: 520,
+      props: { label: 'Иконка', name: 'icon', value: 'card', icons: ENTRY_ICONS, auto: { icon: 'phone', label: 'По названию' } },
+    },
+    {
+      name: 'По названию',
+      width: 520,
+      props: { label: 'Иконка', name: 'icon', value: '', icons: ENTRY_ICONS.slice(0, 6), auto: { icon: 'phone', label: 'По названию' } },
+    },
   ]),
 
   doc(statCard, { group: 'Карточки', description: 'Одна цифра месяца и полоска прогресса.' }, [
@@ -390,7 +408,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
   ]),
   doc(entryForm, {
     group: 'Настройка',
-    description: 'Новая или открытая для правки запись: поля из field, кнопка и скрытые значения. У существующей есть «Удалить» и «Отмена».',
+    description: 'Новая или открытая для правки запись: поля из field, кнопка и скрытые значения. Редкие поля сворачиваются в more. У существующей есть «Удалить» и «Отмена».',
   }, [
     {
       name: 'Новая',
@@ -405,6 +423,13 @@ export const WIDGET_DOCS: WidgetDoc[] = [
           field({ label: 'Сумма, ₽', name: 'amount', type: 'decimal', placeholder: '13 000', width: 130, required: true }),
           field({ label: 'Число', name: 'day', type: 'integer', min: 1, max: 31, placeholder: '25', width: 84, required: true }),
         ],
+        more: {
+          label: 'Даты и иконка',
+          fields: [
+            field({ label: 'Дата начала', name: 'start', type: 'date', width: 160 }),
+            field({ label: 'Дата окончания', name: 'end', type: 'date', width: 160 }),
+          ],
+        },
       },
     },
     {
@@ -420,6 +445,32 @@ export const WIDGET_DOCS: WidgetDoc[] = [
           field({ label: 'Сумма, ₽', name: 'amount', type: 'decimal', value: 'дорого', width: 130, error: 'Сумма в рублях, например 13 000' }),
           field({ label: 'Число', name: 'day', type: 'integer', value: '30', width: 84 }),
         ],
+        deleteAction: '#',
+        cancelHref: '#',
+      },
+    },
+    {
+      name: 'Правка с раскрытыми настройками',
+      width: 640,
+      props: {
+        action: '#',
+        submitLabel: 'Сохранить',
+        icon: 'card',
+        color: 'var(--orange)',
+        fields: [
+          field({ label: 'Название', name: 'title', value: 'Кредит', required: true }),
+          field({ label: 'Сумма, ₽', name: 'amount', type: 'decimal', value: '9000', width: 130, required: true }),
+          field({ label: 'Число', name: 'day', type: 'integer', value: '20', width: 84, required: true }),
+        ],
+        more: {
+          label: 'Даты и иконка',
+          open: true,
+          fields: [
+            field({ label: 'Дата начала', name: 'start', type: 'date', value: '2026-11-01', width: 160 }),
+            field({ label: 'Дата окончания', name: 'end', type: 'date', value: '2026-10-01', width: 160, error: 'Раньше даты начала' }),
+            iconPicker({ label: 'Иконка', name: 'icon', value: 'card', icons: ENTRY_ICONS, auto: { icon: 'card', label: 'По названию' } }),
+          ],
+        },
         deleteAction: '#',
         cancelHref: '#',
       },

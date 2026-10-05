@@ -13,6 +13,7 @@ import {
   type Envelope,
   type Purchase,
 } from '../src/week.ts';
+import { regular } from './fixtures.ts';
 
 const today = '2026-10-06';
 const week = '2026-10-05';
@@ -37,7 +38,7 @@ function budget(overrides: Partial<Budget> = {}, marks: Array<[string, Envelope]
       purchase(5, 'Проезд', 1_000),
     ],
     marks: new Map(marks),
-    regular: [{ id: 1, title: 'Школа', amount: 45_000, day: 7 }],
+    regular: [regular({ id: 1, title: 'Школа', amount: 45_000, day: 7 })],
     ...overrides,
   };
 }
@@ -81,7 +82,7 @@ describe('summarizeWeek', () => {
   });
 
   it('finds regular payments in a week that spans two months', () => {
-    const w = summarizeWeek(budget({ regular: [{ id: 1, title: 'Связь', amount: 600, day: 1 }, { id: 2, title: 'Аренда', amount: 30_000, day: 30 }] }), '2026-09-28');
+    const w = summarizeWeek(budget({ regular: [regular({ id: 1, title: 'Связь', amount: 600, day: 1 }), regular({ id: 2, title: 'Аренда', amount: 30_000, day: 30 })] }), '2026-09-28');
 
     assert.deepEqual(w.regular.map((r) => r.date), ['2026-09-30', '2026-10-01']);
   });

@@ -105,14 +105,14 @@ export function filterTag(options: { label: string; href: string; color?: string
 }
 
 /**
- * A labelled input of a form. `decimal` and `integer` bring up a number keyboard on phones.
- * Without `width` the field takes the free space of its row. An error shows under it and marks it invalid.
+ * A labelled input of a form. `decimal` and `integer` bring up a number keyboard on phones; `date` a date picker,
+ * which sends 2026-10-25. Without `width` the field takes the free space of its row. An error shows under it and marks it invalid.
  */
 export function field(options: {
   label: string;
   name: string;
   value?: string;
-  type?: 'text' | 'decimal' | 'integer';
+  type?: 'text' | 'decimal' | 'integer' | 'date';
   min?: number;
   max?: number;
   maxLength?: number;
@@ -125,7 +125,11 @@ export function field(options: {
   return html`<label class="field${options.width ? ' fixed' : ''}"${options.width ? html` style="--field-width:${options.width}px"` : null}>
     <span class="field-label">${options.label}</span>
     <input class="field-input" name="${options.name}" value="${options.value ?? ''}" autocomplete="off"${
-      type === 'integer' ? html` type="number" inputmode="numeric" step="1"` : html` type="text"${type === 'decimal' ? html` inputmode="decimal"` : null}`
+      type === 'integer'
+        ? html` type="number" inputmode="numeric" step="1"`
+        : type === 'date'
+          ? html` type="date"`
+          : html` type="text"${type === 'decimal' ? html` inputmode="decimal"` : null}`
     }${options.min === undefined ? null : html` min="${options.min}"`}${options.max === undefined ? null : html` max="${options.max}"`}${
       options.maxLength === undefined ? null : html` maxlength="${options.maxLength}"`
     }${options.placeholder ? html` placeholder="${options.placeholder}"` : null}${options.required ? html` required` : null}${
@@ -133,4 +137,28 @@ export function field(options: {
     }>
     ${options.error ? html`<small class="field-error">${options.error}</small>` : null}
   </label>`;
+}
+
+/**
+ * A choice of an icon, tinted with the colour of the form it is in. `auto`, the first choice, sends an empty value:
+ * the icon is then picked for the entry, such as by its title.
+ */
+export function iconPicker(options: {
+  label: string;
+  name: string;
+  /** The picked icon, or empty for `auto`. */
+  value: string;
+  icons: ReadonlyArray<{ icon: IconName; label: string }>;
+  auto?: { icon: IconName; label: string };
+}): Html {
+  const choice = (value: string, label: string, inner: Html, wide = false) =>
+    html`<label class="icon-choice${wide ? ' wide' : ''}" title="${label}"><input type="radio" name="${options.name}" value="${value}" aria-label="${label}"${
+      value === options.value ? html` checked` : null
+    }><span>${inner}</span></label>`;
+  return html`<fieldset class="icon-picker">
+    <legend class="field-label">${options.label}</legend>
+    <span class="icon-choices">${options.auto ? choice('', options.auto.label, html`${icon(options.auto.icon, 16)}${options.auto.label}`, true) : null}${options.icons.map(
+      (i) => choice(i.icon, i.label, icon(i.icon, 16)),
+    )}</span>
+  </fieldset>`;
 }

@@ -10,7 +10,10 @@ const SCHEMA = `
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
     amount REAL NOT NULL CHECK (amount > 0),
-    day INTEGER NOT NULL CHECK (day BETWEEN 1 AND 31)
+    day INTEGER NOT NULL CHECK (day BETWEEN 1 AND 31),
+    start_date TEXT,
+    end_date TEXT,
+    icon TEXT
   ) STRICT;
 
   -- params holds the model's numbers as JSON, so a new model needs no migration.
@@ -44,6 +47,13 @@ const SCHEMA = `
   ) STRICT;
 `;
 
+/** Columns added after their table was created: databases made before them get them on open. */
+const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> = [
+  ['regular_expense', 'start_date', 'TEXT'],
+  ['regular_expense', 'end_date', 'TEXT'],
+  ['regular_expense', 'icon', 'TEXT'],
+];
+
 /**
  * What the user sets up in the app itself: regular expenses, incomes, the weeks' purchases, wishes and where
  * spending counts. It lives in its own SQLite file, apart from the ZenMoney copy, so make resync never deletes it.
@@ -58,29 +68,42 @@ export class Settings {
     }
     this.#db = new DatabaseSync(path);
     this.#db.exec(SCHEMA);
+    for (const [table, column, definition] of ADDED_COLUMNS) {
+      const columns = this.#db.prepare(`SELECT name FROM pragma_table_info('${table}')`).all();
+      if (!columns.some((c) => c.name === column)) this.#db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
   }
 
   /** Regular expenses by day of the month, then by title. */
   regularExpenses(): RegularExpense[] {
+    const text = (value: unknown) => (value === null ? null : String(value));
     return this.#db
-      .prepare('SELECT id, title, amount, day FROM regular_expense')
+      .prepare('SELECT id, title, amount, day, start_date, end_date, icon FROM regular_expense')
       .all()
-      .map((row) => ({ id: Number(row.id), title: String(row.title), amount: Number(row.amount), day: Number(row.day) }))
+      .map((row) => ({
+        id: Number(row.id),
+        title: String(row.title),
+        amount: Number(row.amount),
+        day: Number(row.day),
+        start: text(row.start_date),
+        end: text(row.end_date),
+        icon: text(row.icon),
+      }))
       .sort((a, b) => a.day - b.day || a.title.localeCompare(b.title, 'ru'));
   }
 
   addRegularExpense(expense: RegularExpenseInput): RegularExpense {
     const { lastInsertRowid } = this.#db
-      .prepare('INSERT INTO regular_expense (title, amount, day) VALUES (?, ?, ?)')
-      .run(expense.title, expense.amount, expense.day);
+      .prepare('INSERT INTO regular_expense (title, amount, day, start_date, end_date, icon) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(expense.title, expense.amount, expense.day, expense.start, expense.end, expense.icon);
     return { id: Number(lastInsertRowid), ...expense };
   }
 
   /** False when there is no such expense. */
   updateRegularExpense(id: number, expense: RegularExpenseInput): boolean {
     const { changes } = this.#db
-      .prepare('UPDATE regular_expense SET title = ?, amount = ?, day = ? WHERE id = ?')
-      .run(expense.title, expense.amount, expense.day, id);
+      .prepare('UPDATE regular_expense SET title = ?, amount = ?, day = ?, start_date = ?, end_date = ?, icon = ? WHERE id = ?')
+      .run(expense.title, expense.amount, expense.day, expense.start, expense.end, expense.icon, id);
     return Number(changes) > 0;
   }
 

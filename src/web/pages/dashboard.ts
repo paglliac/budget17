@@ -32,7 +32,7 @@ import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { capitalize, dayMonth, money, monthName } from '../format.ts';
 import type { Html } from '../html.ts';
-import { categoryIcon } from '../icons.ts';
+import { categoryIcon, entryIcon } from '../icons.ts';
 import { categoryColor, toneColor } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
 import { button, emptyState, field, footnote, pageIntro, section, shareBar } from '../widgets/basics.ts';
@@ -277,7 +277,7 @@ function weekView(page: Page): { main: Html[]; side: Html[] } {
               entryRow({
                 title: expense.title,
                 details: `регулярная, вне бюджета · ${dayMonth(date)}`,
-                icon: categoryIcon(expense.title),
+                icon: entryIcon(expense.icon, expense.title),
                 color: toneColor('gray'),
                 amount: expense.amount,
                 symbol: d.symbol,

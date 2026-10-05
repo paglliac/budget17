@@ -5,7 +5,7 @@ import type { Envelope } from '../src/week.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { createHref } from '../src/web/pages/chrome.ts';
 import { budgetOf, loadDashboard, renderDashboard, submitDashboard, type SavedBudget } from '../src/web/pages/dashboard.ts';
-import { account, RUB, transaction, user } from './fixtures.ts';
+import { account, regular, RUB, transaction, user } from './fixtures.ts';
 
 const today = '2026-10-06';
 
@@ -31,7 +31,7 @@ function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
     ],
     wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500 }],
     marks: new Map(marks),
-    regular: [{ id: 7, title: 'Школа, ЛДК', amount: 45_000, day: 7 }],
+    regular: [regular({ id: 7, title: 'Школа, ЛДК', amount: 45_000, day: 7 })],
   };
 }
 

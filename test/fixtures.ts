@@ -1,3 +1,4 @@
+import type { RegularExpense, RegularExpenseInput } from '../src/regular.ts';
 import type { Account, Budget, Instrument, ReminderMarker, Tag, Transaction, User } from '../src/zenmoney/types.ts';
 
 export const RUB: Instrument = { id: 2, changed: 0, title: 'Российский рубль', shortTitle: 'RUB', symbol: '₽', rate: 1 };
@@ -119,4 +120,14 @@ export function reminderMarker(overrides: Partial<ReminderMarker> = {}): Reminde
     notify: false,
     ...overrides,
   };
+}
+
+/** A regular expense paid every month, with no dates or picked icon unless given. */
+export function regular(fields: Pick<RegularExpense, 'id' | 'title' | 'amount' | 'day'> & Partial<RegularExpense>): RegularExpense {
+  return { start: null, end: null, icon: null, ...fields };
+}
+
+/** What a form gives to add or save a regular expense, with no dates or picked icon unless given. */
+export function regularInput(fields: Pick<RegularExpense, 'title' | 'amount' | 'day'> & Partial<RegularExpenseInput>): RegularExpenseInput {
+  return { start: null, end: null, icon: null, ...fields };
 }
