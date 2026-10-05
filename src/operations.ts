@@ -25,6 +25,19 @@ export function operationAmount(operation: OperationAmounts, kind: OperationKind
     : { amount: operation.outcome, instrument: operation.outcomeInstrument };
 }
 
+export interface Category {
+  id: TagId;
+  title: string;
+  /** '#rrggbb', or null when the category has no colour in ZenMoney. */
+  color: string | null;
+}
+
+export function categoryOf(tag: Tag): Category {
+  // ZenMoney stores colours as ARGB packed into an integer.
+  const color = tag.color === null ? null : `#${((tag.color >>> 0) & 0xffffff).toString(16).padStart(6, '0')}`;
+  return { id: tag.id, title: tag.title, color };
+}
+
 /** The top-level category of an operation: ZenMoney nests categories one level deep, and the first tag is the main one. */
 export function topCategory(tags: ReadonlyMap<TagId, Tag>, tagIds: TagId[] | null): Tag | undefined {
   const tag = tagIds?.[0] === undefined ? undefined : tags.get(tagIds[0]);

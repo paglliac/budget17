@@ -1,6 +1,6 @@
 import { mainCurrencyConverter } from './balances.ts';
 import { dateOf, dayOfMonth, daysInMonth, monthOf, shiftMonth, type MonthString } from './dates.ts';
-import { operationAmount, operationKind, topCategory } from './operations.ts';
+import { categoryOf, operationAmount, operationKind, topCategory } from './operations.ts';
 import type { DateString, EntityCollections, TagId } from './zenmoney/types.ts';
 
 export interface CategorySpending {
@@ -97,7 +97,7 @@ export function summarizeMonth(
     const id = tag?.id ?? null;
     let category = categories.get(id);
     if (!category) {
-      category = { id, title: tag?.title ?? 'Без категории', color: argbToHex(tag?.color ?? null), amount: 0 };
+      category = { ...(tag ? categoryOf(tag) : { id: null, title: 'Без категории', color: null }), amount: 0 };
       categories.set(id, category);
     }
     category.amount += value;
@@ -124,10 +124,4 @@ function monthBudget(data: Pick<EntityCollections, 'tag' | 'budget'>, month: Mon
       return !parent || !budgeted.has(parent);
     })
     .reduce((sum, b) => sum + b.outcome, 0);
-}
-
-/** ZenMoney stores colours as ARGB packed into an integer. */
-function argbToHex(color: number | null): string | null {
-  if (color === null) return null;
-  return `#${((color >>> 0) & 0xffffff).toString(16).padStart(6, '0')}`;
 }
