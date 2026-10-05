@@ -1,4 +1,4 @@
-import type { AccountId, AccountType, EntityCollections, Instrument } from './zenmoney/types.ts';
+import type { AccountId, AccountType, EntityCollections, Instrument, InstrumentId } from './zenmoney/types.ts';
 
 export interface AccountBalance {
   id: AccountId;
@@ -23,23 +23,44 @@ export function convert(amount: number, from: Instrument, to: Instrument): numbe
   return from.id === to.id ? amount : (amount * from.rate) / to.rate;
 }
 
-export function summarizeBalances(data: Pick<EntityCollections, 'account' | 'instrument' | 'user'>): BalanceSummary {
+/** Converts amounts in any of the user's currencies into the main currency. */
+export function mainCurrencyConverter(
+  data: Pick<EntityCollections, 'instrument' | 'user'>,
+): (amount: number, instrument: InstrumentId) => number {
+  const main = mainCurrency(data);
   const instruments = new Map((data.instrument ?? []).map((i) => [i.id, i]));
+  return (amount, id) => {
+    const instrument = instruments.get(id);
+    if (!instrument) {
+      throw new Error(`Неизвестная валюта: ${id}`);
+    }
+    return convert(amount, instrument, main);
+  };
+}
+
+/** The family administrator's currency, which totals are shown in. */
+export function mainCurrency(data: Pick<EntityCollections, 'instrument' | 'user'>): Instrument {
   const users = data.user ?? [];
   const mainUser = users.find((u) => u.parent === null) ?? users[0];
   if (!mainUser) {
     throw new Error('В данных ZenMoney нет пользователя');
   }
-  const mainInstrument = instruments.get(mainUser.currency);
-  if (!mainInstrument) {
+  const instrument = (data.instrument ?? []).find((i) => i.id === mainUser.currency);
+  if (!instrument) {
     throw new Error(`Неизвестная основная валюта пользователя: ${mainUser.currency}`);
   }
+  return instrument;
+}
+
+export function summarizeBalances(data: Pick<EntityCollections, 'account' | 'instrument' | 'user'>): BalanceSummary {
+  const instruments = new Map((data.instrument ?? []).map((i) => [i.id, i]));
+  const mainInstrument = mainCurrency(data);
 
   const accounts = (data.account ?? [])
     // 'debt' is ZenMoney's technical account for loans to/from people.
     .filter((a) => !a.archive && a.type !== 'debt')
     .map((a): AccountBalance => {
-      const instrumentId = a.instrument ?? mainUser.currency;
+      const instrumentId = a.instrument ?? mainInstrument.id;
       const instrument = instruments.get(instrumentId);
       if (!instrument) {
         throw new Error(`Неизвестная валюта ${instrumentId} у счёта «${a.title}»`);
