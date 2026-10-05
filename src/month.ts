@@ -1,16 +1,8 @@
 import { mainCurrencyConverter } from './balances.ts';
 import { dateOf, dayOfMonth, daysInMonth, monthOf, shiftMonth, type MonthString } from './dates.ts';
+import type { CategorySpending } from './ledger.ts';
 import { categoryOf, operationAmount, operationKind, topCategory } from './operations.ts';
 import type { DateString, EntityCollections, TagId } from './zenmoney/types.ts';
-
-export interface CategorySpending {
-  /** Top-level category; null for operations without one. */
-  id: TagId | null;
-  title: string;
-  /** '#rrggbb', or null when the category has no colour in ZenMoney. */
-  color: string | null;
-  amount: number;
-}
 
 /** Income and spending of one month, in the main currency. Transfers between accounts count as neither. */
 export interface MonthSummary {

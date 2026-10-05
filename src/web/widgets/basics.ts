@@ -140,6 +140,35 @@ export function field(options: {
 }
 
 /**
+ * A labelled choice from a list, in groups when the list has things of different kinds. With a placeholder and no
+ * value nothing is chosen, so a required one makes the user pick. Empty groups are left out.
+ */
+export function selectField(options: {
+  label: string;
+  name: string;
+  value?: string;
+  groups: Array<{ label: string; options: Array<{ value: string; label: string }> }>;
+  placeholder?: string;
+  required?: boolean;
+  width?: number;
+}): Html {
+  const value = options.value ?? '';
+  return html`<label class="field${options.width ? ' fixed' : ''}"${options.width ? html` style="--field-width:${options.width}px"` : null}>
+    <span class="field-label">${options.label}</span>
+    <select class="field-input field-select" name="${options.name}"${options.required ? html` required` : null}>${
+      options.placeholder ? html`<option value="" disabled${value === '' ? html` selected` : null}>${options.placeholder}</option>` : null
+    }${options.groups
+      .filter((group) => group.options.length > 0)
+      .map(
+        (group) =>
+          html`<optgroup label="${group.label}">${group.options.map(
+            (option) => html`<option value="${option.value}"${option.value === value ? html` selected` : null}>${option.label}</option>`,
+          )}</optgroup>`,
+      )}</select>
+  </label>`;
+}
+
+/**
  * A choice of an icon, tinted with the colour of the form it is in. `auto`, the first choice, sends an empty value:
  * the icon is then picked for the entry, such as by its title.
  */

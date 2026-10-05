@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { filterOperations, listOperations } from '../src/ledger.ts';
+import { filterOperations, listOperations, REGULAR_CATEGORY, spendingByCategory } from '../src/ledger.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { account, RUB, tag, transaction, USD, user } from './fixtures.ts';
 
@@ -47,6 +47,7 @@ describe('listOperations', () => {
       payee: 'Яндекс Go',
       comment: null,
       category: { id: transport.id, title: 'Транспорт', color: '#5b84f0' },
+      regular: null,
       account: 'Т-Банк',
       toAccount: null,
       hold: true,
@@ -108,6 +109,99 @@ describe('listOperations', () => {
         ['YANDEX*GO', null],
         ['Транспорт', null],
         ['Аванс', null],
+      ],
+    );
+  });
+});
+
+describe('listOperations with banks and the user’s sorting', () => {
+  const tbank = 4902;
+  const main = account({ id: 'main', title: 'Основной', company: tbank });
+  const reserve = account({ id: 'reserve', title: 'Запас', company: tbank });
+  const sber = account({ id: 'sber', title: 'Сбер', company: 4624 });
+  const cash = account({ id: 'cash', title: 'Наличные', type: 'cash' });
+  const food = tag({ title: 'Продукты' });
+  const data: EntityCollections = { ...base, account: [main, reserve, sber, cash], tag: [transport, taxi, food] };
+
+  it('leaves out transfers between accounts of one bank and keeps those between banks or to cash', () => {
+    const operations = listOperations(
+      {
+        ...data,
+        transaction: [
+          transaction({ outcome: 5000, income: 5000, outcomeAccount: 'main', incomeAccount: 'reserve' }),
+          transaction({ outcome: 3000, income: 3000, outcomeAccount: 'main', incomeAccount: 'sber' }),
+          transaction({ outcome: 2000, income: 2000, outcomeAccount: 'main', incomeAccount: 'cash' }),
+          transaction({ outcome: 700, outcomeAccount: 'main', payee: 'Кирилл А.' }),
+        ],
+      },
+      october,
+    );
+
+    assert.deepEqual(operations.map((o) => o.payee).sort(), ['Кирилл А.', 'Основной → Наличные', 'Основной → Сбер']);
+  });
+
+  it('gives an expense without a category the one the user picked, or Регулярные траты for a regular payment', () => {
+    const sorting = {
+      categorizations: new Map([
+        ['picked', { tag: food.id }],
+        ['tagged', { tag: food.id }],
+        ['rent', { regular: 3 }],
+        ['untitled', { regular: 3 }],
+        ['gone', { regular: 99 }],
+        ['salary', { tag: food.id }],
+      ]),
+      regular: [{ id: 3, title: 'Мастерская аренда' }],
+    };
+    const operations = listOperations(
+      {
+        ...data,
+        transaction: [
+          transaction({ id: 'picked', created: 6, outcome: 400, payee: 'Лавка' }),
+          transaction({ id: 'tagged', created: 5, outcome: 500, payee: 'Такси', tag: [taxi.id] }),
+          transaction({ id: 'rent', created: 4, outcome: 40_000, payee: 'Александр А.' }),
+          transaction({ id: 'untitled', created: 3, outcome: 40_000 }),
+          transaction({ id: 'gone', created: 2, outcome: 100, payee: 'Без привязки' }),
+          transaction({ id: 'salary', created: 1, income: 100_000, payee: 'Зарплата' }),
+        ],
+      },
+      october,
+      sorting,
+    );
+
+    assert.deepEqual(
+      operations.map((o) => [o.payee, o.category?.title ?? null, o.regular?.title ?? null]),
+      [
+        ['Лавка', 'Продукты', null],
+        ['Такси', 'Транспорт', null],
+        ['Александр А.', REGULAR_CATEGORY.title, 'Мастерская аренда'],
+        ['Мастерская аренда', REGULAR_CATEGORY.title, 'Мастерская аренда'],
+        ['Без привязки', null, null],
+        ['Зарплата', null, null],
+      ],
+    );
+  });
+
+  it('sums expenses by category, largest first', () => {
+    const operations = listOperations(
+      {
+        ...data,
+        transaction: [
+          transaction({ outcome: 300, tag: [food.id] }),
+          transaction({ outcome: 200, tag: [taxi.id] }),
+          transaction({ outcome: 150, tag: [transport.id] }),
+          transaction({ outcome: 400 }),
+          transaction({ income: 1000, tag: [food.id] }),
+        ],
+      },
+      october,
+    );
+
+    assert.deepEqual(
+      spendingByCategory(operations).map((c) => [c.title, c.amount]),
+      [
+        ['Без категории', 400],
+        ['Транспорт', 350],
+        ['Продукты', 300],
       ],
     );
   });

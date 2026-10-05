@@ -1,6 +1,7 @@
 // The budget by weeks: a limit for ordinary spending each week, a limit for extras each month, purchases planned
 // into weeks, and when a wish fits. Spending from ZenMoney counts towards its week unless it is marked as extras
-// or as outside the budget. Pure functions; what the user plans and marks is kept by src/settings.ts.
+// or as outside the budget, or it paid a regular expense. Pure functions; what the user plans and marks is kept by
+// src/settings.ts.
 
 import { addDays, monthOf, weekday, type MonthString } from './dates.ts';
 import type { Operation } from './ledger.ts';
@@ -69,8 +70,9 @@ export function weeksOfMonth(month: MonthString): DateString[] {
   return weeks;
 }
 
-export function envelopeOf(budget: Pick<Budget, 'marks'>, operation: Pick<Operation, 'id'>): Envelope {
-  return budget.marks.get(operation.id) ?? 'week';
+/** Spending counts towards its week until moved; a payment of a regular expense is outside the budget, as the expense is. */
+export function envelopeOf(budget: Pick<Budget, 'marks'>, operation: Pick<Operation, 'id' | 'regular'>): Envelope {
+  return budget.marks.get(operation.id) ?? (operation.regular ? 'outside' : 'week');
 }
 
 export interface WeekSummary {

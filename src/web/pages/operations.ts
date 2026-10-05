@@ -1,10 +1,10 @@
 // Operations of a month by day, filtered by kind, category and text, with spending by category on the side.
-// Filters live in the URL, so any view can be linked to, e.g. from a category on the overview.
+// Filters live in the URL, so any view can be linked to, e.g. from a category on the overview. Categories picked in
+// the app count as if they came from ZenMoney, and payments of regular expenses go under Регулярные траты.
 
 import { mainCurrency } from '../../balances.ts';
 import { dateOf, daysInMonth, monthOf, type MonthString } from '../../dates.ts';
-import { filterOperations, listOperations, type Operation, type OperationFilter } from '../../ledger.ts';
-import { summarizeMonth, type CategorySpending } from '../../month.ts';
+import { filterOperations, listOperations, spendingByCategory, type CategorySpending, type Operation, type OperationFilter, type Sorting } from '../../ledger.ts';
 import type { OperationKind } from '../../operations.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
@@ -38,21 +38,24 @@ const KINDS: OperationKind[] = ['expense', 'income', 'transfer'];
 
 export function loadOperations(
   data: EntityCollections,
+  sorting: Sorting,
   options: { today: DateString; month?: string | null; kind?: string | null; category?: string | null; query?: string | null },
 ): OperationsData {
   const month = parseMonth(options.month, monthOf(options.today));
-  const all = listOperations(data, { from: dateOf(month, 1), to: dateOf(month, daysInMonth(month)) });
+  const all = listOperations(data, { from: dateOf(month, 1), to: dateOf(month, daysInMonth(month)) }, sorting);
   const kind = KINDS.find((k) => k === options.kind);
   const filter: OperationFilter = { kind, category: options.category || undefined, query: options.query?.trim() || undefined };
   const withoutKind = filterOperations(all, { ...filter, kind: undefined });
-  const summary = summarizeMonth(data, { month, today: options.today });
+  const categories = spendingByCategory(all);
+  // Регулярные траты are not a ZenMoney category, so the title is looked up among the month's categories first.
+  const category = categories.find((c) => c.id !== null && c.id === filter.category);
   const tag = filter.category && filter.category !== 'none' ? data.tag?.find((t) => t.id === filter.category) : undefined;
 
   return {
     today: options.today,
     month,
     filter,
-    categoryTitle: filter.category === 'none' ? 'Без категории' : (tag?.title ?? (filter.category ? 'Категория' : null)),
+    categoryTitle: filter.category === 'none' ? 'Без категории' : (category?.title ?? tag?.title ?? (filter.category ? 'Категория' : null)),
     operations: filterOperations(withoutKind, { kind }),
     counts: {
       all: withoutKind.length,
@@ -60,8 +63,8 @@ export function loadOperations(
       income: withoutKind.filter((o) => o.kind === 'income').length,
       transfer: withoutKind.filter((o) => o.kind === 'transfer').length,
     },
-    categories: summary.categories,
-    expense: summary.expense,
+    categories,
+    expense: categories.reduce((sum, c) => sum + c.amount, 0),
     symbol: mainCurrency(data).symbol,
     userName: userName(data),
   };
@@ -92,7 +95,10 @@ export function renderOperations(d: OperationsData, href: Href): Html {
               { label: 'Все', href: to({ kind: null }), active: !d.filter.kind, count: d.counts.all },
               { label: 'Расходы', href: to({ kind: 'expense' }), active: d.filter.kind === 'expense', count: d.counts.expense },
               { label: 'Доходы', href: to({ kind: 'income' }), active: d.filter.kind === 'income', count: d.counts.income },
-              { label: 'Переводы', href: to({ kind: 'transfer' }), active: d.filter.kind === 'transfer', count: d.counts.transfer },
+              // Transfers within one bank are left out, so often there are none to show.
+              ...(d.counts.transfer > 0 || d.filter.kind === 'transfer'
+                ? [{ label: 'Переводы', href: to({ kind: 'transfer' }), active: d.filter.kind === 'transfer', count: d.counts.transfer }]
+                : []),
             ],
           }),
           searchField({ action: '/operations', name: 'q', value: d.filter.query, placeholder: 'Найти операцию', params: searchParams }),
@@ -142,7 +148,9 @@ function sentence(d: OperationsData): string {
   const income = d.operations.filter((o) => o.kind === 'income').reduce((s, o) => s + o.amount, 0);
   const parts = [expense > 0 ? `потрачено ${money(expense, d.symbol)}` : '', income > 0 ? `получено ${money(income, d.symbol)}` : ''].filter(Boolean);
   const head = `${count} ${plural(count, ['операция', 'операции', 'операций'])}`;
-  return parts.length ? `${head}: ${parts.join(', ')}.` : `${head}.`;
+  // The symbol may end with a dot of its own, as «руб.» does.
+  const text = parts.length ? `${head}: ${parts.join(', ')}` : head;
+  return text.endsWith('.') ? text : `${text}.`;
 }
 
 function feed(d: OperationsData): Html {
@@ -174,7 +182,7 @@ function feed(d: OperationsData): Html {
 
 function row(o: Operation, symbol: string): Html {
   const isTransfer = o.kind === 'transfer';
-  const category = o.category?.title ?? (o.kind === 'income' ? 'Доход' : isTransfer ? 'Перевод' : 'Без категории');
+  const category = o.regular?.title ?? o.category?.title ?? (o.kind === 'income' ? 'Доход' : isTransfer ? 'Перевод' : 'Без категории');
   return operationRow({
     title: o.payee,
     details: isTransfer ? `${o.account} → ${o.toAccount}` : `${category}, ${o.account}`,

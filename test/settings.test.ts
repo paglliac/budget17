@@ -95,6 +95,22 @@ describe('Settings', () => {
     assert.deepEqual([...settings.spendingMarks()], [['tx-2', 'outside']]);
   });
 
+  it('keeps categories picked for expenses and regular expenses they paid, and forgets them when taken back', () => {
+    using settings = new Settings(':memory:');
+    const rent = settings.addRegularExpense(regularInput({ title: 'Мастерская аренда', amount: 40_000, day: 10 }));
+
+    settings.categorize('tx-1', { tag: 'groceries' });
+    settings.categorize('tx-2', { regular: rent.id });
+    settings.categorize('tx-3', { tag: 'cafe' });
+    settings.categorize('tx-3', { regular: rent.id });
+    settings.categorize('tx-1', null);
+    assert.deepEqual([...settings.categorizations()], [['tx-2', { regular: rent.id }], ['tx-3', { regular: rent.id }]]);
+
+    settings.categorize('tx-4', { tag: 'cafe' });
+    settings.deleteRegularExpense(rent.id);
+    assert.deepEqual([...settings.categorizations()], [['tx-4', { tag: 'cafe' }]], 'deleting the expense unlinks its payments');
+  });
+
   it('keeps expenses in a file between runs', () => {
     const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
     try {

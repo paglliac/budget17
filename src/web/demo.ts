@@ -7,6 +7,8 @@ import type { Account, Budget, EntityCollections, ReminderMarker, Tag, Transacti
 const USER = 1;
 const USD = 1;
 const RUB = 2;
+/** The bank of the cards and the savings account, so transfers between them are left out as the user's are. */
+const TBANK = 4902;
 
 interface Spec {
   amount: number;
@@ -29,8 +31,10 @@ const RECURRING: Array<[number, Spec]> = [
   [6, { amount: 30_000, payee: 'Накопительный счёт', to: 'savings', comment: 'Откладываю' }],
   [7, { amount: 650, payee: 'Т-Мобайл', tag: 'phone', mcc: 4814 }],
   [9, { amount: 890, payee: 'МГТС', tag: 'phone', mcc: 4814, comment: 'Домашний интернет' }],
+  [10, { amount: 4_000, payee: 'Марина Б.', comment: 'За кружок' }],
   [12, { amount: 449, payee: 'Яндекс Плюс', tag: 'subs', mcc: 5815 }],
   [14, { amount: 12.99, payee: 'Steam', tag: 'fun', account: 'usd', instrument: USD, mcc: 5816 }],
+  [16, { amount: 2_300, payee: 'Алишер Ш.' }],
   [18, { amount: 299, payee: 'Telegram Premium', tag: 'subs', mcc: 5815 }],
   [20, { amount: 68_000, payee: 'ООО «Северный ветер»', tag: 'salary', income: true, comment: 'Аванс' }],
   [22, { amount: 149, payee: 'iCloud+', tag: 'subs', account: 'platinum', mcc: 5815 }],
@@ -165,12 +169,12 @@ export function demoCollections(today: string): EntityCollections {
     ],
     user: [{ id: USER, changed: 0, login: 'demo', currency: RUB, parent: null }],
     account: [
-      account('black', 'Т-Банк Black', 'ccard', 86_412.4),
-      account('platinum', 'Т-Банк Platinum', 'ccard', -18_740, { creditLimit: 150_000 }),
-      account('savings', 'Накопительный счёт', 'checking', 412_000, { savings: true }),
+      account('black', 'Т-Банк Black', 'ccard', 86_412.4, { company: TBANK }),
+      account('platinum', 'Т-Банк Platinum', 'ccard', -18_740, { company: TBANK, creditLimit: 150_000 }),
+      account('savings', 'Накопительный счёт', 'checking', 412_000, { company: TBANK, savings: true }),
       account('cash', 'Наличные', 'cash', 6_300),
       account('usd', 'Доллары', 'cash', 1_250, { instrument: USD }),
-      account('invest', 'Т-Инвестиции', 'checking', 238_500, { inBalance: false }),
+      account('invest', 'Т-Инвестиции', 'checking', 238_500, { company: TBANK, inBalance: false }),
     ],
     tag: [
       tag('food', 'Продукты', 0x4fae7f),

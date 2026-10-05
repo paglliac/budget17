@@ -20,7 +20,8 @@ const data: EntityCollections = {
     transaction({ date: '2026-09-30', outcome: 999, payee: 'Сентябрь' }),
   ],
 };
-const render = (options: Parameters<typeof loadOperations>[1]) => String(renderOperations(loadOperations(data, options), createHref()));
+const sorting = { categorizations: new Map(), regular: [] };
+const render = (options: Parameters<typeof loadOperations>[2]) => String(renderOperations(loadOperations(data, sorting, options), createHref()));
 
 describe('operations page', () => {
   it('lists the month by day with a summary, escaping payees', () => {
@@ -36,7 +37,7 @@ describe('operations page', () => {
   });
 
   it('filters by kind, category and text, keeping the other filters in links', () => {
-    const expenses = loadOperations(data, { today, kind: 'expense' });
+    const expenses = loadOperations(data, sorting, { today, kind: 'expense' });
     assert.deepEqual(expenses.operations.map((o) => o.payee), ['<i>Лавка</i>', 'Киоск']);
     assert.deepEqual(expenses.counts, { all: 4, expense: 2, income: 1, transfer: 1 });
 
@@ -48,12 +49,24 @@ describe('operations page', () => {
   });
 
   it('shows uncategorised operations under none and says when nothing is found', () => {
-    assert.deepEqual(loadOperations(data, { today, category: 'none' }).operations.map((o) => o.payee), ['Зарплата', 'Киоск']);
+    assert.deepEqual(loadOperations(data, sorting, { today, category: 'none' }).operations.map((o) => o.payee), ['Зарплата', 'Киоск']);
     assert.ok(render({ today, query: 'нет такого' }).includes('Ничего не нашлось'));
   });
 
+  it('counts categories picked in the app and leaves out transfers within one bank, with their tab', () => {
+    const tbank = { ...data, account: (data.account ?? []).map((a) => ({ ...a, company: 4902 })) };
+    const sorted = { categorizations: new Map([[data.transaction![2]!.id, { tag: food.id }]]), regular: [] };
+    const operations = loadOperations(tbank, sorted, { today });
+
+    assert.deepEqual(operations.counts, { all: 3, expense: 2, income: 1, transfer: 0 });
+    assert.deepEqual(operations.categories.map((c) => [c.title, c.amount]), [['Продукты', 1_500]]);
+    const page = String(renderOperations(operations, createHref()));
+    assert.ok(!page.includes('>Переводы<'));
+    assert.ok(page.includes('Продукты, Т-Банк'));
+  });
+
   it('ignores an unknown kind and a month in the future', () => {
-    const page = loadOperations(data, { today, kind: 'gift', month: '2027-01' });
+    const page = loadOperations(data, sorting, { today, kind: 'gift', month: '2027-01' });
     assert.equal(page.filter.kind, undefined);
     assert.equal(page.month, '2026-10');
   });

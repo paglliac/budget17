@@ -32,6 +32,7 @@ function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
     wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500 }],
     marks: new Map(marks),
     regular: [regular({ id: 7, title: 'Школа, ЛДК', amount: 45_000, day: 7 })],
+    categorizations: new Map(),
   };
 }
 
@@ -74,6 +75,15 @@ describe('dashboard', () => {
     assert.ok(purchase.includes('action="/purchases/1"') && purchase.includes('value="8000"'));
     assert.ok(purchase.includes('formaction="/purchases/1/move"') && purchase.includes('В дополнительные'));
     assert.ok(purchase.includes('formaction="/purchases/1/delete"'));
+  });
+
+  it('keeps a payment of a regular expense outside the week, naming the expense, with no way back into the week', () => {
+    const page = render({ edit: 'spending-transfer' }, { ...saved(), categorizations: new Map([['transfer', { regular: 7 }]]) });
+
+    assert.ok(page.includes('Можно потратить ещё 36 527 ₽.'));
+    assert.ok(page.includes('5 октября, Основной · Школа, ЛДК · вне бюджета'));
+    assert.ok(page.includes('action="/spending/transfer/extra"'));
+    assert.ok(!page.includes('action="/spending/transfer/week"') && !page.includes('action="/spending/transfer/outside"'));
   });
 
   it('shows the month as weeks, with extras and a form to plan one', () => {

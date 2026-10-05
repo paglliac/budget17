@@ -4,6 +4,7 @@
 // /spending (see submitDashboard), and the server sends the browser back to the page they came from.
 
 import { summarizeBalances } from '../../balances.ts';
+import type { Categorization } from '../../categorization.ts';
 import { addDays, type MonthString } from '../../dates.ts';
 import { amountText, parseAmount, parseTitle } from '../../input.ts';
 import { listOperations, type Operation } from '../../ledger.ts';
@@ -46,6 +47,8 @@ export interface SavedBudget {
   wishes: Wish[];
   marks: ReadonlyMap<string, Envelope>;
   regular: RegularExpense[];
+  /** Expenses linked to the regular expenses they paid count outside the budget. */
+  categorizations: ReadonlyMap<string, Categorization>;
 }
 
 export type FormField = 'title' | 'amount';
@@ -87,7 +90,7 @@ export function budgetOf(data: EntityCollections, saved: SavedBudget, options: {
   const current = weekOf(options.today);
   const monthStart = weeksOfMonth(monthOfWeek(current))[0] ?? current;
   const from = options.from && options.from < monthStart ? options.from : monthStart;
-  const expenses = listOperations(data, { from, to: addDays(current, 6) }).filter((o) => o.kind === 'expense');
+  const expenses = listOperations(data, { from, to: addDays(current, 6) }, saved).filter((o) => o.kind === 'expense');
   return { expenses, purchases: saved.purchases, marks: saved.marks, regular: saved.regular };
 }
 
@@ -433,20 +436,24 @@ function wishItem({ d, href, here }: Page, wish: Wish, advice: Advice): Html {
   });
 }
 
-/** Spending opens to show where it can be moved; it counts towards its week until moved. */
+/**
+ * Spending opens to show where it can be moved; it counts towards its week until moved. A payment of a regular
+ * expense is outside the budget unless moved, and it cannot go back to the week while it is linked.
+ */
 function spendingItem({ d, href, here }: Page, o: Operation): Html {
   const key = `spending-${o.id}`;
   const envelope = envelopeOf({ marks: d.marks }, o);
   const open = d.edit === key;
+  const moves = ENVELOPES.filter((e) => e !== envelope && !(e === 'week' && o.regular));
   return entryRow({
     title: o.payee,
-    details: `${dayMonth(o.date)}, ${o.account} · ${ENVELOPE_NAME[envelope]}`,
+    details: [`${dayMonth(o.date)}, ${o.account}`, o.regular?.title, ENVELOPE_NAME[envelope]].filter(Boolean).join(' · '),
     icon: o.category ? categoryIcon(o.category.title) : 'tag',
     color: categoryColor(o.category?.id ?? null, o.category?.color ?? null),
     amount: o.amount,
     symbol: d.symbol,
     href: open ? here() : here({ edit: key }),
-    actions: open ? ENVELOPES.filter((e) => e !== envelope).map((e) => ({ label: MOVE_TO[e], action: href(`/spending/${o.id}/${e}`) })) : [],
+    actions: open ? moves.map((e) => ({ label: MOVE_TO[e], action: href(`/spending/${o.id}/${e}`) })) : [],
   });
 }
 

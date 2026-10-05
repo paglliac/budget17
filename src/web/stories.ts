@@ -20,6 +20,7 @@ import {
   searchField,
   section,
   segmentedLinks,
+  selectField,
   shareBar,
 } from './widgets/basics.ts';
 import { monthCalendar } from './widgets/calendar.ts';
@@ -85,6 +86,23 @@ const kindLinks = segmentedLinks({
 const operationRows = [
   operationRow({ title: 'Пятёрочка', details: 'Продукты, Т-Банк Black', icon: 'cart', color: '#4FAE7F', kind: 'expense', amount: 1_247.9, symbol: '₽' }),
   operationRow({ title: 'Яндекс Go', details: 'Транспорт, Т-Банк Black', icon: 'bus', color: '#5B84F0', kind: 'expense', amount: 560, symbol: '₽', hold: true }),
+];
+
+const sortingGroups = [
+  {
+    label: 'Регулярные траты',
+    options: [
+      { value: 'regular-1', label: 'Офис аренда · 13 000 ₽' },
+      { value: 'regular-2', label: 'Мастерская аренда · 40 000 ₽' },
+    ],
+  },
+  {
+    label: 'Категории',
+    options: [
+      { value: 'tag-food', label: 'Продукты' },
+      { value: 'tag-cafe', label: 'Кафе и рестораны' },
+    ],
+  },
 ];
 
 const accountChips = new Html(
@@ -251,6 +269,21 @@ export const WIDGET_DOCS: WidgetDoc[] = [
     { name: 'Сумма', width: 160, props: { label: 'Сумма, ₽', name: 'amount', type: 'decimal', value: '13 000', width: 130 } },
     { name: 'Число с ошибкой', width: 160, props: { label: 'Число', name: 'day', type: 'integer', min: 1, max: 31, value: '32', width: 84, error: 'От 1 до 31' } },
     { name: 'Дата', width: 190, props: { label: 'Дата окончания', name: 'end', type: 'date', value: '2027-03-20', width: 160 } },
+  ]),
+  doc(selectField, {
+    group: 'Формы',
+    description: 'Выбор из списка с подписью, по группам, если в нём вещи разного рода. С подсказкой и без значения ничего не выбрано.',
+  }, [
+    {
+      name: 'Выбрано',
+      width: 420,
+      props: { label: 'Александр А. · 5 октября · 40 000 ₽', name: 'target', value: 'regular-2', required: true, groups: sortingGroups },
+    },
+    {
+      name: 'Ничего не выбрано',
+      width: 420,
+      props: { label: 'Куда отнести', name: 'target', placeholder: 'Категория или регулярная трата', required: true, groups: sortingGroups },
+    },
   ]),
   doc(iconPicker, {
     group: 'Формы',

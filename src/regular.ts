@@ -1,7 +1,7 @@
 // Regular expenses: payments that repeat every month on the same day, such as rent or a loan, optionally only
 // between a start and an end date. They are entered in the app rather than in ZenMoney and kept by src/settings.ts.
 
-import { addDays, clampedDate, monthOf, shiftMonth, type MonthString } from './dates.ts';
+import { addDays, clampedDate, daysBetween, monthOf, shiftMonth, type MonthString } from './dates.ts';
 import { amountText, parseAmount, parseDay, parseOptionalDate, parseTitle } from './input.ts';
 import { soonestFirst, type PlannedOperation } from './planned.ts';
 import type { DateString } from './zenmoney/types.ts';
@@ -40,6 +40,17 @@ export function nextPayment(expense: RegularSchedule, today: DateString): DateSt
   let date = clampedDate(monthOf(from), expense.day);
   if (date < from) date = clampedDate(shiftMonth(monthOf(from), 1), expense.day);
   return expense.end === null || date <= expense.end ? date : null;
+}
+
+/** The payment closest to `date` in its month or the months on either side; null when none of them has one. */
+export function nearestPayment(expense: RegularSchedule, date: DateString): DateString | null {
+  const month = monthOf(date);
+  let nearest: DateString | null = null;
+  for (const m of [shiftMonth(month, -1), month, shiftMonth(month, 1)]) {
+    const payment = paymentDate(expense, m);
+    if (payment !== null && (nearest === null || Math.abs(daysBetween(date, payment)) < Math.abs(daysBetween(date, nearest)))) nearest = payment;
+  }
+  return nearest;
 }
 
 /** Payments from today through the next `days` days as planned operations, soonest first. */

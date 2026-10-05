@@ -19,7 +19,7 @@ const today = '2026-10-06';
 const week = '2026-10-05';
 
 function spending(id: string, date: string, amount: number): Operation {
-  return { id, date, created: 0, kind: 'expense', amount, original: null, payee: id, comment: null, category: null, account: 'Основной', toAccount: null, hold: false };
+  return { id, date, created: 0, kind: 'expense', amount, original: null, payee: id, comment: null, category: null, regular: null, account: 'Основной', toAccount: null, hold: false };
 }
 
 function purchase(id: number, title: string, amount: number, overrides: Partial<Purchase> = {}): Purchase {
@@ -79,6 +79,14 @@ describe('summarizeWeek', () => {
     assert.equal(w.planned, 1_000);
     assert.equal(w.free, 43_527);
     assert.equal(w.spending.length, 2, 'moved spending is still listed under its week');
+  });
+
+  it('leaves out a payment of a regular expense unless it is moved, since regular expenses are outside the budget', () => {
+    const rent = { ...spending('transfer', '2026-10-05', 40_000), regular: { id: 1, title: 'Мастерская аренда' } };
+    const expenses = [spending('groceries', '2026-10-05', 473), rent];
+
+    assert.equal(summarizeWeek(budget({ expenses }), week).spent, 473);
+    assert.equal(summarizeExtras(budget({ expenses }, [['transfer', 'extra']]), '2026-10').spent, 40_000);
   });
 
   it('finds regular payments in a week that spans two months', () => {

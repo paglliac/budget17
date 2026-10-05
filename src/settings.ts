@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import type { Categorization } from './categorization.ts';
 import { isIncomeModel, type Income, type IncomeInput } from './income.ts';
 import type { RegularExpense, RegularExpenseInput } from './regular.ts';
 import type { Envelope, Purchase, PurchaseInput, Wish, WishInput } from './week.ts';
@@ -45,6 +46,14 @@ const SCHEMA = `
     transaction_id TEXT PRIMARY KEY,
     envelope TEXT NOT NULL CHECK (envelope IN ('extra', 'outside'))
   ) STRICT;
+
+  -- ZenMoney expenses that came without a category, put into one or linked to the regular expense they paid.
+  CREATE TABLE IF NOT EXISTS categorization (
+    transaction_id TEXT PRIMARY KEY,
+    tag_id TEXT,
+    regular_expense_id INTEGER,
+    CHECK ((tag_id IS NULL) <> (regular_expense_id IS NULL))
+  ) STRICT;
 `;
 
 /** Columns added after their table was created: databases made before them get them on open. */
@@ -55,8 +64,9 @@ const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> 
 ];
 
 /**
- * What the user sets up in the app itself: regular expenses, incomes, the weeks' purchases, wishes and where
- * spending counts. It lives in its own SQLite file, apart from the ZenMoney copy, so make resync never deletes it.
+ * What the user sets up in the app itself: regular expenses, incomes, the weeks' purchases, wishes, where spending
+ * counts and the categories of expenses that came without one. It lives in its own SQLite file, apart from the
+ * ZenMoney copy, so make resync never deletes it.
  */
 export class Settings {
   readonly #db: DatabaseSync;
@@ -107,9 +117,18 @@ export class Settings {
     return Number(changes) > 0;
   }
 
-  /** False when there is no such expense. */
+  /** False when there is no such expense. The expenses linked to it are left without a category again. */
   deleteRegularExpense(id: number): boolean {
-    return Number(this.#db.prepare('DELETE FROM regular_expense WHERE id = ?').run(id).changes) > 0;
+    this.#db.exec('BEGIN');
+    try {
+      this.#db.prepare('DELETE FROM categorization WHERE regular_expense_id = ?').run(id);
+      const deleted = Number(this.#db.prepare('DELETE FROM regular_expense WHERE id = ?').run(id).changes) > 0;
+      this.#db.exec('COMMIT');
+      return deleted;
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   /** Incomes by title; those of a model the app no longer has are left out. */
@@ -241,6 +260,33 @@ export class Settings {
         .prepare('INSERT INTO spending_mark (transaction_id, envelope) VALUES (?, ?) ON CONFLICT (transaction_id) DO UPDATE SET envelope = excluded.envelope')
         .run(transactionId, envelope);
     }
+  }
+
+  /** Where the user put expenses that came without a category, by ZenMoney transaction id. */
+  categorizations(): Map<string, Categorization> {
+    return new Map(
+      this.#db
+        .prepare('SELECT transaction_id, tag_id, regular_expense_id FROM categorization')
+        .all()
+        .map((row): [string, Categorization] => [
+          String(row.transaction_id),
+          row.tag_id === null ? { regular: Number(row.regular_expense_id) } : { tag: String(row.tag_id) },
+        ]),
+    );
+  }
+
+  /** Puts an expense into a category or links it to a regular expense; null leaves it without a category again. */
+  categorize(transactionId: string, categorization: Categorization | null): void {
+    if (categorization === null) {
+      this.#db.prepare('DELETE FROM categorization WHERE transaction_id = ?').run(transactionId);
+      return;
+    }
+    const [tag, regular] = 'tag' in categorization ? [categorization.tag, null] : [null, categorization.regular];
+    this.#db
+      .prepare(
+        'INSERT INTO categorization (transaction_id, tag_id, regular_expense_id) VALUES (?, ?, ?) ON CONFLICT (transaction_id) DO UPDATE SET tag_id = excluded.tag_id, regular_expense_id = excluded.regular_expense_id',
+      )
+      .run(transactionId, tag, regular);
   }
 
   [Symbol.dispose](): void {

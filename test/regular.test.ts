@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { nextPayment, parseRegularExpense, paymentDate, regularTotals, regularValues, upcomingRegular, type RegularValues } from '../src/regular.ts';
+import { nearestPayment, nextPayment, parseRegularExpense, paymentDate, regularTotals, regularValues, upcomingRegular, type RegularValues } from '../src/regular.ts';
 import { regular } from './fixtures.ts';
 
 const today = '2026-10-05';
@@ -38,6 +38,14 @@ describe('regular expenses', () => {
     assert.equal(nextPayment(loan, '2027-03-25'), '2027-03-25');
     assert.equal(nextPayment(loan, '2027-03-26'), null, 'over');
     assert.equal(nextPayment(monthly(4, null, '2026-10-31'), today), null, 'the last one has passed');
+  });
+
+  it('find the payment nearest to a date in its month or the months around it', () => {
+    assert.equal(nearestPayment(monthly(26), '2026-09-18'), '2026-09-26');
+    assert.equal(nearestPayment(monthly(3), '2026-09-28'), '2026-10-03');
+    assert.equal(nearestPayment(monthly(30), '2026-10-02'), '2026-09-30');
+    assert.equal(nearestPayment(monthly(5, '2026-11-01'), '2026-10-05'), '2026-11-05');
+    assert.equal(nearestPayment(monthly(5, null, '2026-06-30'), '2026-10-05'), null);
   });
 
   it('become planned expenses within the window, every month they fall in', () => {

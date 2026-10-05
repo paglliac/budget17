@@ -1,8 +1,8 @@
-// Web UI on localhost: the week's budget at /, operations at /operations, incomes at /income, regular expenses at
-// /regular, the widget storyboard at /storyboard. Reads the local ZenMoney copy (data/zenmoney.db) and syncs it on
-// start and on POST /sync when ZENMONEY_TOKEN is set. Without a local copy, or with ?demo, it shows demo data.
-// Purchases, wishes, spending marks, incomes and regular expenses are the app's own data (data/settings.db),
-// so demo mode leaves them as they are.
+// Web UI on localhost: the week's budget at /, operations at /operations, expenses without a category at
+// /uncategorized, incomes at /income, regular expenses at /regular, the widget storyboard at /storyboard. Reads the
+// local ZenMoney copy (data/zenmoney.db) and syncs it on start and on POST /sync when ZENMONEY_TOKEN is set. Without
+// a local copy, or with ?demo, it shows demo data. Purchases, wishes, spending marks, categories picked in the app,
+// incomes and regular expenses are the app's own data (data/settings.db), so demo mode leaves them as they are.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -22,6 +22,7 @@ import { loadIncome, renderIncome, submitIncome } from './pages/income.ts';
 import { loadOperations, renderOperations } from './pages/operations.ts';
 import { loadRegular, renderRegular, submitRegular } from './pages/regular.ts';
 import { renderStoryboard } from './pages/storyboard.ts';
+import { loadUncategorized, renderUncategorized, submitUncategorized, type SavedSorting } from './pages/uncategorized.ts';
 import { WIDGET_DOCS } from './stories.ts';
 
 const DB_PATH = fileURLToPath(new URL('../../data/zenmoney.db', import.meta.url));
@@ -47,8 +48,12 @@ function loadSettings<T>(read: (settings: Settings) => T): T {
   return read(settings);
 }
 
+function savedSorting(settings: Settings): SavedSorting {
+  return { categorizations: settings.categorizations(), regular: settings.regularExpenses() };
+}
+
 function savedBudget(settings: Settings): SavedBudget {
-  return { purchases: settings.purchases(), wishes: settings.wishes(), marks: settings.spendingMarks(), regular: settings.regularExpenses() };
+  return { purchases: settings.purchases(), wishes: settings.wishes(), marks: settings.spendingMarks(), ...savedSorting(settings) };
 }
 
 /** The page a form was sent from, without the entry it had open, so saving closes the form. */
@@ -141,6 +146,18 @@ createServer(async (request, response) => {
       }
       return;
     }
+    if (request.method === 'POST' && url.pathname.startsWith('/uncategorized/')) {
+      const body = await readForm(request);
+      using settings = new Settings(SETTINGS_PATH);
+      const result = submitUncategorized(settings, loadCollections(demo, today), url.pathname, body);
+      const back = backTo(request);
+      if (result.status === 'saved') {
+        response.writeHead(303, { location: `${back.pathname}${back.search}` }).end();
+      } else {
+        send(response, 404, 'text/plain', 'Такой траты, категории или регулярной траты нет');
+      }
+      return;
+    }
     if (request.method === 'POST' && url.pathname.startsWith('/regular')) {
       const body = await readForm(request);
       using settings = new Settings(SETTINGS_PATH);
@@ -178,7 +195,7 @@ createServer(async (request, response) => {
         send(response, 200, 'text/html', dashboardPage(loadCollections(demo, today), loadSettings(savedBudget), params, today, demo, href));
         return;
       case '/operations': {
-        const operations = loadOperations(loadCollections(demo, today), {
+        const operations = loadOperations(loadCollections(demo, today), loadSettings(savedSorting), {
           today,
           month: params.get('month'),
           kind: params.get('kind'),
@@ -186,6 +203,15 @@ createServer(async (request, response) => {
           query: params.get('q'),
         });
         send(response, 200, 'text/html', renderOperations(operations, href).toString());
+        return;
+      }
+      case '/uncategorized': {
+        const page = loadUncategorized(loadCollections(demo, today), loadSettings(savedSorting), {
+          today,
+          month: params.get('month'),
+          edit: params.get('edit'),
+        });
+        send(response, 200, 'text/html', renderUncategorized(page, href).toString());
         return;
       }
       case '/regular': {
@@ -217,10 +243,11 @@ createServer(async (request, response) => {
     send(response, 500, 'text/html', `<p>Не удалось показать страницу: ${escape(message)}</p>`);
   }
 }).listen(PORT, () => {
-  console.log(`Обзор:      http://localhost:${PORT}/`);
-  console.log(`Операции:   http://localhost:${PORT}/operations`);
-  console.log(`Доходы:     http://localhost:${PORT}/income`);
-  console.log(`Регулярные: http://localhost:${PORT}/regular`);
-  console.log(`Виджеты:    http://localhost:${PORT}/storyboard`);
+  console.log(`Обзор:         http://localhost:${PORT}/`);
+  console.log(`Операции:      http://localhost:${PORT}/operations`);
+  console.log(`Без категории: http://localhost:${PORT}/uncategorized`);
+  console.log(`Доходы:        http://localhost:${PORT}/income`);
+  console.log(`Регулярные:    http://localhost:${PORT}/regular`);
+  console.log(`Виджеты:       http://localhost:${PORT}/storyboard`);
   if (!existsSync(DB_PATH)) console.log('Локальной копии ZenMoney нет, показываю демо-данные. Запустите make sync.');
 });
