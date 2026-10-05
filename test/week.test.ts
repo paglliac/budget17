@@ -89,6 +89,14 @@ describe('summarizeWeek', () => {
     assert.equal(summarizeExtras(budget({ expenses }, [['transfer', 'extra']]), '2026-10').spent, 40_000);
   });
 
+  it('finds the expenses that paid a regular payment, even in an earlier week, but not those of another month', () => {
+    const rent = regular({ id: 1, title: 'Мастерская аренда', amount: 40_000, day: 10 });
+    const paid = (id: string, date: string) => ({ ...spending(id, date, 40_000), regular: { id: 1, title: 'Мастерская аренда' } });
+    const w = summarizeWeek(budget({ regular: [rent], expenses: [paid('october', '2026-10-02'), paid('september', '2026-09-09')] }), week);
+
+    assert.deepEqual(w.regular.map((r) => [r.date, r.paid.map((o) => o.id)]), [['2026-10-10', ['october']]]);
+  });
+
   it('finds regular payments in a week that spans two months', () => {
     const w = summarizeWeek(budget({ regular: [regular({ id: 1, title: 'Связь', amount: 600, day: 1 }), regular({ id: 2, title: 'Аренда', amount: 30_000, day: 30 })] }), '2026-09-28');
 

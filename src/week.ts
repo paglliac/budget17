@@ -5,7 +5,7 @@
 
 import { addDays, monthOf, weekday, type MonthString } from './dates.ts';
 import type { Operation } from './ledger.ts';
-import { paymentDate, type RegularExpense } from './regular.ts';
+import { nearestPayment, paymentDate, type RegularExpense } from './regular.ts';
 import type { DateString } from './zenmoney/types.ts';
 
 /** Ordinary spending allowed in a week. */
@@ -86,8 +86,11 @@ export interface WeekSummary {
   /** All expenses of the week, whatever they count towards, newest first. */
   spending: Operation[];
   purchases: Purchase[];
-  /** Regular payments that fall on the week; they are outside the budget. */
-  regular: Array<{ expense: RegularExpense; date: DateString }>;
+  /**
+   * Regular payments that fall on the week; they are outside the budget. `paid` are the expenses linked to the regular
+   * expense whose nearest payment is this one, newest first, even when they came in an earlier week.
+   */
+  regular: Array<{ expense: RegularExpense; date: DateString; paid: Operation[] }>;
 }
 
 export function summarizeWeek(budget: Budget, week: DateString): WeekSummary {
@@ -100,7 +103,9 @@ export function summarizeWeek(budget: Budget, week: DateString): WeekSummary {
     .filter((month, i, months) => months.indexOf(month) === i)
     .flatMap((month) => budget.regular.flatMap((expense) => {
       const date = paymentDate(expense, month);
-      return date !== null && date >= week && date <= end ? [{ expense, date }] : [];
+      if (date === null || date < week || date > end) return [];
+      const paid = budget.expenses.filter((o) => o.regular?.id === expense.id && nearestPayment(expense, o.date) === date);
+      return [{ expense, date, paid }];
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
   return { week, spent, planned, free: WEEK_LIMIT - spent - planned, spending, purchases, regular };

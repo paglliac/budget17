@@ -86,6 +86,15 @@ describe('dashboard', () => {
     assert.ok(!page.includes('action="/spending/transfer/week"') && !page.includes('action="/spending/transfer/outside"'));
   });
 
+  it('marks a regular payment of the week paid once linked expenses cover it, and says how much when they do not', () => {
+    const linked = (ids: string[]) => ({ ...saved(), categorizations: new Map(ids.map((id) => [id, { regular: 7 }] as const)) });
+    const school = (page: string) => /<b>Школа, ЛДК<\/b><small>([^<]*)<\/small>/.exec(page)?.[1];
+
+    assert.equal(school(render({}, linked(['groceries']))), 'оплачено 473 ₽ из 45 000 ₽ · 7 октября');
+    assert.equal(school(render({}, linked(['groceries', 'transfer', 'last-week']))), 'оплачено 5 октября · вне бюджета', 'the latest of them');
+    assert.equal(school(render()), 'регулярная, вне бюджета · 7 октября');
+  });
+
   it('shows the month as weeks, with extras and a form to plan one', () => {
     const page = render({ view: 'month' }, saved([['last-week', 'extra']]));
 

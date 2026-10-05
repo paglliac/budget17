@@ -85,12 +85,15 @@ export interface DashboardData {
   canSync: boolean;
 }
 
-/** The figures' input: expenses from the earliest week that can be shown through the current one. */
+/**
+ * The figures' input: expenses from the earliest week that can be shown through the current one, and a month before
+ * it, so that a regular payment made early is found as paid.
+ */
 export function budgetOf(data: EntityCollections, saved: SavedBudget, options: { today: DateString; from?: DateString }): Budget {
   const current = weekOf(options.today);
   const monthStart = weeksOfMonth(monthOfWeek(current))[0] ?? current;
   const from = options.from && options.from < monthStart ? options.from : monthStart;
-  const expenses = listOperations(data, { from, to: addDays(current, 6) }, saved).filter((o) => o.kind === 'expense');
+  const expenses = listOperations(data, { from: addDays(from, -31), to: addDays(current, 6) }, saved).filter((o) => o.kind === 'expense');
   return { expenses, purchases: saved.purchases, marks: saved.marks, regular: saved.regular };
 }
 
@@ -276,17 +279,7 @@ function weekView(page: Page): { main: Html[]; side: Html[] } {
           label: 'План на неделю',
           items: [
             ...w.purchases.map((p) => purchaseItem(page, p)),
-            ...w.regular.map(({ expense, date }) =>
-              entryRow({
-                title: expense.title,
-                details: `регулярная, вне бюджета · ${dayMonth(date)}`,
-                icon: entryIcon(expense.icon, expense.title),
-                color: toneColor('gray'),
-                amount: expense.amount,
-                symbol: d.symbol,
-                href: href('/regular', { edit: String(expense.id) }),
-              }),
-            ),
+            ...w.regular.map((payment) => regularItem(page, payment)),
             newPurchaseForm(page, w.week, 'week'),
           ],
         }),
@@ -433,6 +426,27 @@ function wishItem({ d, href, here }: Page, wish: Wish, advice: Advice): Html {
     symbol: d.symbol,
     href: here({ edit: key }),
     actions: adviceTarget(advice) ? [{ label: 'Запланировать', action: href(`/wishes/${wish.id}/plan`) }] : [],
+  });
+}
+
+/** A regular payment of the week, marked paid once expenses linked to it cover it, or showing how much they cover. */
+function regularItem({ d, href }: Page, { expense, date, paid }: WeekSummary['regular'][number]): Html {
+  const covered = paid.reduce((total, o) => total + o.amount, 0);
+  const done = paid.length > 0 && covered >= expense.amount - 0.005;
+  const status =
+    paid.length === 0
+      ? `регулярная, вне бюджета · ${dayMonth(date)}`
+      : done
+        ? `оплачено ${dayMonth(paid[0]!.date)} · вне бюджета`
+        : `оплачено ${money(covered, d.symbol)} из ${money(expense.amount, d.symbol)} · ${dayMonth(date)}`;
+  return entryRow({
+    title: expense.title,
+    details: status,
+    icon: done ? 'check' : entryIcon(expense.icon, expense.title),
+    color: toneColor(done ? 'green' : 'gray'),
+    amount: expense.amount,
+    symbol: d.symbol,
+    href: href('/regular', { edit: String(expense.id) }),
   });
 }
 
