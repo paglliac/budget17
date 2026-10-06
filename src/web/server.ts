@@ -162,13 +162,16 @@ createServer(async (request, response) => {
       const body = await readForm(request);
       using settings = new Settings(SETTINGS_PATH);
       const result = submitRegular(settings, url.pathname, body);
+      // PROTOTYPE: the variant shown stays after saving.
+      const variant = backTo(request).searchParams.get('variant');
+      const regularHref = createHref({ ...(params.has('demo') ? { demo: '1' } : {}), ...(variant ? { variant } : {}) });
       if (result.status === 'saved') {
-        response.writeHead(303, { location: href('/regular') }).end();
+        response.writeHead(303, { location: regularHref('/regular') }).end();
       } else if (result.status === 'missing') {
         send(response, 404, 'text/plain', 'Такой регулярной траты нет');
       } else {
-        const page = loadRegular(loadCollections(demo, today), settings.regularExpenses(), { today, form: result.form });
-        send(response, 422, 'text/html', renderRegular(page, href).toString());
+        const page = loadRegular(loadCollections(demo, today), savedSorting(settings), { today, form: result.form, variant });
+        send(response, 422, 'text/html', renderRegular(page, regularHref).toString());
       }
       return;
     }
@@ -215,8 +218,11 @@ createServer(async (request, response) => {
         return;
       }
       case '/regular': {
-        const page = loadRegular(loadCollections(demo, today), loadSettings((s) => s.regularExpenses()), { today, edit: params.get('edit') });
-        send(response, 200, 'text/html', renderRegular(page, href).toString());
+        // PROTOTYPE: links of the page keep the variant shown.
+        const variant = params.get('variant');
+        const regularHref = createHref({ ...(params.has('demo') ? { demo: '1' } : {}), ...(variant ? { variant } : {}) });
+        const page = loadRegular(loadCollections(demo, today), loadSettings(savedSorting), { today, edit: params.get('edit'), variant });
+        send(response, 200, 'text/html', renderRegular(page, regularHref).toString());
         return;
       }
       case '/income': {

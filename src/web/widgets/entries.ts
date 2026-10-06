@@ -25,6 +25,8 @@ export function entryRow(options: {
   symbol: string;
   href?: string;
   actions?: Array<{ label: string; action: string }>;
+  /** Quieter text, for an entry that is behind, such as a payment already made. */
+  muted?: boolean;
 }): Html {
   const inner = html`
     <span class="entry-icon">${icon(options.icon, 16)}</span>
@@ -32,7 +34,7 @@ export function entryRow(options: {
     <b class="entry-amount">${money(options.amount, options.symbol)}</b>`;
   const actions = options.actions ?? [];
   return html`
-    <li class="entry">
+    <li class="entry${options.muted ? ' muted' : ''}">
       ${options.href
         ? html`<a class="entry-row" href="${options.href}" style="--color:${options.color}" title="Изменить">${inner}<span class="entry-edit">${icon('pencil', 14)}</span></a>`
         : html`<div class="entry-row" style="--color:${options.color}">${inner}</div>`}
@@ -42,6 +44,11 @@ export function entryRow(options: {
           )}</span>`
         : null}
     </li>`;
+}
+
+/** A line between entries with its label, such as today between payments made and to come. */
+export function entryDivider(options: { label: string }): Html {
+  return html`<li class="entry-divider" role="separator"><span>${options.label}</span></li>`;
 }
 
 /**

@@ -14,7 +14,7 @@ const expenses = [
   regular({ id: 3, title: '<b>Офис</b> аренда', amount: 13_000, day: 25 }),
 ];
 const render = (options: Parameters<typeof loadRegular>[2], list = expenses) =>
-  String(renderRegular(loadRegular(data, list, options), createHref())).replaceAll('\u00a0', ' ');
+  String(renderRegular(loadRegular(data, { categorizations: new Map(), regular: list }, options), createHref())).replaceAll('\u00a0', ' ');
 const form = (fields: Record<string, string>) => new URLSearchParams(fields);
 
 describe('regular expenses page', () => {
@@ -22,7 +22,7 @@ describe('regular expenses page', () => {
     const page = render({ today });
 
     assert.ok(page.includes('В октябре на них уходит 105 500 ₽. Осталось заплатить 104 000 ₽, ближайший платёж — «Машина», сегодня.'));
-    assert.ok(page.includes('2-го числа · через 28 дней'));
+    assert.ok(page.includes('2-го числа · прошёл 2 октября'));
     assert.ok(page.includes('25-го числа · через 20 дней'));
     assert.ok(page.includes('&lt;b&gt;Офис&lt;/b&gt; аренда'));
     assert.ok(!page.includes('<b>Офис</b>'));

@@ -25,7 +25,7 @@ import {
 } from './widgets/basics.ts';
 import { monthCalendar } from './widgets/calendar.ts';
 import { categoryTile, paymentCard, statCard } from './widgets/cards.ts';
-import { entryForm, entryList, entryRow } from './widgets/entries.ts';
+import { entryDivider, entryForm, entryList, entryRow } from './widgets/entries.ts';
 import { categoryList, dayGroup, operationRow } from './widgets/operations.ts';
 import { appShell, grid, rail, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
 
@@ -423,6 +423,11 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       },
     },
     {
+      name: 'Приглушённая',
+      width: 520,
+      props: { title: 'Интернет', details: '1-го числа · прошёл 1 октября', icon: 'phone', color: 'var(--gray)', amount: 1_100, symbol: '₽', href: '#', muted: true },
+    },
+    {
       name: 'Без правки, с выбором',
       width: 520,
       props: {
@@ -544,6 +549,14 @@ export const WIDGET_DOCS: WidgetDoc[] = [
           }),
         ],
       },
+    },
+  ]),
+
+  doc(entryDivider, { group: 'Настройка', description: 'Черта между записями с подписью, например сегодняшний день между прошедшими и предстоящими платежами.' }, [
+    {
+      name: 'Сегодня',
+      width: 520,
+      props: { label: 'Сегодня, 6 октября' },
     },
   ]),
 
