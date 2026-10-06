@@ -97,6 +97,7 @@ function dashboardPage(
     today,
     view: params.get('view'),
     week: params.get('week'),
+    month: params.get('month'),
     edit: params.get('edit'),
     form,
     source: demo ? 'demo' : 'zenmoney',
