@@ -83,16 +83,19 @@ describe('Settings', () => {
     assert.equal(settings.planWish(styler.id, { week: '2026-10-05', envelope: 'week' }), null);
   });
 
-  it('remembers spending moved out of its week, and forgets it when moved back', () => {
+  it('remembers spending moved out of its week or not counted at all, and forgets it when moved back', () => {
     using settings = new Settings(':memory:');
 
     settings.markSpending('tx-1', 'extra');
     settings.markSpending('tx-2', 'outside');
     settings.markSpending('tx-1', 'outside');
-    assert.deepEqual([...settings.spendingMarks()], [['tx-1', 'outside'], ['tx-2', 'outside']]);
+    settings.markSpending('tx-3', 'ignored');
+    assert.deepEqual(settings.spendingMarks(), new Map([['tx-1', 'outside'], ['tx-2', 'outside'], ['tx-3', 'ignored']]));
 
     settings.markSpending('tx-1', 'week');
-    assert.deepEqual([...settings.spendingMarks()], [['tx-2', 'outside']]);
+    settings.markSpending('tx-2', 'ignored');
+    settings.markSpending('tx-3', 'extra');
+    assert.deepEqual(settings.spendingMarks(), new Map([['tx-2', 'ignored'], ['tx-3', 'extra']]));
   });
 
   it('keeps categories picked for expenses and regular expenses they paid, and forgets them when taken back', () => {
@@ -109,6 +112,59 @@ describe('Settings', () => {
     settings.categorize('tx-4', { tag: 'cafe' });
     settings.deleteRegularExpense(rent.id);
     assert.deepEqual([...settings.categorizations()], [['tx-4', { tag: 'cafe' }]], 'deleting the expense unlinks its payments');
+  });
+
+  it('links expenses to purchases apart from their categories, and unlinks them when the purchase goes', () => {
+    using settings = new Settings(':memory:');
+    const rent = settings.addRegularExpense(regularInput({ title: 'Аренда', amount: 40_000, day: 10 }));
+    const shoes = settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-10-05', envelope: 'week', done: false });
+
+    settings.categorize('tx-1', { tag: 'shoes' });
+    settings.linkPurchase('tx-1', shoes.id);
+    settings.categorize('tx-2', { regular: rent.id });
+    settings.linkPurchase('tx-2', shoes.id);
+    assert.deepEqual([...settings.categorizations()], [['tx-1', { tag: 'shoes' }]], 'a purchase replaces a regular expense, not a category');
+    assert.deepEqual([...settings.purchasePayments()], [['tx-1', shoes.id], ['tx-2', shoes.id]]);
+
+    settings.categorize('tx-2', { regular: rent.id });
+    assert.deepEqual([...settings.purchasePayments()], [['tx-1', shoes.id]], 'a regular expense replaces a purchase');
+    settings.deletePurchase(shoes.id);
+    assert.deepEqual([...settings.purchasePayments()], []);
+  });
+
+  it('renames and hides ZenMoney categories, and keeps the user’s own', () => {
+    using settings = new Settings(':memory:');
+
+    settings.renameCategory('groceries', 'Продукты');
+    settings.hideCategory('correction', true);
+    settings.hideCategory('groceries', false);
+    const kids = settings.addOwnCategory('Дети');
+    settings.addOwnCategory('Бассейн');
+    assert.deepEqual(settings.categorySetup(), {
+      changes: new Map([
+        ['groceries', { title: 'Продукты', hidden: false }],
+        ['correction', { title: null, hidden: true }],
+      ]),
+      own: [
+        { id: 'own-2', title: 'Бассейн', hidden: false },
+        { id: 'own-1', title: 'Дети', hidden: false },
+      ],
+    });
+
+    settings.renameCategory('groceries', null);
+    assert.equal(settings.renameCategory(kids.id, 'Савва'), true);
+    assert.equal(settings.renameCategory(kids.id, null), false, 'an own category needs a title');
+    assert.equal(settings.hideCategory(kids.id, true), true);
+    assert.deepEqual(settings.categorySetup().changes.get('groceries'), { title: null, hidden: false });
+    assert.deepEqual(settings.categorySetup().own.find((c) => c.id === kids.id), { id: kids.id, title: 'Савва', hidden: true });
+
+    settings.categorize('tx-1', { tag: kids.id });
+    settings.categorize('tx-2', { tag: 'groceries' });
+    assert.equal(settings.deleteOwnCategory(kids.id), true);
+    assert.deepEqual([...settings.categorizations()], [['tx-2', { tag: 'groceries' }]], 'its expenses are left without a category');
+    assert.equal(settings.deleteOwnCategory(kids.id), false);
+    assert.equal(settings.deleteOwnCategory('groceries'), false, 'a ZenMoney category is not deleted');
+    assert.equal(settings.addOwnCategory('Дети').id, 'own-3', 'ids are not reused');
   });
 
   it('keeps expenses in a file between runs', () => {
@@ -147,6 +203,31 @@ describe('Settings', () => {
       }
       using settings = new Settings(path);
       assert.equal(settings.regularExpenses()[0]?.end, '2027-05-31', 'opening it again changes nothing');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('adds purchase links and categories to a file made before them, keeping how expenses were sorted', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
+    try {
+      const path = join(dir, 'settings.db');
+      {
+        using db = new DatabaseSync(path);
+        db.exec(`CREATE TABLE categorization (
+          transaction_id TEXT PRIMARY KEY,
+          tag_id TEXT,
+          regular_expense_id INTEGER,
+          CHECK ((tag_id IS NULL) <> (regular_expense_id IS NULL))
+        ) STRICT`);
+        db.exec(`INSERT INTO categorization (transaction_id, tag_id) VALUES ('tx-1', 'cafe')`);
+      }
+      using settings = new Settings(path);
+      assert.deepEqual([...settings.categorizations()], [['tx-1', { tag: 'cafe' }]]);
+      settings.linkPurchase('tx-1', 1);
+      settings.renameCategory('cafe', 'Кафе');
+      assert.deepEqual([...settings.purchasePayments()], [['tx-1', 1]]);
+      assert.equal(settings.categorySetup().changes.get('cafe')?.title, 'Кафе');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

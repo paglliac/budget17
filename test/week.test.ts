@@ -4,6 +4,7 @@ import type { Operation } from '../src/ledger.ts';
 import {
   adviceTarget,
   adviseWish,
+  envelopeOf,
   monthOfWeek,
   summarizeExtras,
   summarizeWeek,
@@ -19,7 +20,7 @@ const today = '2026-10-06';
 const week = '2026-10-05';
 
 function spending(id: string, date: string, amount: number): Operation {
-  return { id, date, created: 0, kind: 'expense', amount, original: null, payee: id, comment: null, category: null, regular: null, account: 'Основной', toAccount: null, hold: false };
+  return { id, date, created: 0, kind: 'expense', amount, original: null, payee: id, originalPayee: null, comment: null, category: null, zenmoneyCategory: null, regular: null, purchase: null, account: 'Основной', toAccount: null, hold: false, ignored: false };
 }
 
 function purchase(id: number, title: string, amount: number, overrides: Partial<Purchase> = {}): Purchase {
@@ -101,6 +102,36 @@ describe('summarizeWeek', () => {
     const w = summarizeWeek(budget({ regular: [regular({ id: 1, title: 'Связь', amount: 600, day: 1 }), regular({ id: 2, title: 'Аренда', amount: 30_000, day: 30 })] }), '2026-09-28');
 
     assert.deepEqual(w.regular.map((r) => r.date), ['2026-09-30', '2026-10-01']);
+  });
+});
+
+describe('purchases paid by linked spending', () => {
+  const linked = (id: string, date: string, amount: number, purchaseId: number) => ({ ...spending(id, date, amount), purchase: { id: purchaseId, title: '' } });
+
+  it('take what they paid out of the plan, and buy a purchase once they cover it', () => {
+    const expenses = [linked('groceries', '2026-10-05', 473, 3), linked('pass', '2026-10-06', 1_000, 5), spending('transfer', '2026-10-05', 40_000)];
+    const w = summarizeWeek(budget({ expenses }), week);
+
+    assert.equal(w.spent, 41_473, 'they still count as spent in the week');
+    assert.equal(w.planned, 22_000 - 473 - 1_000);
+    assert.deepEqual(
+      w.purchases.filter((p) => p.paid.length > 0).map((p) => [p.purchase.title, p.covered, p.bought, p.left]),
+      [
+        ['Продукты', 473, false, 2_527],
+        ['Проезд', 1_000, true, 0],
+      ],
+    );
+  });
+
+  it('count where the purchase does, unless moved', () => {
+    const jacket = purchase(9, 'Куртка', 20_000, { envelope: 'extra' });
+    const expenses = [linked('transfer', '2026-10-05', 18_000, 9), spending('groceries', '2026-10-05', 473)];
+    const b = budget({ expenses, purchases: [jacket] });
+
+    assert.equal(summarizeWeek(b, week).spent, 473);
+    assert.deepEqual([summarizeExtras(b, '2026-10').spent, summarizeExtras(b, '2026-10').planned], [18_000, 2_000]);
+    assert.equal(envelopeOf(b, expenses[0]!), 'extra');
+    assert.equal(envelopeOf({ ...b, marks: new Map([['transfer', 'outside']]) }, expenses[0]!), 'outside');
   });
 });
 

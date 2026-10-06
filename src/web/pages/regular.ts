@@ -210,6 +210,7 @@ const STATUS_TONE = { paid: 'green', past: 'gray', ahead: 'teal' } as const sati
 /** A row of the list; what is behind is quieter, and a paid one gets a check. */
 function row(e: RegularExpense, status: MonthStatus, d: RegularData, href: Href): Html {
   return entryRow({
+    id: `regular-${e.id}`,
     title: e.title,
     details: details(e, status, d),
     icon: status.kind === 'paid' ? 'check' : entryIcon(e.icon, e.title),
@@ -233,6 +234,7 @@ function details(e: RegularExpense, status: MonthStatus, d: RegularData): string
 
 function editForm(e: RegularExpense, form: RegularForm, symbol: string, href: Href): Html {
   return entryForm({
+    id: `regular-${e.id}`,
     action: href(`/regular/${e.id}`),
     submitLabel: 'Сохранить',
     icon: entryIcon(e.icon, e.title),

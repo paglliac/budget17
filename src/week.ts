@@ -1,7 +1,7 @@
 // The budget by weeks: a limit for ordinary spending each week, a limit for extras each month, purchases planned
 // into weeks, and when a wish fits. Spending from ZenMoney counts towards its week unless it is marked as extras
-// or as outside the budget, or it paid a regular expense. Pure functions; what the user plans and marks is kept by
-// src/settings.ts.
+// or as outside the budget, or it paid a regular expense or an extra purchase. Spending linked to a purchase takes
+// its amount out of the plan. Pure functions; what the user plans and marks is kept by src/settings.ts.
 
 import { addDays, monthOf, weekday, type MonthString } from './dates.ts';
 import type { Operation } from './ledger.ts';
@@ -15,8 +15,12 @@ export const MONTH_LIMIT = 100_000;
 /** How many weeks ahead a wish looks for room. */
 const WISH_HORIZON = 8;
 
-/** Where spending counts: the week's limit, the month's extras, or nowhere, such as a transfer to savings. */
-export type Envelope = 'week' | 'extra' | 'outside';
+/**
+ * Where spending counts: the week's limit, the month's extras, outside the budget, such as a transfer to savings, or
+ * not at all, such as cash taken out that is only lying in a drawer. Spending not counted at all is left out of
+ * everything but the list of operations (see listOperations).
+ */
+export type Envelope = 'week' | 'extra' | 'outside' | 'ignored';
 
 /** Something to buy in a week, from the week's money or from the month's extras. */
 export interface Purchase {
@@ -27,6 +31,7 @@ export interface Purchase {
   /** Monday of the week it is planned for. */
   week: DateString;
   envelope: 'week' | 'extra';
+  /** Finished: it keeps what the expenses linked to it paid, and the rest of its amount goes back. */
   done: boolean;
 }
 
@@ -70,22 +75,49 @@ export function weeksOfMonth(month: MonthString): DateString[] {
   return weeks;
 }
 
-/** Spending counts towards its week until moved; a payment of a regular expense is outside the budget, as the expense is. */
-export function envelopeOf(budget: Pick<Budget, 'marks'>, operation: Pick<Operation, 'id' | 'regular'>): Envelope {
-  return budget.marks.get(operation.id) ?? (operation.regular ? 'outside' : 'week');
+/**
+ * Spending counts towards its week until moved; a payment of a regular expense is outside the budget, as the expense
+ * is, and a payment of a purchase counts where the purchase does.
+ */
+export function envelopeOf(budget: Pick<Budget, 'marks' | 'purchases'>, operation: Pick<Operation, 'id' | 'regular' | 'purchase'>): Envelope {
+  const marked = budget.marks.get(operation.id);
+  if (marked) return marked;
+  if (operation.regular) return 'outside';
+  const purchase = operation.purchase ? budget.purchases.find((p) => p.id === operation.purchase?.id) : undefined;
+  return purchase?.envelope ?? 'week';
+}
+
+/** A purchase with the expenses that paid it. */
+export interface PurchaseStatus {
+  purchase: Purchase;
+  /** Expenses linked to the purchase, newest first. */
+  paid: Operation[];
+  /** What they paid in all. */
+  covered: number;
+  /** Bought: finished, or paid in full by the expenses linked to it. */
+  bought: boolean;
+  /** What the plan still holds for it: nothing once bought. */
+  left: number;
+}
+
+export function purchaseStatus(purchase: Purchase, expenses: readonly Operation[]): PurchaseStatus {
+  const paid = expenses.filter((o) => o.purchase?.id === purchase.id);
+  const covered = sum(paid.map((o) => o.amount));
+  const bought = purchase.done || covered >= purchase.amount - 0.005;
+  return { purchase, paid, covered, bought, left: bought ? 0 : purchase.amount - covered };
 }
 
 export interface WeekSummary {
   week: DateString;
   /** Spending of the week that counts towards its limit. */
   spent: number;
-  /** Purchases from the week's money not bought yet. */
+  /** What the plan still holds for purchases from the week's money. */
   planned: number;
   /** What is left after the spending and the planned purchases; negative when over the limit. */
   free: number;
   /** All expenses of the week, whatever they count towards, newest first. */
   spending: Operation[];
-  purchases: Purchase[];
+  purchases: PurchaseStatus[];
   /**
    * Regular payments that fall on the week; they are outside the budget. `paid` are the expenses linked to the regular
    * expense whose nearest payment is this one, newest first, even when they came in an earlier week.
@@ -96,9 +128,9 @@ export interface WeekSummary {
 export function summarizeWeek(budget: Budget, week: DateString): WeekSummary {
   const end = addDays(week, 6);
   const spending = budget.expenses.filter((o) => o.date >= week && o.date <= end);
-  const purchases = budget.purchases.filter((p) => p.week === week);
+  const purchases = budget.purchases.filter((p) => p.week === week).map((p) => purchaseStatus(p, budget.expenses));
   const spent = sum(spending.filter((o) => envelopeOf(budget, o) === 'week').map((o) => o.amount));
-  const planned = sum(purchases.filter((p) => !p.done && p.envelope === 'week').map((p) => p.amount));
+  const planned = sum(purchases.filter((p) => p.purchase.envelope === 'week').map((p) => p.left));
   const regular = [monthOf(week), monthOf(end)]
     .filter((month, i, months) => months.indexOf(month) === i)
     .flatMap((month) => budget.regular.flatMap((expense) => {
@@ -113,19 +145,19 @@ export function summarizeWeek(budget: Budget, week: DateString): WeekSummary {
 export interface ExtrasSummary {
   month: MonthString;
   spent: number;
-  /** Extras planned and not bought yet. */
+  /** What the plan still holds for extras. */
   planned: number;
   free: number;
-  /** Spending marked as extras in the month's weeks. */
+  /** Spending marked as extras, or paying an extra purchase, in the month's weeks. */
   spending: Operation[];
-  purchases: Purchase[];
+  purchases: PurchaseStatus[];
 }
 
 export function summarizeExtras(budget: Budget, month: MonthString): ExtrasSummary {
   const spending = budget.expenses.filter((o) => envelopeOf(budget, o) === 'extra' && monthOfWeek(weekOf(o.date)) === month);
-  const purchases = budget.purchases.filter((p) => p.envelope === 'extra' && monthOfWeek(p.week) === month);
+  const purchases = budget.purchases.filter((p) => p.envelope === 'extra' && monthOfWeek(p.week) === month).map((p) => purchaseStatus(p, budget.expenses));
   const spent = sum(spending.map((o) => o.amount));
-  const planned = sum(purchases.filter((p) => !p.done).map((p) => p.amount));
+  const planned = sum(purchases.map((p) => p.left));
   return { month, spent, planned, free: MONTH_LIMIT - spent - planned, spending, purchases };
 }
 

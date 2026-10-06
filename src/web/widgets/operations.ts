@@ -4,15 +4,19 @@ import { weekday } from '../../dates.ts';
 import type { OperationKind } from '../../operations.ts';
 import type { DateString } from '../../zenmoney/types.ts';
 import { dayMonth, dayTitle, money, WEEKDAYS_FULL } from '../format.ts';
-import { html, type Html } from '../html.ts';
+import { html, type Content, type Html } from '../html.ts';
 import { icon, type IconName } from '../icons.ts';
 import { badge } from './basics.ts';
 
 /**
  * One operation: who, what for and from which account, and the amount in the main currency.
  * Expenses get a minus, incomes a plus and green, transfers stay quiet.
+ * With `href` the row links to its marking; with `panel` it is open: the panel shows under the row, `actions` next
+ * to it, and the row's link closes it.
  */
 export function operationRow(options: {
+  /** Keeps the row in place on the screen when the page comes back, as entries do. */
+  id?: string;
   title: string;
   details: string;
   icon: IconName;
@@ -25,11 +29,18 @@ export function operationRow(options: {
   comment?: string;
   /** The bank has not settled it yet. */
   hold?: boolean;
+  /** Quieter, for an operation that counts nowhere, such as cash only taken out. */
+  muted?: boolean;
+  href?: string;
+  /** What the open operation shows under its row, such as choices to make. */
+  panel?: Content;
+  /** Buttons next to the open row, each posting a form to its URL. */
+  actions?: Array<{ label: string; action: string }>;
 }): Html {
   const { kind, amount, symbol } = options;
+  const open = options.panel !== undefined;
   const value = kind === 'transfer' ? money(amount, symbol) : money(kind === 'income' ? amount : -amount, symbol, { sign: true });
-  return html`
-    <li class="operation">
+  const inner = html`
       <span class="operation-icon" style="--color:${options.color}">${icon(options.icon, 16)}</span>
       <span class="operation-text">
         <b>${options.title}</b>
@@ -40,7 +51,19 @@ export function operationRow(options: {
       <span class="operation-amount ${kind}">
         <b>${value}</b>
         ${options.original ? html`<small>${money(options.original.amount, options.original.symbol, { cents: true })}</small>` : null}
-      </span>
+      </span>`;
+  const actions = open ? (options.actions ?? []) : [];
+  return html`
+    <li class="operation-item${open ? ' open' : ''}${options.muted ? ' muted' : ''}"${options.id ? html` id="${options.id}"` : null}>
+      ${options.href
+        ? html`<a class="operation" href="${options.href}" title="${open ? 'Закрыть' : 'Разметить'}"${open ? html` aria-expanded="true"` : null}>${inner}</a>`
+        : html`<div class="operation">${inner}</div>`}
+      ${actions.length > 0
+        ? html`<span class="operation-actions">${actions.map(
+            (a) => html`<form method="post" action="${a.action}"><button class="operation-action" type="submit">${a.label}</button></form>`,
+          )}</span>`
+        : null}
+      ${open ? html`<div class="operation-panel">${options.panel}</div>` : null}
     </li>`;
 }
 

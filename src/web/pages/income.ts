@@ -183,6 +183,7 @@ function row(income: Income, d: IncomeData, href: Href): Html {
   const model = incomeModel(income.model);
   const next = d.upcoming.find((p) => p.income.id === income.id);
   return entryRow({
+    id: `income-${income.id}`,
     title: income.title,
     details: [model.schedule(income.params), next ? fromToday(next.date, d.today) : ''].filter(Boolean).join(' · '),
     icon: ICONS[income.model],
@@ -195,6 +196,7 @@ function row(income: Income, d: IncomeData, href: Href): Html {
 
 function editForm(income: Income, form: IncomeForm, symbol: string, href: Href): Html {
   return entryForm({
+    id: `income-${income.id}`,
     action: href(`/income/${income.id}`),
     submitLabel: 'Сохранить',
     icon: ICONS[income.model],

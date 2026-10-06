@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { NO_SETUP } from '../src/categories.ts';
 import { Settings } from '../src/settings.ts';
 import type { Envelope } from '../src/week.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { createHref } from '../src/web/pages/chrome.ts';
 import { budgetOf, loadDashboard, renderDashboard, submitDashboard, type SavedBudget } from '../src/web/pages/dashboard.ts';
-import { account, regular, RUB, transaction, user } from './fixtures.ts';
+import { account, regular, RUB, tag, transaction, user } from './fixtures.ts';
 
 const today = '2026-10-06';
 
@@ -33,6 +34,8 @@ function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
     marks: new Map(marks),
     regular: [regular({ id: 7, title: 'Школа, ЛДК', amount: 45_000, day: 7 })],
     categorizations: new Map(),
+    purchasePayments: new Map(),
+    categories: NO_SETUP,
   };
 }
 
@@ -47,13 +50,21 @@ describe('dashboard', () => {
 
     assert.ok(page.includes('Неделя 5–11 октября'));
     assert.ok(page.includes('Неделя в минусе на 3 473 ₽: потрачено 40 473 ₽ из 45 000 ₽, ещё 8 000 ₽ ждут покупок из плана.'));
-    assert.ok(page.includes('action="/purchases/1/done"') && page.includes('>Куплено</button>'));
-    assert.ok(page.includes('>Не куплено</button>'), 'a bought purchase can be taken back');
+    assert.ok(page.includes('action="/purchases/1/done"><button class="entry-icon-action" type="submit" title="Завершить: остаток вернётся"'));
+    assert.ok(page.includes('<b>Подарок</b><small>завершено, вернулось 5 000 ₽ · обычные</small>'), 'a finished one gives its amount back');
+    assert.ok(!page.includes('Куплено'));
     assert.ok(page.includes('регулярная, вне бюджета · 7 октября') && page.includes('href="/regular?edit=7"'));
     assert.ok(page.includes('&lt;b&gt;Пятёрочка&lt;/b&gt;') && !page.includes('<b>Пятёрочка</b>'));
     assert.ok(!page.includes('Дарья Ч.'), 'last week’s spending is not this week’s');
     assert.ok(page.includes('action="/sync"'));
     assert.ok(page.includes('href="/?view=month"'));
+  });
+
+  it('leaves out spending not counted at all, from the list and the figures', () => {
+    const page = render({}, saved([['transfer', 'ignored']]));
+
+    assert.ok(!page.includes('Александр А.'));
+    assert.ok(page.includes('Можно потратить ещё 36 527 ₽.'));
   });
 
   it('advises when to buy a wish and offers to plan it', () => {
@@ -75,15 +86,69 @@ describe('dashboard', () => {
     assert.ok(purchase.includes('action="/purchases/1"') && purchase.includes('value="8000"'));
     assert.ok(purchase.includes('formaction="/purchases/1/move"') && purchase.includes('В дополнительные'));
     assert.ok(purchase.includes('formaction="/purchases/1/delete"'));
+    assert.ok(purchase.includes('formaction="/purchases/1/done">Завершить</button>'), 'for touch screens, where the row has no icon');
   });
 
   it('keeps a payment of a regular expense outside the week, naming the expense, with no way back into the week', () => {
     const page = render({ edit: 'spending-transfer' }, { ...saved(), categorizations: new Map([['transfer', { regular: 7 }]]) });
 
     assert.ok(page.includes('Можно потратить ещё 36 527 ₽.'));
-    assert.ok(page.includes('5 октября, Основной · Школа, ЛДК · вне бюджета'));
+    assert.ok(page.includes('5 октября, Основной · регулярная «Школа, ЛДК» · вне бюджета'));
     assert.ok(page.includes('action="/spending/transfer/extra"'));
     assert.ok(!page.includes('action="/spending/transfer/week"') && !page.includes('action="/spending/transfer/outside"'));
+    assert.ok(page.includes('action="/spending/transfer/unlink"'));
+  });
+
+  it('opens spending to mark it: what it paid, likeliest first, its category, most popular first, and where it counts', () => {
+    const groceries = tag({ id: 'groceries', title: 'Продукты' });
+    const cafe = tag({ id: 'cafe', title: 'Кафе' });
+    const collections = {
+      ...data(),
+      tag: [cafe, groceries],
+      transaction: [
+        ...data().transaction!,
+        transaction({ id: 'shop', date: '2026-09-20', outcome: 300, payee: 'Лента', tag: [groceries.id] }),
+        transaction({ id: 'shop-2', date: '2026-09-21', outcome: 300, payee: 'Лента', tag: [groceries.id] }),
+        transaction({ id: 'coffee', date: '2026-09-22', outcome: 300, payee: 'Кофейня', tag: [cafe.id] }),
+      ],
+    };
+    const budget = { ...saved(), purchases: [...saved().purchases, { id: 4, title: 'Продукты на неделю', amount: 3_000, week: '2026-10-05', envelope: 'week' as const, done: false }] };
+    const page = String(renderDashboard(loadDashboard(collections, budget, { ...options, edit: 'spending-groceries' }), createHref())).replaceAll('\u00a0', ' ');
+    const choices = (label: string) => [...(new RegExp(`aria-label="${label}">(.*?)</div>`, 's').exec(page)?.[1] ?? '').matchAll(/<span>([^<]*)/g)].map((m) => m[1]!.trim());
+
+    assert.deepEqual(choices('Оплата'), ['Продукты на неделю', 'Ботинки Савве', 'Куртка', 'Школа, ЛДК'], 'the closest amount left first; bought ones are left out');
+    assert.ok(page.includes('action="/spending/groceries/purchase-4"') && page.includes('план недели · 3 000 ₽'));
+    assert.deepEqual(choices('Категория'), ['Продукты', 'Кафе']);
+    assert.ok(page.includes('action="/spending/groceries/tag-groceries"'));
+    assert.deepEqual(choices('Бюджет'), ['Неделя', 'Дополнительные', 'Вне бюджета', 'Не учитывать']);
+    assert.ok(page.includes('class="choice current" aria-current="true"><svg') && page.includes('Неделя</span></span>'));
+    assert.ok(page.includes('id="spending-groceries"'), 'the open expense keeps its place on the screen');
+    assert.ok(page.includes('<dt>Когда</dt><dd>5 октября</dd>') && page.includes('<dt>Сумма</dt><dd>473,00 ₽</dd>'), 'no time when ZenMoney has none for that day');
+  });
+
+  it('takes what linked expenses paid out of the plan, buys a purchase they cover, and counts them where it is', () => {
+    const linked = (payments: Array<[string, number]>) => ({ ...saved(), purchasePayments: new Map(payments) });
+    const purchaseOf = (page: string, title: string) => new RegExp(`<b>${title}</b><small>([^<]*)</small>`).exec(page)?.[1];
+
+    const partly = render({}, linked([['groceries', 1]]));
+    assert.equal(purchaseOf(partly, 'Ботинки Савве'), 'оплачено 473 ₽ из 8 000 ₽ · обычные');
+    assert.ok(partly.includes('ещё 7 527 ₽ ждут покупок из плана'));
+    assert.ok(partly.includes('5 октября, Основной · покупка «Ботинки Савве» · в неделе'));
+
+    const paid = render({}, linked([['transfer', 1]]));
+    assert.equal(purchaseOf(paid, 'Ботинки Савве'), 'куплено 5 октября, на 32 000 ₽ больше плана · обычные');
+    assert.ok(!paid.includes('action="/purchases/1/done"'), 'nothing to finish once paid in full');
+
+    const finished = linked([['groceries', 1]]);
+    finished.purchases = finished.purchases.map((p) => (p.id === 1 ? { ...p, done: true } : p));
+    const page = render({}, finished);
+    assert.equal(purchaseOf(page, 'Ботинки Савве'), 'завершено, вернулось 7 527 ₽ · обычные');
+    assert.ok(page.includes('473 ₽</b>'), 'it shows what it cost');
+    assert.ok(page.includes('Можно потратить ещё 4 527 ₽. Потрачено 40 473 ₽ из 45 000 ₽.'), 'the rest is back in the week');
+    assert.ok(render({ edit: 'purchase-1' }, finished).includes('formaction="/purchases/1/done">Вернуть в план</button>'));
+
+    const extra = render({ view: 'month' }, linked([['transfer', 3]]));
+    assert.ok(extra.includes('В октябре на дополнительные осталось 60 000 ₽ из 100 000 ₽.'), 'the payment counts in extras, the jacket is bought');
   });
 
   it('marks a regular payment of the week paid once linked expenses cover it, and says how much when they do not', () => {
@@ -146,7 +211,7 @@ describe('dashboard', () => {
 
     assert.ok(page.includes('Неделя 2–8 ноября'));
     assert.ok(page.includes('Неделя впереди: в плане 3 500 ₽, свободно 41 500 ₽ из 45 000 ₽.'));
-    assert.ok(page.includes('Будет свободно') && !page.includes('Куплено'));
+    assert.ok(page.includes('Будет свободно') && !page.includes('Завершить'), 'nothing paid it yet');
     assert.ok(page.includes('регулярная, вне бюджета · 7 ноября'));
     assert.ok(page.includes('name="week" value="2026-11-02"'), 'a new purchase goes into the week shown');
     assert.ok(render({ week: '2026-11-09' }, budget).includes('Неделя впереди, в плане пока ничего: свободны все 45 000 ₽.'));
@@ -209,7 +274,7 @@ describe('submitDashboard', () => {
     assert.deepEqual(settings.purchases().map((p) => [p.amount, p.week]), [[4_000, '2026-11-16']], 'a form without the week keeps it');
   });
 
-  it('plans a wish into the advised week and marks spending', () => {
+  it('plans a wish into the advised week', () => {
     using settings = new Settings(':memory:');
     settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-10-05', envelope: 'week', done: false });
     const styler = settings.addWish({ title: 'Укладка', amount: 4_500 });
@@ -221,8 +286,5 @@ describe('submitDashboard', () => {
       ['Укладка', '2026-10-12', 'week'],
     ]);
 
-    submitDashboard(settings, '/spending/transfer/outside', form({}), context(settings));
-    assert.deepEqual([...settings.spendingMarks()], [['transfer', 'outside']]);
-    assert.deepEqual(submitDashboard(settings, '/spending/transfer/nowhere', form({}), context(settings)), { status: 'missing' });
   });
 });

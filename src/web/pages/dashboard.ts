@@ -1,21 +1,18 @@
 // The overview: the budget by weeks. The week tab is a week's plan, with wishes in the current one, and what is left
 // to spend with the week's spending on the side; a week ahead shows what its plan leaves free. The month tab is a
 // month's weeks and its extras. Both step back and forth, ?week=2026-10-19 and ?month=2026-11, up to a year ahead.
-// Built from widgets only. Entries open by ?edit=purchase-1, wish-1 or spending-<ZenMoney id>; forms post to
-// /purchases, /wishes and /spending (see submitDashboard), and the server sends the browser back to the page they
-// came from.
+// Built from widgets only. Entries open by ?edit=purchase-1, wish-1 or spending-<ZenMoney id>; an open expense is
+// marked as on every page (see marking.ts). Forms post to /purchases and /wishes (see submitDashboard) and to
+// /spending (see submitMarking), and the server sends the browser back to the page they came from.
 
 import { summarizeBalances } from '../../balances.ts';
-import type { Categorization } from '../../categorization.ts';
 import { addDays, shiftMonth, type MonthString } from '../../dates.ts';
 import { amountText, parseAmount, parseTitle } from '../../input.ts';
 import { listOperations, type Operation } from '../../ledger.ts';
-import type { RegularExpense } from '../../regular.ts';
 import type { Settings } from '../../settings.ts';
 import {
   adviceTarget,
   adviseWish,
-  envelopeOf,
   MONTH_LIMIT,
   monthOfWeek,
   summarizeExtras,
@@ -25,15 +22,14 @@ import {
   weeksOfMonth,
   type Advice,
   type Budget,
-  type Envelope,
   type ExtrasSummary,
-  type Purchase,
+  type PurchaseStatus,
   type WeekSummary,
   type Wish,
 } from '../../week.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
-import { capitalize, dayMonth, money, monthName } from '../format.ts';
+import { capitalize, dayMonth, money, monthName, weekLabel } from '../format.ts';
 import type { Html } from '../html.ts';
 import { categoryIcon, entryIcon } from '../icons.ts';
 import { categoryColor, toneColor } from '../tones.ts';
@@ -42,6 +38,7 @@ import { button, emptyState, field, footnote, pageIntro, section, segmentedLinks
 import { entryForm, entryList, entryRow } from '../widgets/entries.ts';
 import { appShell, tabs, topBar } from '../widgets/shell.ts';
 import { appRail, userName, type Href } from './chrome.ts';
+import { allExpenses, loadMarking, markingActions, markingDetails, markingPanel, type Marking, type SavedMarking } from './marking.ts';
 
 /** How many weeks ahead a week can be opened and planned. */
 const PLAN_AHEAD = 52;
@@ -49,13 +46,8 @@ const PLAN_AHEAD = 52;
 const WEEK_CHOICES = 13;
 
 /** What the user keeps in the app for the budget. */
-export interface SavedBudget {
-  purchases: Purchase[];
+export interface SavedBudget extends SavedMarking {
   wishes: Wish[];
-  marks: ReadonlyMap<string, Envelope>;
-  regular: RegularExpense[];
-  /** Expenses linked to the regular expenses they paid count outside the budget. */
-  categorizations: ReadonlyMap<string, Categorization>;
 }
 
 export type FormField = 'title' | 'amount';
@@ -83,7 +75,8 @@ export interface DashboardData {
   /** Extras of the month tab's month. */
   extras: ExtrasSummary;
   wishes: Array<{ wish: Wish; advice: Advice }>;
-  marks: ReadonlyMap<string, Envelope>;
+  /** For an expense opened to mark it. */
+  marking: Marking;
   /** What is open for editing: purchase-1, wish-1 or spending-<ZenMoney id>. */
   edit: string | null;
   form: DashboardForm | null;
@@ -133,7 +126,7 @@ export function loadDashboard(
     weeks: weeksOfMonth(month).map((w) => summarizeWeek(budget, w)),
     extras: summarizeExtras(budget, month),
     wishes: saved.wishes.map((wish) => ({ wish, advice: adviseWish(budget, wish, today) })),
-    marks: saved.marks,
+    marking: loadMarking(data, saved, allExpenses(data, saved), today),
     edit: options.edit ?? null,
     form: options.form ?? null,
     symbol: summarizeBalances(data).mainInstrument.symbol,
@@ -164,13 +157,11 @@ function parseMonthOfWeeks(value: string | null | undefined, current: DateString
 
 export type DashboardSubmission = { status: 'saved' } | { status: 'missing' } | { status: 'invalid'; form: DashboardForm };
 
-const ENVELOPES: Envelope[] = ['week', 'extra', 'outside'];
-
 /**
  * Applies a form posted to /purchases (add), /purchases/:id (save), /purchases/:id/move (save and switch between
  * the week's money and extras), /purchases/:id/done (bought or not), /purchases/:id/delete, /wishes (add),
- * /wishes/:id (save), /wishes/:id/plan (into the advised week), /wishes/:id/delete or /spending/:id/:envelope.
- * `budget` is needed only to plan a wish.
+ * /wishes/:id (save), /wishes/:id/plan (into the advised week) or /wishes/:id/delete. `budget` is needed only to
+ * plan a wish.
  */
 export function submitDashboard(
   settings: Settings,
@@ -178,12 +169,6 @@ export function submitDashboard(
   body: URLSearchParams,
   context: { today: DateString; budget: () => Budget },
 ): DashboardSubmission {
-  const spending = /^\/spending\/([\w-]+)\/(week|extra|outside)$/.exec(path);
-  if (spending) {
-    settings.markSpending(spending[1]!, spending[2] as Envelope);
-    return { status: 'saved' };
-  }
-
   const purchase = /^\/purchases(?:\/(\d+)(?:\/(move|done|delete))?)?$/.exec(path);
   if (purchase) {
     const id = purchase[1] === undefined ? null : Number(purchase[1]);
@@ -343,7 +328,7 @@ function spentSide(page: Page, w: WeekSummary): Html[] {
       ? [emptyState({ text: 'Трат пока нет.' })]
       : [
           entryList({ label: 'Траты недели', items: w.spending.map((o) => spendingItem(page, o)) }),
-          footnote({ text: 'Траты идут в неделю. Откройте трату, чтобы отнести её к дополнительным или вне бюджета.' }),
+          footnote({ text: 'Траты идут в неделю. Откройте трату, чтобы привязать её к покупке или платежу, выбрать категорию или отнести к дополнительным.' }),
         ]),
   ];
 }
@@ -456,17 +441,20 @@ function syncButton(d: DashboardData): Html | null {
   return d.canSync ? button({ label: 'Обновить', icon: 'refresh', action: '/sync' }) : null;
 }
 
-const ENVELOPE_NAME: Record<Envelope, string> = { week: 'в неделе', extra: 'дополнительные', outside: 'вне бюджета' };
-const MOVE_TO: Record<Envelope, string> = { week: 'В неделю', extra: 'В дополнительные', outside: 'Вне бюджета' };
-
-/** A purchase of a week; one of a week ahead cannot be bought yet. */
-function purchaseItem(page: Page, p: Purchase): Html {
+/**
+ * A purchase of a week, with what the expenses linked to it paid. Once they pay it in full it is bought; before that
+ * it can be finished, keeping what they paid and giving the rest back to the week or the extras: by the icon on its
+ * row, or from its form on a touch screen. A finished or bought one shows what it cost, and its form takes it back
+ * into the plan. On its row, one of a week ahead finishes only once something paid it.
+ */
+function purchaseItem(page: Page, { purchase: p, paid, covered, bought }: PurchaseStatus): Html {
   const { d, href, here, current } = page;
   const key = `purchase-${p.id}`;
   const form = d.form?.kind === 'purchase' && d.form.id === p.id ? d.form : null;
-  const color = p.done ? toneColor('gray') : p.envelope === 'extra' ? toneColor('violet') : categoryColor(key, null);
+  const color = bought ? toneColor('gray') : p.envelope === 'extra' ? toneColor('violet') : categoryColor(key, null);
   if (form || d.edit === key) {
     return entryForm({
+      id: key,
       action: href(`/purchases/${p.id}`),
       submitLabel: 'Сохранить',
       icon: categoryIcon(p.title),
@@ -475,22 +463,41 @@ function purchaseItem(page: Page, p: Purchase): Html {
         ...entryFields(form ?? { values: { title: p.title, amount: amountText(p.amount) }, errors: {} }, d.symbol),
         weekField(page, form?.week ? parseWeek(form.week, current) : p.week),
       ],
-      extraActions: [{ label: p.envelope === 'week' ? 'В дополнительные' : 'В обычные', action: href(`/purchases/${p.id}/move`) }],
+      extraActions: [
+        { label: p.envelope === 'week' ? 'В дополнительные' : 'В обычные', action: href(`/purchases/${p.id}/move`) },
+        ...(p.done
+          ? [{ label: 'Вернуть в план', action: href(`/purchases/${p.id}/done`) }]
+          : bought
+            ? []
+            : [{ label: 'Завершить', action: href(`/purchases/${p.id}/done`) }]),
+      ],
       deleteAction: href(`/purchases/${p.id}/delete`),
       cancelHref: here(),
     });
   }
   const ahead = p.week > current;
-  const status = p.done ? 'куплено' : ahead ? 'в плане' : 'ждёт покупки';
+  const paidInFull = covered >= p.amount - 0.005;
+  const over = covered - p.amount;
+  const status = !bought
+    ? covered > 0
+      ? `оплачено ${money(covered, d.symbol)} из ${money(p.amount, d.symbol)}`
+      : ahead
+        ? 'в плане'
+        : 'ждёт покупки'
+    : paidInFull
+      ? `куплено ${dayMonth(paid[0]!.date)}${over > 0.005 ? `, на ${money(over, d.symbol)} больше плана` : ''}`
+      : `завершено, вернулось ${money(p.amount - covered, d.symbol)}`;
   return entryRow({
+    id: key,
     title: p.title,
     details: `${status} · ${p.envelope === 'extra' ? 'дополнительные' : 'обычные'}`,
     icon: categoryIcon(p.title),
     color,
-    amount: p.amount,
+    amount: bought ? covered : p.amount,
     symbol: d.symbol,
     href: here({ edit: key }),
-    actions: ahead ? [] : [{ label: p.done ? 'Не куплено' : 'Куплено', action: href(`/purchases/${p.id}/done`) }],
+    actions: bought || (ahead && covered === 0) ? [] : [{ label: 'Завершить: остаток вернётся', icon: 'check', action: href(`/purchases/${p.id}/done`) }],
+    muted: bought,
   });
 }
 
@@ -499,6 +506,7 @@ function wishItem({ d, href, here }: Page, wish: Wish, advice: Advice): Html {
   const form = d.form?.kind === 'wish' && d.form.id === wish.id ? d.form : null;
   if (form || d.edit === key) {
     return entryForm({
+      id: key,
       action: href(`/wishes/${wish.id}`),
       submitLabel: 'Сохранить',
       icon: 'sparkles',
@@ -509,6 +517,7 @@ function wishItem({ d, href, here }: Page, wish: Wish, advice: Advice): Html {
     });
   }
   return entryRow({
+    id: key,
     title: wish.title,
     details: adviceText(advice, d),
     icon: 'sparkles',
@@ -541,24 +550,21 @@ function regularItem({ d, href }: Page, { expense, date, paid }: WeekSummary['re
   });
 }
 
-/**
- * Spending opens to show where it can be moved; it counts towards its week until moved. A payment of a regular
- * expense is outside the budget unless moved, and it cannot go back to the week while it is linked.
- */
+/** Spending opens to be marked: what it paid, its category and where it counts. */
 function spendingItem({ d, href, here }: Page, o: Operation): Html {
   const key = `spending-${o.id}`;
-  const envelope = envelopeOf({ marks: d.marks }, o);
   const open = d.edit === key;
-  const moves = ENVELOPES.filter((e) => e !== envelope && !(e === 'week' && o.regular));
   return entryRow({
+    id: key,
     title: o.payee,
-    details: [`${dayMonth(o.date)}, ${o.account}`, o.regular?.title, ENVELOPE_NAME[envelope]].filter(Boolean).join(' · '),
+    details: `${dayMonth(o.date)}, ${o.account} · ${markingDetails(d.marking, o)}`,
     icon: o.category ? categoryIcon(o.category.title) : 'tag',
     color: categoryColor(o.category?.id ?? null, o.category?.color ?? null),
     amount: o.amount,
     symbol: d.symbol,
     href: open ? here() : here({ edit: key }),
-    actions: open ? moves.map((e) => ({ label: MOVE_TO[e], action: href(`/spending/${o.id}/${e}`) })) : [],
+    actions: open ? markingActions(d.marking, o, href) : [],
+    panel: open ? markingPanel(d.marking, o, href) : undefined,
   });
 }
 
@@ -613,12 +619,6 @@ function entryFields(form: Pick<DashboardForm, 'values' | 'errors'>, symbol: str
 }
 
 // ---- Words
-
-/** 5–11 октября, or 28 сентября – 4 октября across months. */
-export function weekLabel(week: DateString): string {
-  const end = addDays(week, 6);
-  return week.slice(0, 7) === end.slice(0, 7) ? `${Number(week.slice(8, 10))}–${dayMonth(end)}` : `${dayMonth(week)} – ${dayMonth(end)}`;
-}
 
 /** Ends a sentence with a dot, unless it already ends with one, as after «руб.». */
 function sentence(text: string): string {

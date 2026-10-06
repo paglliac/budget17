@@ -9,6 +9,8 @@ import {
   badge,
   button,
   chip,
+  choiceGroup,
+  factList,
   emptyState,
   field,
   filterTag,
@@ -285,6 +287,56 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       props: { label: 'Куда отнести', name: 'target', placeholder: 'Категория или регулярная трата', required: true, groups: sortingGroups },
     },
   ]),
+  doc(factList, { group: 'Основа', description: 'Сведения о чём-то: подпись и значение, в строку с переносом, например когда и откуда оплачена трата.' }, [
+    {
+      name: 'Трата',
+      width: 520,
+      props: {
+        label: 'О трате',
+        items: [
+          { label: 'Когда', value: '5 октября, 23:28' },
+          { label: 'Счёт', value: 'Основной' },
+          { label: 'В банке', value: 'prostoplatSBP' },
+          { label: 'Комментарий', value: 'Оплата штрафа по постановлению 18810542260930190636' },
+        ],
+      },
+    },
+  ]),
+  doc(choiceGroup, {
+    group: 'Формы',
+    description: 'Выбор в один клик: каждая кнопка сразу отправляет форму. Текущий вариант выделен, подсказанный отмечен; остальные можно выбрать из списка.',
+  }, [
+    {
+      name: 'Категории с подсказкой',
+      width: 520,
+      props: {
+        label: 'Категория',
+        choices: [
+          { label: 'Продукты', action: '#', color: '#4FAE7F', suggested: true },
+          { label: 'Кафе', action: '#', color: '#EE7B3C' },
+          { label: 'Транспорт', action: '#', color: '#5B84F0' },
+          { label: 'Дети', action: '#', color: 'var(--violet)' },
+        ],
+      },
+    },
+    {
+      name: 'Выбрано, со списком остального',
+      width: 520,
+      props: {
+        label: 'Оплата',
+        choices: [
+          { label: 'Продукты', detail: 'в плане недели · 3 000 ₽', current: true },
+          { label: 'Бокс', detail: '3 октября · 25 000 ₽', action: '#' },
+        ],
+        other: { label: 'Другой платёж', action: '#', name: 'target', placeholder: 'Регулярная трата или покупка', submitLabel: 'Привязать', groups: sortingGroups },
+      },
+    },
+    {
+      name: 'Выбирать не из чего',
+      width: 320,
+      props: { label: 'Категория', choices: [], empty: 'Из ZenMoney: Продукты' },
+    },
+  ]),
   doc(iconPicker, {
     group: 'Формы',
     description: 'Выбор иконки в цвете формы вокруг. Первый вариант, «авто», отправляет пустое значение: иконку подберут сами, например по названию.',
@@ -355,7 +407,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
 
   doc(operationRow, {
     group: 'Операции',
-    description: 'Одна операция: кто, за что, с какого счёта и сколько. У расхода минус, доход зелёный с плюсом, перевод приглушён.',
+    description: 'Одна операция: кто, за что, с какого счёта и сколько. У расхода минус, доход зелёный с плюсом, перевод приглушён. Расход открывается на месте для разметки.',
   }, [
     { name: 'Расход', width: 520, props: { title: 'Пятёрочка', details: 'Продукты, Т-Банк Black', icon: 'cart', color: '#4FAE7F', kind: 'expense', amount: 1_247.9, symbol: '₽' } },
     {
@@ -372,6 +424,34 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       name: 'В валюте, ещё не проведена',
       width: 520,
       props: { title: 'Steam', details: 'Развлечения, Доллары', icon: 'ticket', color: '#F2C14E', kind: 'expense', amount: 1_252.24, symbol: '₽', original: { amount: 12.99, symbol: '$' }, hold: true },
+    },
+    {
+      name: 'Не учитывается',
+      width: 520,
+      props: { title: 'Расход', details: 'не учитывается, Основной', icon: 'tag', color: 'var(--gray)', kind: 'expense', amount: 120_000, symbol: '₽', href: '#', muted: true },
+    },
+    {
+      name: 'Открытая для разметки',
+      width: 520,
+      props: {
+        id: 'spending-1',
+        title: 'Т-Мобайл',
+        details: 'Связь, Т-Банк Black',
+        icon: 'phone',
+        color: 'var(--orange)',
+        kind: 'expense',
+        amount: 1_500,
+        symbol: '₽',
+        href: '#',
+        actions: [{ label: 'Отвязать', action: '#' }],
+        panel: choiceGroup({
+          label: 'Категория',
+          choices: [
+            { label: 'Связь', action: '#', color: 'var(--orange)', current: true },
+            { label: 'Дом', detail: 'из ZenMoney', action: '#', color: 'var(--teal)' },
+          ],
+        }),
+      },
     },
   ]),
   doc(dayGroup, { group: 'Операции', description: 'Операции одного дня под заголовком с итогом дня.' }, [
@@ -396,7 +476,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
 
   doc(entryRow, {
     group: 'Настройка',
-    description: 'Запись, которую настраивают: что, когда и сколько. Строка открывает её для правки, кнопки рядом делают частое действие сразу.',
+    description: 'Запись, которую настраивают: что, когда и сколько. Строка открывает её для правки, кнопки рядом делают частое действие сразу; кнопка-значок видна при наведении.',
   }, [
     {
       name: 'Регулярная трата',
@@ -409,7 +489,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       props: { title: 'Зарплата', details: 'аванс 20-го, остальное 5-го · через 15 дней', icon: 'briefcase', color: 'var(--teal)', amount: 200_000, symbol: '₽', href: '#' },
     },
     {
-      name: 'Покупка с действием',
+      name: 'Покупка с действием-значком',
       width: 520,
       props: {
         title: 'Ботинки Савве',
@@ -419,13 +499,40 @@ export const WIDGET_DOCS: WidgetDoc[] = [
         amount: 8_000,
         symbol: '₽',
         href: '#',
-        actions: [{ label: 'Куплено', action: '#' }],
+        actions: [{ label: 'Завершить: остаток вернётся', icon: 'check', action: '#' }],
       },
     },
     {
       name: 'Приглушённая',
       width: 520,
       props: { title: 'Интернет', details: '1-го числа · прошёл 1 октября', icon: 'phone', color: 'var(--gray)', amount: 1_100, symbol: '₽', href: '#', muted: true },
+    },
+    {
+      name: 'Открытая, с панелью',
+      width: 520,
+      props: {
+        id: 'spending-1',
+        title: 'Пятёрочка',
+        details: '5 октября, Основной · в неделе',
+        icon: 'cart',
+        color: '#4FAE7F',
+        amount: 473,
+        symbol: '₽',
+        href: '#',
+        actions: [{ label: 'Отвязать', action: '#' }],
+        panel: choiceGroup({
+          label: 'Оплата',
+          choices: [
+            { label: 'Продукты', detail: 'в плане недели · 3 000 ₽', current: true },
+            { label: 'Проезд', detail: 'в плане недели · 1 000 ₽', action: '#' },
+          ],
+        }),
+      },
+    },
+    {
+      name: 'Без суммы',
+      width: 520,
+      props: { title: 'Продукты', details: 'в ZenMoney «Groceries» · 200 трат за 3 месяца', icon: 'cart', color: '#4FAE7F', href: '#' },
     },
     {
       name: 'Без правки, с выбором',

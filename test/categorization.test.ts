@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { suggester, type Suggestion } from '../src/categorization.ts';
-import { REGULAR_CATEGORY, type Operation } from '../src/ledger.ts';
+import { paymentChoices, suggester, type PaymentChoice, type Suggestion } from '../src/categorization.ts';
+import { PURCHASE_CATEGORY, REGULAR_CATEGORY, type Operation } from '../src/ledger.ts';
 import type { Category } from '../src/operations.ts';
+import type { Purchase } from '../src/week.ts';
 import { regular } from './fixtures.ts';
 
 const groceries: Category = { id: 'groceries', title: 'Продукты', color: null };
@@ -13,8 +14,8 @@ const mortgage = regular({ id: 3, title: 'Ипотека', amount: 29_000, day: 
 const phone = regular({ id: 4, title: 'Телефон', amount: 1_500, day: 2 });
 const wifePhone = regular({ id: 5, title: 'Телефон жены', amount: 1_500, day: 2 });
 
-function expense(payee: string, amount: number, date: string, sorted: Partial<Pick<Operation, 'category' | 'regular'>> = {}): Operation {
-  return { id: `${payee}-${date}`, date, created: 0, kind: 'expense', amount, original: null, payee, comment: null, category: null, regular: null, account: 'Основной', toAccount: null, hold: false, ...sorted };
+function expense(payee: string, amount: number, date: string, sorted: Partial<Pick<Operation, 'category' | 'regular' | 'purchase'>> = {}): Operation {
+  return { id: `${payee}-${date}`, date, created: 0, kind: 'expense', amount, original: null, payee, originalPayee: null, comment: null, category: null, zenmoneyCategory: null, regular: null, purchase: null, account: 'Основной', toAccount: null, hold: false, ignored: false, ...sorted };
 }
 
 /** An expense the user linked to a regular expense. */
@@ -83,5 +84,52 @@ describe('suggester', () => {
 
     assert.equal(suggest(expense('Влас М.', 91_000, '2026-10-05')), null);
     assert.equal(name(suggest(expense('Влас М.', 91_000, '2026-11-04'))), 'Машина');
+  });
+});
+
+describe('paymentChoices', () => {
+  const purchase = (id: number, title: string, amount: number, week: string, overrides: Partial<Purchase> = {}): Purchase => ({
+    id,
+    title,
+    amount,
+    week,
+    envelope: 'week',
+    done: false,
+    ...overrides,
+  });
+  const named = (choices: PaymentChoice[]) => choices.map((c) => ('regular' in c ? `${c.regular.title} ${c.date} ${c.left}` : `${c.purchase.title} ${c.left}`));
+  const groceries = purchase(1, 'Продукты', 3_000, '2026-10-05');
+  const shoes = purchase(2, 'Ботинки', 8_000, '2026-10-12');
+
+  it('offers payments due near the expense and purchases planned near it, the closest amount first', () => {
+    const choices = paymentChoices(expense('Пятёрочка', 2_500, '2026-10-05'), {
+      regular: [workshop, phone, oldCar, mortgage],
+      purchases: [shoes, groceries, purchase(3, 'Пальто', 15_000, '2026-11-02'), purchase(4, 'Куртка', 20_000, '2026-10-26', { envelope: 'extra' })],
+      expenses: [],
+    });
+
+    assert.deepEqual(
+      named(choices),
+      ['Продукты 3000', 'Телефон 2026-10-02 1500', 'Ботинки 8000', 'Куртка 20000', 'Старая машина 2026-09-26 30500', 'Мастерская аренда 2026-10-10 40000'],
+      'not the mortgage of the 21st, nor the coat of November',
+    );
+  });
+
+  it('leaves out what other expenses paid in full or what is bought, and counts what they paid in part', () => {
+    const paidPhone = expense('Т-Мобайл', 1_500, '2026-10-01', { category: REGULAR_CATEGORY, regular: { id: phone.id, title: phone.title } });
+    const someGroceries = expense('Лента', 1_000, '2026-10-06', { category: PURCHASE_CATEGORY, purchase: { id: 1, title: 'Продукты' } });
+    const choices = paymentChoices(expense('Пятёрочка', 2_000, '2026-10-05'), {
+      regular: [phone],
+      purchases: [groceries, purchase(5, 'Подарок', 2_000, '2026-10-05', { done: true })],
+      expenses: [paidPhone, someGroceries],
+    });
+
+    assert.deepEqual(named(choices), ['Продукты 2000']);
+  });
+
+  it('still offers what the expense itself paid', () => {
+    const self = expense('Т-Мобайл', 1_500, '2026-10-01', { category: REGULAR_CATEGORY, regular: { id: phone.id, title: phone.title } });
+
+    assert.deepEqual(named(paymentChoices(self, { regular: [phone], purchases: [], expenses: [self] })), ['Телефон 2026-10-02 1500']);
   });
 });

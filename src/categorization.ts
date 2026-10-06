@@ -1,14 +1,16 @@
-// Expenses that come from ZenMoney without a category are sorted in the app: into a category, or as the payment of
-// a regular expense. What the user picks is kept by src/settings.ts and applied by listOperations; this module
-// suggests a pick for each expense from the picks before it and from the amounts and days of regular expenses.
+// Expenses are sorted in the app: into a category when ZenMoney has none for them, or as the payment of a regular
+// expense or of a purchase planned in a week. What the user picks is kept by src/settings.ts and applied by
+// listOperations; this module suggests a pick for each expense from the picks before it and from the amounts and days
+// of regular expenses, and lists what an expense may have paid.
 
 import { daysBetween } from './dates.ts';
 import { isUntitled, type Operation } from './ledger.ts';
 import type { Category } from './operations.ts';
-import { nearestPayment, type RegularExpense } from './regular.ts';
-import type { TagId } from './zenmoney/types.ts';
+import { nearestPayment, paidBy, type RegularExpense } from './regular.ts';
+import { monthOfWeek, purchaseStatus, weekOf, type Purchase } from './week.ts';
+import type { DateString, TagId } from './zenmoney/types.ts';
 
-/** Where the user put an expense that came without a category. */
+/** Where the user put an expense: a category, or the regular expense it paid. A purchase it paid is kept apart. */
 export type Categorization = { tag: TagId } | { regular: number };
 
 export type Suggestion = { category: Category } | { regular: RegularExpense };
@@ -17,6 +19,8 @@ export type Suggestion = { category: Category } | { regular: RegularExpense };
 const PAYMENT_WINDOW = 10;
 /** How far, as a share, an amount may be from an earlier payment to the same payee and still be that payment. */
 const AMOUNT_SPREAD = 0.1;
+/** How many days from the week of an expense a purchase it may have paid can be planned. */
+const PURCHASE_WINDOW = 14;
 
 /**
  * Builds a function that suggests where an expense goes. `history` is expenses with their categories and regular
@@ -40,7 +44,7 @@ export function suggester(history: Operation[], regular: RegularExpense[]): (exp
       const due = nearestPayment(expense, o.date);
       if (due !== null) paid.add(`${expense.id}:${due}`);
       if (payee !== null) payments.push({ payee, amount: o.amount, expense });
-    } else if (o.category && payee !== null) {
+    } else if (o.category && !o.purchase && payee !== null) {
       const counts = categories.get(payee) ?? new Map<TagId, { category: Category; count: number }>();
       const seen = counts.get(o.category.id);
       counts.set(o.category.id, { category: o.category, count: (seen?.count ?? 0) + 1 });
@@ -76,6 +80,39 @@ export function suggester(history: Operation[], regular: RegularExpense[]): (exp
       .sort((a, b) => Math.abs(a.amount - o.amount) - Math.abs(b.amount - o.amount))[0];
     return close ? { regular: close.expense } : null;
   };
+}
+
+/** Something an expense may have paid, with what other expenses have not paid of it yet. */
+export type PaymentChoice = { regular: RegularExpense; date: DateString; left: number } | { purchase: Purchase; left: number };
+
+/**
+ * What an expense may have paid, likeliest first: payments of regular expenses due within PAYMENT_WINDOW days of it,
+ * and purchases planned within PURCHASE_WINDOW days of its week or among the extras of its month. Payments and
+ * purchases that other expenses paid in full, and purchases marked bought, are left out. The closer what is left of
+ * one to the expense's amount, the likelier it is; then the closer its date. `expenses` are the expenses around it
+ * with what they paid, the expense itself among them or not.
+ */
+export function paymentChoices(
+  expense: Operation,
+  context: { regular: readonly RegularExpense[]; purchases: readonly Purchase[]; expenses: readonly Operation[] },
+): PaymentChoice[] {
+  const others = context.expenses.filter((o) => o.id !== expense.id);
+  const week = weekOf(expense.date);
+  const choices: Array<{ choice: PaymentChoice; days: number }> = [];
+  for (const e of context.regular) {
+    const date = nearestPayment(e, expense.date);
+    if (date === null || Math.abs(daysBetween(expense.date, date)) > PAYMENT_WINDOW) continue;
+    const left = e.amount - paidBy(e, date, others).reduce((total, o) => total + o.amount, 0);
+    if (left > 0.005) choices.push({ choice: { regular: e, date, left }, days: Math.abs(daysBetween(expense.date, date)) });
+  }
+  for (const p of context.purchases) {
+    const days = Math.abs(daysBetween(week, p.week));
+    const near = days <= PURCHASE_WINDOW || (p.envelope === 'extra' && monthOfWeek(p.week) === monthOfWeek(week));
+    const status = purchaseStatus(p, others);
+    if (near && !status.bought) choices.push({ choice: { purchase: p, left: status.left }, days });
+  }
+  const distance = (left: number) => Math.abs(left - expense.amount) / Math.max(left, expense.amount);
+  return choices.sort((a, b) => distance(a.choice.left) - distance(b.choice.left) || a.days - b.days).map((c) => c.choice);
 }
 
 /** The payee without case, digits and punctuation, so that Lenta 089 and Lenta 139 are one shop; null when there is none. */

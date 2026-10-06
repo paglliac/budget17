@@ -1,5 +1,6 @@
 // Things the user sets up, such as regular expenses or incomes: a row per entry that opens for editing, and form rows.
-// A row can also carry quick actions, such as marking a purchase as bought.
+// A row can also carry quick actions, such as marking a purchase as bought, or open in place with a panel under it.
+// An entry with an id stays where it is on the screen when the page comes back after opening or saving it.
 
 import { money } from '../format.ts';
 import { html, type Content, type Html } from '../html.ts';
@@ -13,36 +14,61 @@ export function entryList(options: { label: string; items: Html[] }): Html {
 
 /**
  * One entry: what, when and how much. With `href` the row links to its editing.
- * `actions` are buttons next to the row, each posting a form to its URL.
+ * `actions` are buttons next to the row, each posting a form to its URL. One with an icon is just the icon, like the
+ * pencil, before the amount, and shows only while the pointer is over the row; touch screens have no pointer, so
+ * there it is left out, and the entry's form should offer the same action.
+ * With `panel` the entry is open: the panel shows under the row, and the row's link closes it.
  */
 export function entryRow(options: {
+  /** Keeps the entry in place on the screen when the page comes back, and names it in links. */
+  id?: string;
   title: string;
   /** When it comes, such as 25-го числа · через 20 дней. */
   details: string;
   icon: IconName;
   color: string;
-  amount: number;
-  symbol: string;
+  /** Left out for an entry that is not about money, such as a category. */
+  amount?: number;
+  symbol?: string;
   href?: string;
-  actions?: Array<{ label: string; action: string }>;
+  actions?: Array<{ label: string; action: string; icon?: IconName }>;
   /** Quieter text, for an entry that is behind, such as a payment already made. */
   muted?: boolean;
+  /** What the open entry shows under its row, such as choices to make. */
+  panel?: Content;
 }): Html {
-  const inner = html`
-    <span class="entry-icon">${icon(options.icon, 16)}</span>
-    <span class="entry-text"><b>${options.title}</b><small>${options.details}</small></span>
-    <b class="entry-amount">${money(options.amount, options.symbol)}</b>`;
+  const open = options.panel !== undefined;
   const actions = options.actions ?? [];
+  const iconActions = actions.filter((a) => a.icon);
+  const textActions = actions.filter((a) => !a.icon);
+  // The link covers the whole row, so that the icon actions can sit in it, before the amount, and amounts line up
+  // with those of rows that have none.
   return html`
-    <li class="entry${options.muted ? ' muted' : ''}">
-      ${options.href
-        ? html`<a class="entry-row" href="${options.href}" style="--color:${options.color}" title="Изменить">${inner}<span class="entry-edit">${icon('pencil', 14)}</span></a>`
-        : html`<div class="entry-row" style="--color:${options.color}">${inner}</div>`}
-      ${actions.length > 0
-        ? html`<span class="entry-row-actions">${actions.map(
+    <li class="entry${options.muted ? ' muted' : ''}${open ? ' open' : ''}"${options.id ? html` id="${options.id}"` : null}>
+      <div class="entry-row" style="--color:${options.color}">
+        ${options.href
+          ? html`<a class="entry-link" href="${options.href}" title="${open ? 'Закрыть' : 'Изменить'}" aria-label="${open ? 'Закрыть' : 'Изменить'}: ${options.title}"${
+              open ? html` aria-expanded="true"` : null
+            }></a>`
+          : null}
+        <span class="entry-icon">${icon(options.icon, 16)}</span>
+        <span class="entry-text"><b>${options.title}</b><small>${options.details}</small></span>
+        ${iconActions.map(
+          (a) =>
+            html`<form class="entry-inline" method="post" action="${a.action}"><button class="entry-icon-action" type="submit" title="${a.label}" aria-label="${a.label}">${icon(
+              a.icon!,
+              14,
+            )}</button></form>`,
+        )}
+        ${options.amount === undefined ? null : html`<b class="entry-amount">${money(options.amount, options.symbol ?? '')}</b>`}
+        ${options.href ? html`<span class="entry-edit">${icon(open ? 'x' : 'pencil', 14)}</span>` : null}
+      </div>
+      ${textActions.length > 0
+        ? html`<span class="entry-row-actions">${textActions.map(
             (a) => html`<form method="post" action="${a.action}"><button class="entry-quiet" type="submit">${a.label}</button></form>`,
           )}</span>`
         : null}
+      ${open ? html`<div class="entry-panel">${options.panel}</div>` : null}
     </li>`;
 }
 
@@ -58,6 +84,8 @@ export function entryDivider(options: { label: string }): Html {
  * `extraActions` post the same form elsewhere, such as moving the entry.
  */
 export function entryForm(options: {
+  /** Keeps the entry in place on the screen when the page comes back; the same id as its row. */
+  id?: string;
   action: string;
   submitLabel: string;
   icon: IconName;
@@ -71,7 +99,7 @@ export function entryForm(options: {
   cancelHref?: string;
 }): Html {
   return html`
-    <li>
+    <li${options.id ? html` id="${options.id}"` : null}>
       <form class="entry-form" method="post" action="${options.action}" style="--color:${options.color}">
         ${Object.entries(options.hidden ?? {}).map(([name, value]) => html`<input type="hidden" name="${name}" value="${value}">`)}
         <span class="entry-icon">${icon(options.icon, 16)}</span>

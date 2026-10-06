@@ -1,8 +1,9 @@
 // Web UI on localhost: the week's budget at /, operations at /operations, expenses without a category at
-// /uncategorized, incomes at /income, regular expenses at /regular, the widget storyboard at /storyboard. Reads the
-// local ZenMoney copy (data/zenmoney.db) and syncs it on start and on POST /sync when ZENMONEY_TOKEN is set. Without
-// a local copy, or with ?demo, it shows demo data. Purchases, wishes, spending marks, categories picked in the app,
-// incomes and regular expenses are the app's own data (data/settings.db), so demo mode leaves them as they are.
+// /uncategorized, incomes at /income, regular expenses at /regular, categories at /settings, the widget storyboard at
+// /storyboard. Reads the local ZenMoney copy (data/zenmoney.db) and syncs it on start and on POST /sync when
+// ZENMONEY_TOKEN is set. Without a local copy, or with ?demo, it shows demo data. Purchases, wishes, how expenses are
+// marked, categories, incomes and regular expenses are the app's own data (data/settings.db), so demo mode leaves
+// them as they are.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -20,9 +21,11 @@ import { createHref } from './pages/chrome.ts';
 import { budgetOf, loadDashboard, renderDashboard, submitDashboard, type DashboardForm, type SavedBudget } from './pages/dashboard.ts';
 import { loadIncome, renderIncome, submitIncome } from './pages/income.ts';
 import { loadOperations, renderOperations } from './pages/operations.ts';
+import { submitMarking, type SavedMarking } from './pages/marking.ts';
 import { loadRegular, renderRegular, submitRegular } from './pages/regular.ts';
+import { loadSettingsPage, renderSettings, submitSettings } from './pages/settings.ts';
 import { renderStoryboard } from './pages/storyboard.ts';
-import { loadUncategorized, renderUncategorized, submitUncategorized, type SavedSorting } from './pages/uncategorized.ts';
+import { loadUncategorized, renderUncategorized } from './pages/uncategorized.ts';
 import { WIDGET_DOCS } from './stories.ts';
 
 const DB_PATH = fileURLToPath(new URL('../../data/zenmoney.db', import.meta.url));
@@ -48,12 +51,19 @@ function loadSettings<T>(read: (settings: Settings) => T): T {
   return read(settings);
 }
 
-function savedSorting(settings: Settings): SavedSorting {
-  return { categorizations: settings.categorizations(), regular: settings.regularExpenses() };
+function savedMarking(settings: Settings): SavedMarking {
+  return {
+    categorizations: settings.categorizations(),
+    purchasePayments: settings.purchasePayments(),
+    regular: settings.regularExpenses(),
+    purchases: settings.purchases(),
+    marks: settings.spendingMarks(),
+    categories: settings.categorySetup(),
+  };
 }
 
 function savedBudget(settings: Settings): SavedBudget {
-  return { purchases: settings.purchases(), wishes: settings.wishes(), marks: settings.spendingMarks(), ...savedSorting(settings) };
+  return { ...savedMarking(settings), wishes: settings.wishes() };
 }
 
 /** The page a form was sent from, without the entry it had open, so saving closes the form. */
@@ -129,7 +139,7 @@ createServer(async (request, response) => {
       response.writeHead(303, { location: `${back.pathname}${back.search}` }).end();
       return;
     }
-    if (request.method === 'POST' && /^\/(purchases|wishes|spending)(\/|$)/.test(url.pathname)) {
+    if (request.method === 'POST' && /^\/(purchases|wishes)(\/|$)/.test(url.pathname)) {
       const body = await readForm(request);
       using settings = new Settings(SETTINGS_PATH);
       const collections = loadCollections(demo, today);
@@ -147,15 +157,30 @@ createServer(async (request, response) => {
       }
       return;
     }
-    if (request.method === 'POST' && url.pathname.startsWith('/uncategorized/')) {
+    if (request.method === 'POST' && url.pathname.startsWith('/spending/')) {
       const body = await readForm(request);
       using settings = new Settings(SETTINGS_PATH);
-      const result = submitUncategorized(settings, loadCollections(demo, today), url.pathname, body);
+      const result = submitMarking(settings, loadCollections(demo, today), url.pathname, body);
       const back = backTo(request);
       if (result.status === 'saved') {
         response.writeHead(303, { location: `${back.pathname}${back.search}` }).end();
       } else {
-        send(response, 404, 'text/plain', 'Такой траты, категории или регулярной траты нет');
+        send(response, 404, 'text/plain', 'Такой траты, категории, регулярной траты или покупки нет');
+      }
+      return;
+    }
+    if (request.method === 'POST' && /^\/categories(\/|$)/.test(url.pathname)) {
+      const body = await readForm(request);
+      using settings = new Settings(SETTINGS_PATH);
+      const collections = loadCollections(demo, today);
+      const result = submitSettings(settings, collections, url.pathname, body);
+      if (result.status === 'saved') {
+        response.writeHead(303, { location: href('/settings') }).end();
+      } else if (result.status === 'missing') {
+        send(response, 404, 'text/plain', 'Такой категории нет');
+      } else {
+        const page = loadSettingsPage(collections, savedMarking(settings), { today, form: result.form });
+        send(response, 422, 'text/html', renderSettings(page, href).toString());
       }
       return;
     }
@@ -168,7 +193,7 @@ createServer(async (request, response) => {
       } else if (result.status === 'missing') {
         send(response, 404, 'text/plain', 'Такой регулярной траты нет');
       } else {
-        const page = loadRegular(loadCollections(demo, today), savedSorting(settings), { today, form: result.form });
+        const page = loadRegular(loadCollections(demo, today), savedMarking(settings), { today, form: result.form });
         send(response, 422, 'text/html', renderRegular(page, href).toString());
       }
       return;
@@ -196,18 +221,19 @@ createServer(async (request, response) => {
         send(response, 200, 'text/html', dashboardPage(loadCollections(demo, today), loadSettings(savedBudget), params, today, demo, href));
         return;
       case '/operations': {
-        const operations = loadOperations(loadCollections(demo, today), loadSettings(savedSorting), {
+        const operations = loadOperations(loadCollections(demo, today), loadSettings(savedMarking), {
           today,
           month: params.get('month'),
           kind: params.get('kind'),
           category: params.get('category'),
           query: params.get('q'),
+          edit: params.get('edit'),
         });
         send(response, 200, 'text/html', renderOperations(operations, href).toString());
         return;
       }
       case '/uncategorized': {
-        const page = loadUncategorized(loadCollections(demo, today), loadSettings(savedSorting), {
+        const page = loadUncategorized(loadCollections(demo, today), loadSettings(savedMarking), {
           today,
           month: params.get('month'),
           edit: params.get('edit'),
@@ -216,8 +242,13 @@ createServer(async (request, response) => {
         return;
       }
       case '/regular': {
-        const page = loadRegular(loadCollections(demo, today), loadSettings(savedSorting), { today, edit: params.get('edit') });
+        const page = loadRegular(loadCollections(demo, today), loadSettings(savedMarking), { today, edit: params.get('edit') });
         send(response, 200, 'text/html', renderRegular(page, href).toString());
+        return;
+      }
+      case '/settings': {
+        const page = loadSettingsPage(loadCollections(demo, today), loadSettings(savedMarking), { today, edit: params.get('edit') });
+        send(response, 200, 'text/html', renderSettings(page, href).toString());
         return;
       }
       case '/income': {
@@ -249,6 +280,7 @@ createServer(async (request, response) => {
   console.log(`Без категории: http://localhost:${PORT}/uncategorized`);
   console.log(`Доходы:        http://localhost:${PORT}/income`);
   console.log(`Регулярные:    http://localhost:${PORT}/regular`);
+  console.log(`Настройки:     http://localhost:${PORT}/settings`);
   console.log(`Виджеты:       http://localhost:${PORT}/storyboard`);
   if (!existsSync(DB_PATH)) console.log('Локальной копии ZenMoney нет, показываю демо-данные. Запустите make sync.');
 });

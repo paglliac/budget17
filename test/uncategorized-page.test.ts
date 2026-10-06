@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { NO_SETUP } from '../src/categories.ts';
 import type { Categorization } from '../src/categorization.ts';
-import { Settings } from '../src/settings.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { createHref } from '../src/web/pages/chrome.ts';
-import { loadUncategorized, renderUncategorized, submitUncategorized } from '../src/web/pages/uncategorized.ts';
-import { account, regular, regularInput, RUB, tag, transaction, user } from './fixtures.ts';
+import type { SavedMarking } from '../src/web/pages/marking.ts';
+import { loadUncategorized, renderUncategorized } from '../src/web/pages/uncategorized.ts';
+import { account, regular, RUB, tag, transaction, user } from './fixtures.ts';
 
 const today = '2026-10-06';
 const groceries = tag({ id: 'groceries', title: 'Продукты' });
@@ -24,13 +25,26 @@ const data: EntityCollections = {
     transaction({ id: 'sorted', date: '2026-10-01', outcome: 4_000, payee: 'Марина Б.' }),
     transaction({ id: 'move', date: '2026-10-01', outcome: 9_000, income: 9_000, outcomeAccount: 'card', incomeAccount: 'reserve' }),
     transaction({ id: 'kiosk-before', date: '2026-09-20', outcome: 250, payee: 'Киоск 7', tag: [cafe.id] }),
+    transaction({ id: 'cafe-before', date: '2026-09-21', outcome: 250, payee: 'Кофейня', tag: [cafe.id] }),
     transaction({ id: 'september', date: '2026-09-12', outcome: 2_900, payee: 'Алишер Ш.' }),
   ],
 };
 const workshop = regular({ id: 2, title: 'Мастерская аренда', amount: 40_000, day: 10 });
-const saved = { categorizations: new Map<string, Categorization>([['sorted', { tag: groceries.id }]]), regular: [workshop] };
-const render = (options: Parameters<typeof loadUncategorized>[2]) =>
-  String(renderUncategorized(loadUncategorized(data, saved, options), createHref())).replaceAll(' ', ' ');
+
+function saved(overrides: Partial<SavedMarking> = {}): SavedMarking {
+  return {
+    categorizations: new Map<string, Categorization>([['sorted', { tag: groceries.id }]]),
+    purchasePayments: new Map(),
+    regular: [workshop],
+    purchases: [{ id: 5, title: 'Ласты', amount: 300, week: '2026-09-28', envelope: 'week', done: false }],
+    marks: new Map(),
+    categories: NO_SETUP,
+    ...overrides,
+  };
+}
+
+const render = (options: Parameters<typeof loadUncategorized>[2], s = saved()) =>
+  String(renderUncategorized(loadUncategorized(data, s, options), createHref())).replaceAll('\u00a0', ' ');
 
 describe('uncategorized page', () => {
   it('lists the month’s expenses without a category, with suggestions to accept', () => {
@@ -38,61 +52,59 @@ describe('uncategorized page', () => {
 
     assert.ok(page.includes('В октябре 3 траты из 5 без категории, на 40 420 ₽. Для 2 есть подсказка'));
     assert.ok(page.includes('5 октября, Запас · похоже на регулярную «Мастерская аренда»'));
-    assert.ok(page.includes('action="/uncategorized/rent/regular-2"'));
-    assert.ok(page.includes('3 октября, Основной · похоже на «Кафе»') && page.includes('action="/uncategorized/kiosk/tag-cafe"'));
+    assert.ok(page.includes('action="/spending/rent/regular-2"'));
+    assert.ok(page.includes('3 октября, Основной · похоже на «Кафе»') && page.includes('action="/spending/kiosk/tag-cafe"'));
     assert.ok(page.includes('2 октября, Основной · За Савелия'));
     assert.ok(page.includes('&lt;b&gt;Лавка&lt;/b&gt;') && !page.includes('<b>Лавка</b>'));
-    assert.ok(page.includes('href="/uncategorized?edit=shop"'));
+    assert.ok(page.includes('href="/uncategorized?edit=spending-shop"'));
     assert.ok(!page.includes('Пятёрочка') && !page.includes('Алишер'), 'tagged ones and other months are not here');
-    assert.ok(page.includes('Разобрано здесь') && page.includes('1 октября, Основной · Продукты'));
+    assert.ok(page.includes('Разобрано') && page.includes('1 октября, Основной · Продукты · в неделе'));
   });
 
-  it('opens an expense as a form with the suggestion picked, and a sorted one with a way back', () => {
-    const rent = render({ today, edit: 'rent' });
-    assert.ok(rent.includes('action="/uncategorized/rent"'));
-    assert.ok(rent.includes('<option value="regular-2" selected>Мастерская аренда · 40 000 ₽</option>'));
-    assert.ok(rent.includes('<option value="tag-cafe">Кафе</option>') && !rent.includes('tag-salary'), 'only spending categories');
+  it('opens an expense in place to mark it, with the suggestion marked and the most popular categories first', () => {
+    const kiosk = render({ today, edit: 'spending-kiosk' });
+    assert.ok(kiosk.includes('id="spending-kiosk"') && kiosk.includes('href="/uncategorized"'), 'the row closes it');
+    assert.ok(kiosk.includes('class="choice suggested" type="submit" title="Подсказка"><svg'));
+    assert.ok(kiosk.indexOf('tag-cafe') < kiosk.indexOf('tag-groceries'), 'Кафе has more expenses lately');
+    assert.ok(!kiosk.includes('tag-salary'), 'only spending categories');
+    assert.ok(kiosk.includes('action="/spending/kiosk/purchase-5"') && kiosk.includes('план недели · 300 ₽'));
+    assert.ok(kiosk.indexOf('action="/spending/kiosk/purchase-5"') < kiosk.indexOf('action="/spending/kiosk/regular-2"'), 'the closer amount first');
+    assert.ok(!kiosk.includes('Другой платёж'), 'no list when all are buttons');
 
-    const shop = render({ today, edit: 'shop' });
-    assert.ok(shop.includes('<option value="" disabled selected>'), 'nothing is picked without a suggestion');
+    const sorted = render({ today, edit: 'spending-sorted' });
+    assert.ok(sorted.includes('class="choice current" aria-current="true"><svg') && sorted.includes('action="/spending/sorted/uncategorize"'));
+  });
 
-    const sorted = render({ today, edit: 'sorted' });
-    assert.ok(sorted.includes('<option value="tag-groceries" selected>Продукты</option>'));
-    assert.ok(sorted.includes('formaction="/uncategorized/sorted/reset"'));
+  it('leaves out an expense ZenMoney put into a category, even when the user picked another one', () => {
+    const page = render({ today }, saved({ categorizations: new Map<string, Categorization>([['tagged', { tag: cafe.id }]]) }));
+
+    assert.ok(!page.includes('Пятёрочка'));
+  });
+
+  it('leaves out an expense not counted at all', () => {
+    const page = render({ today }, saved({ marks: new Map([['rent', 'ignored']]) }));
+
+    assert.ok(!page.includes('Александр А.'));
+    assert.ok(page.includes('В октябре 2 траты из 4 без категории'));
+  });
+
+  it('counts an expense that paid a purchase as sorted', () => {
+    const page = render({ today }, saved({ purchasePayments: new Map([['kiosk', 5]]) }));
+
+    assert.ok(page.includes('В октябре 2 траты из 5 без категории'));
+    assert.ok(page.includes('3 октября, Основной · покупка «Ласты» · в неделе'));
   });
 
   it('shows another month and says when nothing is left', () => {
     assert.ok(render({ today, month: '2026-09' }).includes('Алишер Ш.'));
-    const categorizations = new Map<string, Categorization>([...saved.categorizations, ['rent', { regular: 2 }], ['kiosk', { tag: 'cafe' }], ['shop', { tag: 'cafe' }]]);
-    const done = loadUncategorized(data, { ...saved, categorizations }, { today });
+    const categorizations = new Map<string, Categorization>([
+      ['sorted', { tag: groceries.id }],
+      ['rent', { regular: 2 }],
+      ['kiosk', { tag: 'cafe' }],
+      ['shop', { tag: 'cafe' }],
+    ]);
+    const done = loadUncategorized(data, saved({ categorizations }), { today });
     assert.deepEqual(done.pending, []);
     assert.ok(String(renderUncategorized(done, createHref())).includes('В октябре у всех трат есть категория.'));
-  });
-});
-
-describe('submitUncategorized', () => {
-  const form = (fields: Record<string, string> = {}) => new URLSearchParams(fields);
-
-  it('saves an accepted suggestion, a picked target and a way back', () => {
-    using settings = new Settings(':memory:');
-    const rent = settings.addRegularExpense(regularInput({ title: 'Мастерская аренда', amount: 40_000, day: 10 }));
-
-    assert.deepEqual(submitUncategorized(settings, data, `/uncategorized/rent/regular-${rent.id}`, form()), { status: 'saved' });
-    assert.deepEqual(submitUncategorized(settings, data, '/uncategorized/kiosk', form({ target: 'tag-cafe' })), { status: 'saved' });
-    assert.deepEqual([...settings.categorizations()], [['rent', { regular: rent.id }], ['kiosk', { tag: 'cafe' }]]);
-
-    submitUncategorized(settings, data, '/uncategorized/rent/reset', form());
-    assert.deepEqual([...settings.categorizations()], [['kiosk', { tag: 'cafe' }]]);
-  });
-
-  it('refuses an unknown expense, category or regular expense', () => {
-    using settings = new Settings(':memory:');
-
-    assert.deepEqual(submitUncategorized(settings, data, '/uncategorized/nope/tag-cafe', form()), { status: 'missing' });
-    assert.deepEqual(submitUncategorized(settings, data, '/uncategorized/kiosk/tag-nope', form()), { status: 'missing' });
-    assert.deepEqual(submitUncategorized(settings, data, '/uncategorized/kiosk/regular-5', form()), { status: 'missing' });
-    assert.deepEqual(submitUncategorized(settings, data, '/uncategorized/kiosk', form({ target: '' })), { status: 'missing' });
-    assert.deepEqual(submitUncategorized(settings, data, '/uncategorized/kiosk/drop', form()), { status: 'missing' });
-    assert.deepEqual([...settings.categorizations()], []);
   });
 });

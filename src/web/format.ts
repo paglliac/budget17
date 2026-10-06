@@ -1,6 +1,6 @@
 // Russian formatting for the web UI: money, months, plurals.
 
-import { daysBetween, monthName } from '../dates.ts';
+import { addDays, daysBetween, localDate, monthName } from '../dates.ts';
 import type { DateString } from '../zenmoney/types.ts';
 
 const integerFormat = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
@@ -51,6 +51,19 @@ export { monthName } from '../dates.ts';
 /** 5 октября. */
 export function dayMonth(date: DateString): string {
   return `${Number(date.slice(8, 10))} ${monthName(date, 'genitive')}`;
+}
+
+/** The time of day of a moment in Unix seconds, 23:28, when it falls on `date` here; null when it does not. */
+export function timeOn(date: DateString, seconds: number): string | null {
+  const moment = new Date(seconds * 1000);
+  if (localDate(moment) !== date) return null;
+  return moment.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+/** A week by its Monday: 5–11 октября, or 28 сентября – 4 октября across months. */
+export function weekLabel(week: DateString): string {
+  const end = addDays(week, 6);
+  return week.slice(0, 7) === end.slice(0, 7) ? `${Number(week.slice(8, 10))}–${dayMonth(end)}` : `${dayMonth(week)} – ${dayMonth(end)}`;
 }
 
 /** 5 октября, or 5 марта 2027 when the year is not the one of `today`. */

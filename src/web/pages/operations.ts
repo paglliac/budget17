@@ -1,10 +1,13 @@
 // Operations of a month by day, filtered by kind, category and text, with spending by category on the side.
 // Filters live in the URL, so any view can be linked to, e.g. from a category on the overview. Categories picked in
-// the app count as if they came from ZenMoney, and payments of regular expenses go under Регулярные траты.
+// the app win over ZenMoney's, and payments of regular expenses go under Регулярные траты. An expense opens in place
+// by ?edit=spending-<ZenMoney id> to be marked as on every page (see marking.ts). Expenses the user said not to count
+// at all are listed only here, quieter, so they can be found and counted again; no sum takes them in.
 
 import { mainCurrency } from '../../balances.ts';
+import { categoryFinder } from '../../categories.ts';
 import { dateOf, daysInMonth, monthOf, type MonthString } from '../../dates.ts';
-import { filterOperations, listOperations, spendingByCategory, type CategorySpending, type Operation, type OperationFilter, type Sorting } from '../../ledger.ts';
+import { filterOperations, listOperations, spendingByCategory, type CategorySpending, type Operation, type OperationFilter } from '../../ledger.ts';
 import type { OperationKind } from '../../operations.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
@@ -16,6 +19,7 @@ import { emptyState, filterTag, pageIntro, searchField, segmentedLinks } from '.
 import { categoryList, dayGroup, operationRow } from '../widgets/operations.ts';
 import { appShell, stack, toolbar, topBar } from '../widgets/shell.ts';
 import { appRail, monthTabs, parseMonth, userName, type Href } from './chrome.ts';
+import { allExpenses, loadMarking, markingActions, markingPanel, type Marking, type SavedMarking } from './marking.ts';
 
 export interface OperationsData {
   today: DateString;
@@ -30,6 +34,10 @@ export interface OperationsData {
   /** Spending of the month by category, for the side panel. */
   categories: CategorySpending[];
   expense: number;
+  /** For an expense opened to mark it. */
+  marking: Marking;
+  /** What is open for marking: spending-<ZenMoney id>. */
+  edit: string | null;
   symbol: string;
   userName: string | null;
 }
@@ -38,18 +46,19 @@ const KINDS: OperationKind[] = ['expense', 'income', 'transfer'];
 
 export function loadOperations(
   data: EntityCollections,
-  sorting: Sorting,
-  options: { today: DateString; month?: string | null; kind?: string | null; category?: string | null; query?: string | null },
+  sorting: SavedMarking,
+  options: { today: DateString; month?: string | null; kind?: string | null; category?: string | null; query?: string | null; edit?: string | null },
 ): OperationsData {
   const month = parseMonth(options.month, monthOf(options.today));
-  const all = listOperations(data, { from: dateOf(month, 1), to: dateOf(month, daysInMonth(month)) }, sorting);
+  const all = listOperations(data, { from: dateOf(month, 1), to: dateOf(month, daysInMonth(month)) }, sorting, { withIgnored: true });
   const kind = KINDS.find((k) => k === options.kind);
   const filter: OperationFilter = { kind, category: options.category || undefined, query: options.query?.trim() || undefined };
   const withoutKind = filterOperations(all, { ...filter, kind: undefined });
-  const categories = spendingByCategory(all);
+  const categories = spendingByCategory(all.filter((o) => !o.ignored));
   // Регулярные траты are not a ZenMoney category, so the title is looked up among the month's categories first.
   const category = categories.find((c) => c.id !== null && c.id === filter.category);
-  const tag = filter.category && filter.category !== 'none' ? data.tag?.find((t) => t.id === filter.category) : undefined;
+  const tags = new Map((data.tag ?? []).map((t) => [t.id, t]));
+  const tag = filter.category && filter.category !== 'none' ? categoryFinder(tags, sorting.categories)(filter.category) : undefined;
 
   return {
     today: options.today,
@@ -65,6 +74,8 @@ export function loadOperations(
     },
     categories,
     expense: categories.reduce((sum, c) => sum + c.amount, 0),
+    marking: loadMarking(data, sorting, allExpenses(data, sorting), options.today),
+    edit: options.edit ?? null,
     symbol: mainCurrency(data).symbol,
     userName: userName(data),
   };
@@ -78,7 +89,7 @@ export function renderOperations(d: OperationsData, href: Href): Html {
     category: d.filter.category ?? null,
     q: d.filter.query ?? null,
   };
-  const to = (changes: Partial<typeof state>) => href('/operations', { ...state, ...changes });
+  const to = (changes: Partial<typeof state> & { edit?: string | null }) => href('/operations', { ...state, ...changes });
   const searchParams = Object.fromEntries(new URL(to({ q: null }), 'http://localhost').searchParams);
 
   const body = appShell({
@@ -112,7 +123,7 @@ export function renderOperations(d: OperationsData, href: Href): Html {
           d.filter.query ? filterTag({ label: `«${d.filter.query}»`, href: to({ q: null }) }) : null,
         ],
       }),
-      feed(d),
+      feed(d, href, to),
     ],
     side: [
       topBar({ crumbs: [{ label: 'Расходы по категориям' }] }),
@@ -144,7 +155,7 @@ export function renderOperations(d: OperationsData, href: Href): Html {
 function sentence(d: OperationsData): string {
   const count = d.operations.length;
   if (count === 0) return 'Под эти условия операций нет.';
-  const expense = d.operations.filter((o) => o.kind === 'expense').reduce((s, o) => s + o.amount, 0);
+  const expense = d.operations.filter((o) => o.kind === 'expense' && !o.ignored).reduce((s, o) => s + o.amount, 0);
   const income = d.operations.filter((o) => o.kind === 'income').reduce((s, o) => s + o.amount, 0);
   const parts = [expense > 0 ? `потрачено ${money(expense, d.symbol)}` : '', income > 0 ? `получено ${money(income, d.symbol)}` : ''].filter(Boolean);
   const head = `${count} ${plural(count, ['операция', 'операции', 'операций'])}`;
@@ -153,7 +164,7 @@ function sentence(d: OperationsData): string {
   return text.endsWith('.') ? text : `${text}.`;
 }
 
-function feed(d: OperationsData): Html {
+function feed(d: OperationsData, href: Href, to: (changes: { edit?: string | null }) => string): Html {
   if (d.operations.length === 0) {
     const filtered = d.filter.kind || d.filter.category || d.filter.query;
     return emptyState({
@@ -171,28 +182,36 @@ function feed(d: OperationsData): Html {
       date,
       today: d.today,
       net: {
-        amount: operations.reduce((s, o) => s + (o.kind === 'income' ? o.amount : o.kind === 'expense' ? -o.amount : 0), 0),
+        amount: operations.reduce((s, o) => s + (o.kind === 'income' ? o.amount : o.kind === 'expense' && !o.ignored ? -o.amount : 0), 0),
         symbol: d.symbol,
       },
-        rows: operations.map((o) => row(o, d.symbol)),
+        rows: operations.map((o) => row(d, o, href, to)),
       }),
     ),
   });
 }
 
-function row(o: Operation, symbol: string): Html {
+/** An operation; an expense opens in place to be marked. */
+function row(d: OperationsData, o: Operation, href: Href, to: (changes: { edit?: string | null }) => string): Html {
   const isTransfer = o.kind === 'transfer';
-  const category = o.regular?.title ?? o.category?.title ?? (o.kind === 'income' ? 'Доход' : isTransfer ? 'Перевод' : 'Без категории');
+  const category = o.regular?.title ?? o.purchase?.title ?? o.category?.title ?? (o.kind === 'income' ? 'Доход' : isTransfer ? 'Перевод' : 'Без категории');
+  const key = `spending-${o.id}`;
+  const open = o.kind === 'expense' && d.edit === key;
   return operationRow({
+    id: o.kind === 'expense' ? key : undefined,
     title: o.payee,
-    details: isTransfer ? `${o.account} → ${o.toAccount}` : `${category}, ${o.account}`,
+    details: isTransfer ? `${o.account} → ${o.toAccount}` : `${o.ignored ? 'не учитывается' : category}, ${o.account}`,
     icon: isTransfer ? 'arrows' : o.category ? categoryIcon(o.category.title) : o.kind === 'income' ? 'arrowDownLeft' : 'tag',
     color: isTransfer ? toneColor('gray') : o.kind === 'income' && !o.category ? toneColor('green') : categoryColor(o.category?.id ?? null, o.category?.color ?? null),
     kind: o.kind,
     amount: o.amount,
-    symbol,
+    symbol: d.symbol,
     original: o.original ? { amount: o.original.amount, symbol: o.original.instrument.symbol } : undefined,
     comment: o.comment ?? undefined,
     hold: o.hold,
+    muted: o.ignored,
+    href: o.kind === 'expense' ? to({ edit: open ? null : key }) : undefined,
+    panel: open ? markingPanel(d.marking, o, href) : undefined,
+    actions: open ? markingActions(d.marking, o, href) : undefined,
   });
 }

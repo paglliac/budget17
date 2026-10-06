@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { filterOperations, listOperations, REGULAR_CATEGORY, spendingByCategory } from '../src/ledger.ts';
+import { filterOperations, listOperations, PURCHASE_CATEGORY, REGULAR_CATEGORY, spendingByCategory } from '../src/ledger.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { account, RUB, tag, transaction, USD, user } from './fixtures.ts';
 
@@ -45,12 +45,16 @@ describe('listOperations', () => {
       amount: 560,
       original: null,
       payee: 'Яндекс Go',
+      originalPayee: null,
       comment: null,
       category: { id: transport.id, title: 'Транспорт', color: '#5b84f0' },
+      zenmoneyCategory: { id: transport.id, title: 'Транспорт', color: '#5b84f0' },
       regular: null,
+      purchase: null,
       account: 'Т-Банк',
       toAccount: null,
       hold: true,
+      ignored: false,
     });
   });
 
@@ -140,7 +144,7 @@ describe('listOperations with banks and the user’s sorting', () => {
     assert.deepEqual(operations.map((o) => o.payee).sort(), ['Кирилл А.', 'Основной → Наличные', 'Основной → Сбер']);
   });
 
-  it('gives an expense without a category the one the user picked, or Регулярные траты for a regular payment', () => {
+  it('gives an expense the category the user picked over ZenMoney’s, or Регулярные траты for a regular payment', () => {
     const sorting = {
       categorizations: new Map([
         ['picked', { tag: food.id }],
@@ -172,13 +176,73 @@ describe('listOperations with banks and the user’s sorting', () => {
       operations.map((o) => [o.payee, o.category?.title ?? null, o.regular?.title ?? null]),
       [
         ['Лавка', 'Продукты', null],
-        ['Такси', 'Транспорт', null],
+        ['Такси', 'Продукты', null],
         ['Александр А.', REGULAR_CATEGORY.title, 'Мастерская аренда'],
         ['Мастерская аренда', REGULAR_CATEGORY.title, 'Мастерская аренда'],
         ['Без привязки', null, null],
         ['Зарплата', null, null],
       ],
     );
+  });
+
+  it('uses the titles the user gave categories and their own ones, and names the purchase an expense paid', () => {
+    const sorting = {
+      categorizations: new Map([
+        ['own', { tag: 'own-1' }],
+        ['kids', { tag: 'own-1' }],
+      ]),
+      regular: [],
+      purchasePayments: new Map([
+        ['kids', 4],
+        ['shoes', 4],
+        ['bare', 4],
+      ]),
+      purchases: [{ id: 4, title: 'Ботинки Савве' }],
+      categories: {
+        changes: new Map([[transport.id, { title: 'Машина и проезд', hidden: true }]]),
+        own: [{ id: 'own-1', title: 'Дети', hidden: false }],
+      },
+    };
+    const operations = listOperations(
+      {
+        ...data,
+        transaction: [
+          transaction({ id: 'taxi', created: 5, outcome: 500, payee: 'Такси', tag: [taxi.id] }),
+          transaction({ id: 'own', created: 4, outcome: 300, payee: 'Лавка' }),
+          transaction({ id: 'kids', created: 3, outcome: 2_000, payee: 'Детский мир' }),
+          transaction({ id: 'shoes', created: 2, outcome: 6_000, payee: 'Обувь', tag: [food.id] }),
+          transaction({ id: 'bare', created: 1, outcome: 100 }),
+        ],
+      },
+      october,
+      sorting,
+    );
+
+    assert.deepEqual(
+      operations.map((o) => [o.payee, o.category?.title ?? null, o.zenmoneyCategory?.title ?? null, o.purchase?.title ?? null]),
+      [
+        ['Такси', 'Машина и проезд', 'Машина и проезд', null],
+        ['Лавка', 'Дети', null, null],
+        ['Детский мир', 'Дети', null, 'Ботинки Савве'],
+        ['Обувь', 'Продукты', 'Продукты', 'Ботинки Савве'],
+        ['Ботинки Савве', PURCHASE_CATEGORY.title, null, 'Ботинки Савве'],
+      ],
+    );
+  });
+
+  it('leaves out expenses the user said not to count at all, unless asked for them, and keeps how the bank named the payee', () => {
+    const transactions = {
+      ...data,
+      transaction: [
+        transaction({ id: 'cash', created: 2, outcome: 120_000 }),
+        transaction({ id: 'shop', created: 1, outcome: 473, payee: 'Пятёрочка', originalPayee: 'PYATEROCHKA 9076' }),
+        transaction({ id: 'same', created: 0, outcome: 100, payee: 'Lenta', originalPayee: 'LENTA' }),
+      ],
+    };
+    const sorting = { categorizations: new Map(), regular: [], marks: new Map([['cash', 'ignored' as const], ['shop', 'outside' as const]]) };
+
+    assert.deepEqual(listOperations(transactions, october, sorting).map((o) => [o.id, o.originalPayee]), [['shop', 'PYATEROCHKA 9076'], ['same', null]]);
+    assert.deepEqual(listOperations(transactions, october, sorting, { withIgnored: true }).map((o) => [o.id, o.ignored]), [['cash', true], ['shop', false], ['same', false]]);
   });
 
   it('sums expenses by category, largest first', () => {

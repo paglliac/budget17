@@ -191,3 +191,64 @@ export function iconPicker(options: {
     )}</span>
   </fieldset>`;
 }
+
+/**
+ * Choices made in one click, under a label, such as the category to put an expense into: each choice posts a form to
+ * its URL. The current one is highlighted and posts nothing; a suggested one is marked. `other` lists the rest, for a
+ * choice that is not among the buttons; it posts the picked value as `name` with its own button.
+ */
+export function choiceGroup(options: {
+  label: string;
+  choices: Array<{
+    label: string;
+    /** Quieter text after the label, such as a date and an amount. */
+    detail?: string;
+    /** Where the choice posts; a current choice needs none. */
+    action?: string;
+    current?: boolean;
+    suggested?: boolean;
+    /** A dot in this colour, such as the category's. */
+    color?: string;
+  }>;
+  other?: {
+    label: string;
+    action: string;
+    name: string;
+    placeholder: string;
+    submitLabel: string;
+    groups: Array<{ label: string; options: Array<{ value: string; label: string }> }>;
+  };
+  /** Shown instead of choices when there are none, such as why the choice is not up to the user. */
+  empty?: string;
+}): Html {
+  const inner = (c: (typeof options.choices)[number]) =>
+    html`${c.suggested && !c.current ? icon('sparkles', 12) : null}${c.current ? icon('check', 12) : null}${
+      c.color ? html`<i style="background:${c.color}"></i>` : null
+    }<span>${c.label}${c.detail ? html` <small>${c.detail}</small>` : null}</span>`;
+  return html`<div class="choices" role="group" aria-label="${options.label}">
+    <span class="choices-label">${options.label}</span>
+    <span class="choices-list">${options.choices.map((c) =>
+      c.current || !c.action
+        ? html`<span class="choice${c.current ? ' current' : ''}"${c.current ? html` aria-current="true"` : null}>${inner(c)}</span>`
+        : html`<form method="post" action="${c.action}"><button class="choice${c.suggested ? ' suggested' : ''}" type="submit"${
+            c.suggested ? html` title="Подсказка"` : null
+          }>${inner(c)}</button></form>`,
+    )}${options.choices.length === 0 && options.empty ? html`<span class="choices-empty">${options.empty}</span>` : null}</span>
+    ${options.other
+      ? html`<form class="choices-other" method="post" action="${options.other.action}">${selectField({
+          label: options.other.label,
+          name: options.other.name,
+          placeholder: options.other.placeholder,
+          required: true,
+          groups: options.other.groups,
+        })}${button({ label: options.other.submitLabel, submit: true })}</form>`
+      : null}
+  </div>`;
+}
+
+/** Facts about something, a label and a value each, in a row that wraps, such as when and from where an expense was paid. */
+export function factList(options: { label: string; items: Array<{ label: string; value: string }> }): Html {
+  return html`<dl class="facts" aria-label="${options.label}">${options.items.map(
+    (item) => html`<div class="fact"><dt>${item.label}</dt><dd>${item.value}</dd></div>`,
+  )}</dl>`;
+}

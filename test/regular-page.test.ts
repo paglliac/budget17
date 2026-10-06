@@ -82,7 +82,7 @@ describe('regular expenses page', () => {
     ]);
     assert.ok(page.indexOf('action="/regular"') < page.indexOf('<h2>Начнутся позже'), 'the form to add one stays under the month');
     assert.ok(!render({ today }).includes('Начнутся позже'), 'no group when nothing starts later');
-    assert.equal(page.split('<li class="entry muted">').length - 1, 2);
+    assert.equal(page.split('<li class="entry muted"').length - 1, 2);
     assert.ok(page.includes('Осталось заплатить 13 000 ₽ из 105 500 ₽, ближайший платёж — «&lt;b&gt;Офис&lt;/b&gt; аренда», через 20 дней.'), 'the car is paid before its day');
     assert.ok(page.includes('13 000<span>,00 ₽</span>') && page.includes('из 105 500 ₽ на 3 платежа'), 'the loan starts next month');
     assert.ok(page.includes('title="Оплачено"') && page.includes('title="Прошли"') && page.includes('title="Впереди"'));
