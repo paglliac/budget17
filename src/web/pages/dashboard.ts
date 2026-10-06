@@ -2,10 +2,13 @@
 // the week's spending on the side; the month tab is the month's weeks and its extras. Built from widgets only.
 // Entries open by ?edit=purchase-1, wish-1 or spending-<ZenMoney id>; forms post to /purchases, /wishes and
 // /spending (see submitDashboard), and the server sends the browser back to the page they came from.
+// PROTOTYPE: planning weeks ahead, switched by ?variant=A|B|C and the floating bar. A «Листать» opens any week with
+// arrows and plans in it; B «Вперёд» adds a tab with the next weeks one under another, each with its own form; C «Выбор
+// недели» keeps this week and lets the form put a purchase into a later week, listing what is planned further on.
 
 import { summarizeBalances } from '../../balances.ts';
 import type { Categorization } from '../../categorization.ts';
-import { addDays, type MonthString } from '../../dates.ts';
+import { addDays, shiftMonth, type MonthString } from '../../dates.ts';
 import { amountText, parseAmount, parseTitle } from '../../input.ts';
 import { listOperations, type Operation } from '../../ledger.ts';
 import type { RegularExpense } from '../../regular.ts';
@@ -32,14 +35,21 @@ import {
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { capitalize, dayMonth, money, monthName } from '../format.ts';
-import type { Html } from '../html.ts';
+import { escape, Html } from '../html.ts';
 import { categoryIcon, entryIcon } from '../icons.ts';
 import { categoryColor, toneColor } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
-import { button, emptyState, field, footnote, pageIntro, section, shareBar } from '../widgets/basics.ts';
+import { button, emptyState, field, footnote, pageIntro, section, segmentedLinks, selectField, shareBar } from '../widgets/basics.ts';
 import { entryForm, entryList, entryRow } from '../widgets/entries.ts';
 import { appShell, tabs, topBar } from '../widgets/shell.ts';
 import { appRail, userName, type Href } from './chrome.ts';
+
+/** How many weeks ahead a week can be opened and planned. */
+const PLAN_AHEAD = 52;
+/** Weeks a purchase can be put into from its form: this one and the next ones. */
+const WEEK_CHOICES = 13;
+/** PROTOTYPE: weeks that «Вперёд» shows after the current one. */
+const AHEAD = 8;
 
 /** What the user keeps in the app for the budget. */
 export interface SavedBudget {
@@ -62,17 +72,24 @@ export interface DashboardForm {
   errors: Partial<Record<FormField, string>>;
   /** Which list a new purchase was added to. */
   envelope: 'week' | 'extra';
+  /** The week the purchase was sent with, as sent. */
+  week: string | null;
 }
 
 export interface DashboardData {
   today: DateString;
-  view: 'week' | 'month';
-  /** The week tab's week: the current one, or an earlier one opened from the month. */
+  view: 'week' | 'month' | 'ahead';
+  /** The week tab's week: the current one, an earlier one opened from the month, or a later one being planned. */
   week: WeekSummary;
-  /** The weeks of the current month. */
+  /** The weeks of the month tab's month, the current one unless another is opened. */
   weeks: WeekSummary[];
-  /** Extras of the current month. */
+  /** Extras of the month tab's month. */
   extras: ExtrasSummary;
+  /** The weeks after the current one. */
+  ahead: WeekSummary[];
+  /** Purchases planned after the current week. */
+  later: Purchase[];
+  variant: Variant;
   wishes: Array<{ wish: Wish; advice: Advice }>;
   marks: ReadonlyMap<string, Envelope>;
   /** What is open for editing: purchase-1, wish-1 or spending-<ZenMoney id>. */
@@ -105,22 +122,29 @@ export function loadDashboard(
     view?: string | null;
     week?: string | null;
     edit?: string | null;
+    month?: string | null;
     form?: DashboardForm;
     source: DashboardData['source'];
     canSync: boolean;
+    variant?: string | null;
   },
 ): DashboardData {
   const { today } = options;
   const current = weekOf(today);
   const week = parseWeek(options.week, current);
-  const budget = budgetOf(data, saved, { today, from: week });
-  const month = monthOfWeek(current);
+  const month = parseMonthOfWeeks(options.month, current);
+  const monthStart = weeksOfMonth(month)[0] ?? current;
+  const budget = budgetOf(data, saved, { today, from: week < monthStart ? week : monthStart });
+  const variant = VARIANTS.find((v) => v.key === options.variant?.toUpperCase()) ?? VARIANTS[0]!;
   return {
     today,
-    view: options.view === 'month' ? 'month' : 'week',
+    view: options.view === 'month' ? 'month' : options.view === 'ahead' && variant.key === 'B' ? 'ahead' : 'week',
     week: summarizeWeek(budget, week),
     weeks: weeksOfMonth(month).map((w) => summarizeWeek(budget, w)),
     extras: summarizeExtras(budget, month),
+    ahead: Array.from({ length: AHEAD }, (_, i) => summarizeWeek(budget, addDays(current, 7 * (i + 1)))),
+    later: saved.purchases.filter((p) => p.week > current),
+    variant,
     wishes: saved.wishes.map((wish) => ({ wish, advice: adviseWish(budget, wish, today) })),
     marks: saved.marks,
     edit: options.edit ?? null,
@@ -132,11 +156,21 @@ export function loadDashboard(
   };
 }
 
-/** A Monday from a query param, no later than the current week; the current week otherwise. */
+/** A Monday from a query param, at most PLAN_AHEAD weeks after the current one; the current week otherwise. */
 function parseWeek(value: string | null | undefined, current: DateString): DateString {
-  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && weekOf(value) === value && value <= current
+  return value &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    !Number.isNaN(Date.parse(value)) &&
+    weekOf(value) === value &&
+    value <= addDays(current, 7 * PLAN_AHEAD)
     ? value
     : current;
+}
+
+/** A month from a query param that has weeks no later than PLAN_AHEAD; the month of the current week otherwise. */
+function parseMonthOfWeeks(value: string | null | undefined, current: DateString): MonthString {
+  const last = monthOfWeek(addDays(current, 7 * PLAN_AHEAD));
+  return value && /^\d{4}-(0[1-9]|1[0-2])$/.test(value) && value <= last ? value : monthOfWeek(current);
 }
 
 // ---- Forms
@@ -179,13 +213,14 @@ export function submitDashboard(
     }
     const envelope = existing ? existing.envelope : body.get('envelope') === 'extra' ? 'extra' : 'week';
     const parsed = parseEntry(body);
-    if ('errors' in parsed) return { status: 'invalid', form: { kind: 'purchase', id, ...parsed, envelope } };
+    if ('errors' in parsed) return { status: 'invalid', form: { kind: 'purchase', id, ...parsed, envelope, week: body.get('week') } };
     if (!existing) {
       const week = parseWeek(body.get('week'), weekOf(context.today));
       settings.addPurchase({ ...parsed.entry, week, envelope, done: false });
     } else {
       const moved = action === 'move' ? (existing.envelope === 'week' ? 'extra' : 'week') : existing.envelope;
-      settings.updatePurchase(existing.id, { ...parsed.entry, envelope: moved });
+      const week = body.has('week') ? parseWeek(body.get('week'), weekOf(context.today)) : existing.week;
+      settings.updatePurchase(existing.id, { ...parsed.entry, envelope: moved, week });
     }
     return { status: 'saved' };
   }
@@ -206,7 +241,7 @@ export function submitDashboard(
       return { status: 'saved' };
     }
     const parsed = parseEntry(body);
-    if ('errors' in parsed) return { status: 'invalid', form: { kind: 'wish', id, ...parsed, envelope: 'week' } };
+    if ('errors' in parsed) return { status: 'invalid', form: { kind: 'wish', id, ...parsed, envelope: 'week', week: null } };
     if (existing) settings.updateWish(existing.id, parsed.entry);
     else settings.addWish(parsed.entry);
     return { status: 'saved' };
@@ -232,11 +267,17 @@ function parseEntry(
 
 export function renderDashboard(d: DashboardData, href: Href): Html {
   const current = weekOf(d.today);
+  const thisMonth = monthOfWeek(current);
   /** This page with the given params; an entry opens with `edit`. */
   const here = (params: Record<string, string | null> = {}) =>
-    href('/', { view: d.view === 'month' ? 'month' : null, week: d.week.week === current ? null : d.week.week, ...params });
+    href('/', {
+      view: d.view === 'week' ? null : d.view,
+      week: d.view === 'week' && d.week.week !== current ? d.week.week : null,
+      month: d.view === 'month' && d.extras.month !== thisMonth ? d.extras.month : null,
+      ...params,
+    });
   const page = { d, href, here, current };
-  const { main, side } = d.view === 'month' ? monthView(page) : weekView(page);
+  const { main, side } = d.view === 'month' ? monthView(page) : d.view === 'ahead' ? aheadView(page) : weekView(page);
 
   const body = appShell({
     rail: appRail('overview', d.userName, href),
@@ -244,6 +285,8 @@ export function renderDashboard(d: DashboardData, href: Href): Html {
       label: 'Период',
       items: [
         { label: 'Неделя', icon: 'calendar', href: href('/'), active: d.view === 'week' },
+        // PROTOTYPE: B has the weeks ahead as a tab of their own.
+        ...(d.variant.key === 'B' ? [{ label: 'Вперёд', icon: 'calendar' as const, href: href('/', { view: 'ahead' }), active: d.view === 'ahead' }] : []),
         { label: 'Месяц', icon: 'calendar', href: href('/', { view: 'month' }), active: d.view === 'month' },
       ],
     }),
@@ -255,7 +298,9 @@ export function renderDashboard(d: DashboardData, href: Href): Html {
       }),
     ],
   });
-  return pageDocument({ title: 'Бюджет', body });
+  const document = pageDocument({ title: 'Бюджет', body });
+  if (process.env.NODE_ENV === 'production') return document;
+  return new Html(document.toString().replace('</body>', `${switcher(d.variant, href)}\n</body>`));
 }
 
 interface Page {
@@ -266,13 +311,15 @@ interface Page {
 }
 
 function weekView(page: Page): { main: Html[]; side: Html[] } {
-  const { d, href, current } = page;
+  const { d, current } = page;
   const w = d.week;
   const isCurrent = w.week === current;
   return {
     main: [
       topBar({ crumbs: [{ label: 'Бюджет' }, { label: `Неделя ${weekLabel(w.week)}`, icon: 'calendar' }], actions: syncButton(d) }),
-      pageIntro({ title: `Неделя ${weekLabel(w.week)}`, text: weekSentence(d, w, isCurrent) }),
+      // PROTOTYPE: A steps from week to week.
+      d.variant.key === 'A' ? weekSteps(page) : null,
+      pageIntro({ title: `Неделя ${weekLabel(w.week)}`, text: weekSentence(d, w, current) }),
       section({
         title: 'План',
         body: entryList({
@@ -280,10 +327,12 @@ function weekView(page: Page): { main: Html[]; side: Html[] } {
           items: [
             ...w.purchases.map((p) => purchaseItem(page, p)),
             ...w.regular.map((payment) => regularItem(page, payment)),
-            newPurchaseForm(page, w.week, 'week'),
+            newPurchaseForm(page, w.week, 'week', d.variant.key === 'C' && isCurrent),
           ],
         }),
       }),
+      // PROTOTYPE: C lists what is planned for the weeks after this one.
+      d.variant.key === 'C' && isCurrent ? laterSection(page) : null,
       isCurrent
         ? section({
             title: 'Хочу купить',
@@ -291,35 +340,58 @@ function weekView(page: Page): { main: Html[]; side: Html[] } {
           })
         : null,
     ].filter((part): part is Html => part !== null),
-    side: [
-      topBar({ crumbs: [{ label: w.week < current ? 'Итог недели' : 'Можно потратить' }] }),
-      balanceTotal({ amount: w.free, symbol: d.symbol, note: `из ${money(WEEK_LIMIT, d.symbol)} на неделю` }),
-      shareBar({
-        label: 'Неделя',
-        parts: [
-          { label: 'Потрачено', value: w.spent, color: toneColor('yellow') },
-          { label: 'План', value: w.planned, color: toneColor('violet') },
-          { label: 'Свободно', value: w.free, color: toneColor('gray') },
-        ],
-      }),
-      topBar({ crumbs: [{ label: 'Траты недели' }] }),
-      ...(w.spending.length === 0
-        ? [emptyState({ text: 'Трат пока нет.' })]
-        : [
-            entryList({ label: 'Траты недели', items: w.spending.map((o) => spendingItem(page, o)) }),
-            footnote({ text: 'Траты идут в неделю. Откройте трату, чтобы отнести её к дополнительным или вне бюджета.' }),
-          ]),
-    ],
+    side: w.week > current ? aheadSide(d, w) : spentSide(page, w),
   };
+}
+
+/** What is left of a week that has begun or is over, and its spending. */
+function spentSide(page: Page, w: WeekSummary): Html[] {
+  const { d, current } = page;
+  return [
+    topBar({ crumbs: [{ label: w.week < current ? 'Итог недели' : 'Можно потратить' }] }),
+    balanceTotal({ amount: w.free, symbol: d.symbol, note: `из ${money(WEEK_LIMIT, d.symbol)} на неделю` }),
+    shareBar({
+      label: 'Неделя',
+      parts: [
+        { label: 'Потрачено', value: w.spent, color: toneColor('yellow') },
+        { label: 'План', value: w.planned, color: toneColor('violet') },
+        { label: 'Свободно', value: w.free, color: toneColor('gray') },
+      ],
+    }),
+    topBar({ crumbs: [{ label: 'Траты недели' }] }),
+    ...(w.spending.length === 0
+      ? [emptyState({ text: 'Трат пока нет.' })]
+      : [
+          entryList({ label: 'Траты недели', items: w.spending.map((o) => spendingItem(page, o)) }),
+          footnote({ text: 'Траты идут в неделю. Откройте трату, чтобы отнести её к дополнительным или вне бюджета.' }),
+        ]),
+  ];
+}
+
+/** What a week ahead leaves free after its plan. */
+function aheadSide(d: DashboardData, w: WeekSummary): Html[] {
+  return [
+    topBar({ crumbs: [{ label: 'Будет свободно' }] }),
+    balanceTotal({ amount: w.free, symbol: d.symbol, note: `из ${money(WEEK_LIMIT, d.symbol)} на неделю` }),
+    shareBar({
+      label: 'Неделя',
+      parts: [
+        { label: 'План', value: w.planned, color: toneColor('violet') },
+        { label: 'Свободно', value: w.free, color: toneColor('gray') },
+      ],
+    }),
+  ];
 }
 
 function monthView(page: Page): { main: Html[]; side: Html[] } {
   const { d, href, current } = page;
   const m = d.extras;
+  const isA = d.variant.key === 'A';
   return {
     main: [
       topBar({ crumbs: [{ label: 'Бюджет' }, { label: capitalize(monthName(m.month)), icon: 'calendar' }], actions: syncButton(d) }),
-      pageIntro({ title: capitalize(monthName(m.month)), text: monthSentence(d) }),
+      isA ? monthSteps(page) : null,
+      pageIntro({ title: capitalize(monthName(m.month)), text: monthSentence(d, current) }),
       section({
         title: 'Недели',
         body: entryList({
@@ -329,13 +401,16 @@ function monthView(page: Page): { main: Html[]; side: Html[] } {
               title: `Неделя ${weekLabel(w.week)}`,
               details:
                 w.week > current
-                  ? 'впереди · можно потратить'
+                  ? w.planned > 0
+                    ? `впереди · в плане ${money(w.planned, d.symbol)} · свободно`
+                    : 'впереди · можно потратить'
                   : `${w.week === current ? 'идёт' : 'прошла'} · потрачено ${money(w.spent, d.symbol)} · ${w.free < 0 ? 'перерасход' : 'осталось'}`,
               icon: 'calendar',
-              color: toneColor(w.free < 0 ? 'red' : w.week === current ? 'violet' : 'yellow'),
+              color: toneColor(w.free < 0 ? 'red' : w.week === current ? 'violet' : w.week > current ? 'gray' : 'yellow'),
               amount: Math.abs(w.free),
               symbol: d.symbol,
-              href: w.week <= current ? href('/', { week: w.week === current ? null : w.week }) : undefined,
+              // PROTOTYPE: only A opens weeks ahead from the month.
+              href: w.week <= current || isA ? href('/', { week: w.week === current ? null : w.week }) : undefined,
             }),
           ),
         }),
@@ -347,11 +422,11 @@ function monthView(page: Page): { main: Html[]; side: Html[] } {
           items: [
             ...m.purchases.map((p) => purchaseItem(page, p)),
             ...m.spending.map((o) => spendingItem(page, o)),
-            newPurchaseForm(page, current, 'extra'),
+            newPurchaseForm(page, m.month === monthOfWeek(current) ? current : (d.weeks[0]?.week ?? current), 'extra'),
           ],
         }),
       }),
-    ],
+    ].filter((part): part is Html => part !== null),
     side: [
       topBar({ crumbs: [{ label: 'Дополнительные' }] }),
       balanceTotal({ amount: m.free, symbol: d.symbol, note: `осталось из ${money(MONTH_LIMIT, d.symbol)} в ${monthName(m.month, 'prepositional')}` }),
@@ -368,6 +443,82 @@ function monthView(page: Page): { main: Html[]; side: Html[] } {
   };
 }
 
+/**
+ * PROTOTYPE B: the next weeks one under another, each with what is planned and a form to add to it. Regular payments
+ * are left out: they are outside the budget and would bury the plan.
+ */
+function aheadView(page: Page): { main: Html[]; side: Html[] } {
+  const { d } = page;
+  const planned = sum(d.ahead.map((w) => w.planned));
+  const free = sum(d.ahead.map((w) => w.free));
+  return {
+    main: [
+      topBar({ crumbs: [{ label: 'Бюджет' }, { label: 'Вперёд', icon: 'calendar' }], actions: syncButton(d) }),
+      pageIntro({ title: `Следующие ${AHEAD} недель`, text: aheadSentence(d) }),
+      ...d.ahead.map((w) =>
+        section({
+          title: `${weekLabel(w.week)} · свободно ${money(w.free, d.symbol)}`,
+          body: entryList({ label: `Неделя ${weekLabel(w.week)}`, items: [...w.purchases.map((p) => purchaseItem(page, p)), newPurchaseForm(page, w.week, 'week')] }),
+        }),
+      ),
+    ],
+    side: [
+      topBar({ crumbs: [{ label: `Свободно за ${AHEAD} недель` }] }),
+      balanceTotal({ amount: free, symbol: d.symbol, note: `из ${money(WEEK_LIMIT * AHEAD, d.symbol)}` }),
+      shareBar({
+        label: 'Недели впереди',
+        parts: [
+          { label: 'План', value: planned, color: toneColor('violet') },
+          { label: 'Свободно', value: free, color: toneColor('gray') },
+        ],
+      }),
+    ],
+  };
+}
+
+/** PROTOTYPE C: purchases planned for the weeks after this one, each with its week. */
+function laterSection(page: Page): Html {
+  const { d } = page;
+  return section({
+    title: 'Дальше',
+    body:
+      d.later.length === 0
+        ? emptyState({ text: 'На следующие недели пока ничего не запланировано.' })
+        : entryList({ label: 'Дальше', items: d.later.map((p) => purchaseItem(page, p, true)) }),
+  });
+}
+
+/** PROTOTYPE A: links to the week before, this week and the week after. */
+function weekSteps({ d, href, current }: Page): Html {
+  const week = d.week.week;
+  const link = (w: DateString) => href('/', { week: w === current ? null : w });
+  const next = addDays(week, 7);
+  return segmentedLinks({
+    label: 'Недели',
+    items: [
+      { label: '← Раньше', href: link(addDays(week, -7)) },
+      { label: 'Эта неделя', href: link(current), active: week === current },
+      ...(next <= addDays(current, 7 * PLAN_AHEAD) ? [{ label: 'Позже →', href: link(next) }] : []),
+    ],
+  });
+}
+
+/** PROTOTYPE A: links to the month before, this month and the month after. */
+function monthSteps({ d, href, current }: Page): Html {
+  const month = d.extras.month;
+  const thisMonth = monthOfWeek(current);
+  const link = (m: MonthString) => href('/', { view: 'month', month: m === thisMonth ? null : m });
+  const next = shiftMonth(month, 1);
+  return segmentedLinks({
+    label: 'Месяцы',
+    items: [
+      { label: `← ${capitalize(monthName(shiftMonth(month, -1)))}`, href: link(shiftMonth(month, -1)) },
+      { label: 'Этот месяц', href: link(thisMonth), active: month === thisMonth },
+      ...(next <= monthOfWeek(addDays(current, 7 * PLAN_AHEAD)) ? [{ label: `${capitalize(monthName(next))} →`, href: link(next) }] : []),
+    ],
+  });
+}
+
 function syncButton(d: DashboardData): Html | null {
   return d.canSync ? button({ label: 'Обновить', icon: 'refresh', action: '/sync' }) : null;
 }
@@ -375,7 +526,9 @@ function syncButton(d: DashboardData): Html | null {
 const ENVELOPE_NAME: Record<Envelope, string> = { week: 'в неделе', extra: 'дополнительные', outside: 'вне бюджета' };
 const MOVE_TO: Record<Envelope, string> = { week: 'В неделю', extra: 'В дополнительные', outside: 'Вне бюджета' };
 
-function purchaseItem({ d, href, here }: Page, p: Purchase): Html {
+/** A purchase of a week; one of a week ahead cannot be bought yet. `withWeek` names its week, for a list of several weeks. */
+function purchaseItem(page: Page, p: Purchase, withWeek = false): Html {
+  const { d, href, here, current } = page;
   const key = `purchase-${p.id}`;
   const form = d.form?.kind === 'purchase' && d.form.id === p.id ? d.form : null;
   const color = p.done ? toneColor('gray') : p.envelope === 'extra' ? toneColor('violet') : categoryColor(key, null);
@@ -385,21 +538,26 @@ function purchaseItem({ d, href, here }: Page, p: Purchase): Html {
       submitLabel: 'Сохранить',
       icon: categoryIcon(p.title),
       color,
-      fields: entryFields(form ?? { values: { title: p.title, amount: amountText(p.amount) }, errors: {} }, d.symbol),
+      fields: [
+        ...entryFields(form ?? { values: { title: p.title, amount: amountText(p.amount) }, errors: {} }, d.symbol),
+        weekField(page, form?.week ? parseWeek(form.week, current) : p.week),
+      ],
       extraActions: [{ label: p.envelope === 'week' ? 'В дополнительные' : 'В обычные', action: href(`/purchases/${p.id}/move`) }],
       deleteAction: href(`/purchases/${p.id}/delete`),
       cancelHref: here(),
     });
   }
+  const ahead = p.week > current;
+  const status = p.done ? 'куплено' : ahead ? 'в плане' : 'ждёт покупки';
   return entryRow({
     title: p.title,
-    details: `${p.done ? 'куплено' : 'ждёт покупки'} · ${p.envelope === 'extra' ? 'дополнительные' : 'обычные'}`,
+    details: [withWeek ? weekLabel(p.week) : status, p.envelope === 'extra' ? 'дополнительные' : 'обычные'].join(' · '),
     icon: categoryIcon(p.title),
     color,
     amount: p.amount,
     symbol: d.symbol,
     href: here({ edit: key }),
-    actions: [{ label: p.done ? 'Не куплено' : 'Куплено', action: href(`/purchases/${p.id}/done`) }],
+    actions: ahead ? [] : [{ label: p.done ? 'Не куплено' : 'Куплено', action: href(`/purchases/${p.id}/done`) }],
   });
 }
 
@@ -471,15 +629,42 @@ function spendingItem({ d, href, here }: Page, o: Operation): Html {
   });
 }
 
-function newPurchaseForm({ d, href }: Page, week: DateString, envelope: 'week' | 'extra'): Html {
-  const form = d.form?.kind === 'purchase' && d.form.id === null && d.form.envelope === envelope ? d.form : null;
+/**
+ * The form that adds a purchase to `week`; with `chooseWeek` the week is picked in it, this one by default. A form
+ * that came back with errors shows in the list it was sent from.
+ */
+function newPurchaseForm(page: Page, week: DateString, envelope: 'week' | 'extra', chooseWeek = false): Html {
+  const { d, href, current } = page;
+  const form =
+    d.form?.kind === 'purchase' && d.form.id === null && d.form.envelope === envelope && (chooseWeek || d.form.week === week) ? d.form : null;
+  const fields = entryFields(form ?? { values: { title: '', amount: '' }, errors: {} }, d.symbol, envelope === 'extra' ? 'Например, куртка' : 'Например, ботинки');
   return entryForm({
     action: href('/purchases'),
     submitLabel: 'В план',
     icon: 'plus',
     color: toneColor('gray'),
-    fields: entryFields(form ?? { values: { title: '', amount: '' }, errors: {} }, d.symbol, envelope === 'extra' ? 'Например, куртка' : 'Например, ботинки'),
-    hidden: { week, envelope },
+    fields: chooseWeek ? [...fields, weekField(page, form?.week ? parseWeek(form.week, current) : week)] : fields,
+    hidden: chooseWeek ? { envelope } : { week, envelope },
+  });
+}
+
+/** A choice of the week, this one and the next ones by month, with `value` among them even when it is out of range. */
+function weekField({ current }: Page, value: DateString): Html {
+  const weeks = Array.from({ length: WEEK_CHOICES }, (_, i) => addDays(current, 7 * i));
+  if (!weeks.includes(value)) weeks.push(value);
+  weeks.sort();
+  const months = weeks.map(monthOfWeek).filter((m, i, all) => all.indexOf(m) === i);
+  return selectField({
+    label: 'Неделя',
+    name: 'week',
+    value,
+    width: 210,
+    groups: months.map((month) => ({
+      label: capitalize(monthName(month)),
+      options: weeks
+        .filter((w) => monthOfWeek(w) === month)
+        .map((w) => ({ value: w, label: w === current ? 'Эта неделя' : w === addDays(current, 7) ? 'Следующая неделя' : weekLabel(w) })),
+    })),
   });
 }
 
@@ -514,23 +699,46 @@ function sentence(text: string): string {
   return text.endsWith('.') ? text : `${text}.`;
 }
 
-function weekSentence(d: DashboardData, w: WeekSummary, isCurrent: boolean): string {
+function weekSentence(d: DashboardData, w: WeekSummary, current: DateString): string {
   const s = d.symbol;
+  if (w.week > current) {
+    if (w.planned === 0) return sentence(`Неделя впереди, в плане пока ничего: свободны все ${money(WEEK_LIMIT, s)}`);
+    return w.free >= 0
+      ? sentence(`Неделя впереди: в плане ${money(w.planned, s)}, свободно ${money(w.free, s)} из ${money(WEEK_LIMIT, s)}`)
+      : sentence(`Неделя впереди: в плане ${money(w.planned, s)}, это на ${money(-w.free, s)} больше ${money(WEEK_LIMIT, s)}`);
+  }
   const spent = `потрачено ${money(w.spent, s)} из ${money(WEEK_LIMIT, s)}`;
-  if (!isCurrent) return sentence(`За эту неделю ${spent}, ${w.free < 0 ? 'перерасход' : 'осталось'} ${money(Math.abs(w.free), s)}`);
+  if (w.week < current) return sentence(`За эту неделю ${spent}, ${w.free < 0 ? 'перерасход' : 'осталось'} ${money(Math.abs(w.free), s)}`);
   const plan = w.planned > 0 ? `, ещё ${money(w.planned, s)} ждут покупок из плана` : '';
   return w.free >= 0
     ? `${sentence(`Можно потратить ещё ${money(w.free, s)}`)} ${sentence(`${capitalize(spent)}${plan}`)}`
     : sentence(`Неделя в минусе на ${money(-w.free, s)}: ${spent}${plan}`);
 }
 
-function monthSentence(d: DashboardData): string {
+function monthSentence(d: DashboardData, current: DateString): string {
   const s = d.symbol;
   const m = d.extras;
-  const spent = d.weeks.reduce((total, w) => total + w.spent, 0);
-  return `${sentence(`В ${monthName(m.month, 'prepositional')} на дополнительные осталось ${money(m.free, s)} из ${money(MONTH_LIMIT, s)}`)} ${sentence(
-    `По неделям потрачено ${money(spent, s)} из ${money(WEEK_LIMIT * d.weeks.length, s)}`,
+  const limit = money(WEEK_LIMIT * d.weeks.length, s);
+  const extras = sentence(`В ${monthName(m.month, 'prepositional')} на дополнительные осталось ${money(m.free, s)} из ${money(MONTH_LIMIT, s)}`);
+  if ((d.weeks[0]?.week ?? current) > current) {
+    return `${extras} ${sentence(`По неделям запланировано ${money(sum(d.weeks.map((w) => w.planned)), s)} из ${limit}`)}`;
+  }
+  return `${extras} ${sentence(`По неделям потрачено ${money(sum(d.weeks.map((w) => w.spent)), s)} из ${limit}`)}`;
+}
+
+/** PROTOTYPE B: what the next weeks hold and which of them is the tightest. */
+function aheadSentence(d: DashboardData): string {
+  const s = d.symbol;
+  const planned = sum(d.ahead.map((w) => w.planned));
+  if (planned === 0) return sentence(`В плане пока ничего: на каждую неделю свободны все ${money(WEEK_LIMIT, s)}`);
+  const tightest = d.ahead.reduce((a, b) => (b.free < a.free ? b : a));
+  return `${sentence(`На ${AHEAD} недель запланировано ${money(planned, s)}`)} ${sentence(
+    `Меньше всего свободно на неделе ${weekLabel(tightest.week)}: ${money(tightest.free, s)}`,
   )}`;
+}
+
+function sum(values: number[]): number {
+  return values.reduce((total, v) => total + v, 0);
 }
 
 function adviceText(advice: Advice, d: DashboardData): string {
@@ -547,4 +755,40 @@ function adviceText(advice: Advice, d: DashboardData): string {
     case 'never':
       return 'Не влезает ни в неделю, ни в дополнительные';
   }
+}
+
+// ---- PROTOTYPE: the variants and their switcher
+
+interface Variant {
+  key: 'A' | 'B' | 'C';
+  name: string;
+}
+
+const VARIANTS: Variant[] = [
+  { key: 'A', name: 'Листать' },
+  { key: 'B', name: 'Вперёд' },
+  { key: 'C', name: 'Выбор недели' },
+];
+
+function switcher(current: Variant, href: Href): string {
+  const index = VARIANTS.indexOf(current);
+  const hrefs = VARIANTS.map((v) => href('/', { variant: v.key }));
+  const prev = hrefs[(index - 1 + VARIANTS.length) % VARIANTS.length]!;
+  const next = hrefs[(index + 1) % VARIANTS.length]!;
+  return `
+<div id="proto-switcher" role="toolbar" aria-label="Варианты прототипа">
+  <a href="${escape(prev)}" aria-label="Предыдущий вариант">‹</a>
+  <span><b>${escape(current.key)}</b> ${escape(current.name)} <i>${index + 1}/${VARIANTS.length}</i></span>
+  <a href="${escape(next)}" aria-label="Следующий вариант">›</a>
+</div>
+<style>
+  #proto-switcher { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 2147483647; display: flex; align-items: center; gap: 4px;
+    padding: 5px; border-radius: 999px; background: #1F4BFF; color: #fff; font: 500 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    box-shadow: 0 10px 30px -8px rgb(31 75 255 / .6), 0 0 0 3px rgb(255 255 255 / .9); }
+  #proto-switcher a { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 999px; background: rgb(255 255 255 / .16); color: #fff; font-size: 18px; }
+  #proto-switcher a:hover { background: rgb(255 255 255 / .28); }
+  #proto-switcher span { padding: 0 10px; white-space: nowrap; }
+  #proto-switcher b { display: inline-block; padding: 3px 6px; margin-right: 4px; border-radius: 6px; background: #fff; color: #1F4BFF; }
+  #proto-switcher i { font-style: normal; opacity: .7; }
+</style>`;
 }

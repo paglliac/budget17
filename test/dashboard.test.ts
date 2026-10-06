@@ -105,10 +105,31 @@ describe('dashboard', () => {
     assert.ok(page.includes('name="envelope" value="extra"'));
   });
 
-  it('opens an earlier week and ignores a week that is not a past Monday', () => {
+  it('opens an earlier week and ignores a week that is not a Monday or is more than a year ahead', () => {
     assert.ok(render({ week: '2026-09-28' }).includes('За эту неделю потрачено 30 000 ₽ из 45 000 ₽, осталось 15 000 ₽.'));
-    assert.ok(render({ week: '2026-10-12' }).includes('Неделя 5–11 октября'));
     assert.ok(render({ week: '2026-10-07' }).includes('Неделя 5–11 октября'));
+    assert.ok(render({ week: '2027-10-11' }).includes('Неделя 5–11 октября'));
+  });
+
+  it('opens a week ahead with what is planned in it, which cannot be bought yet, and its regular payments', () => {
+    const budget = { ...saved(), purchases: [{ id: 4, title: 'Стрижка', amount: 3_500, week: '2026-11-02', envelope: 'week' as const, done: false }] };
+    const page = render({ week: '2026-11-02' }, budget);
+
+    assert.ok(page.includes('Неделя 2–8 ноября'));
+    assert.ok(page.includes('Неделя впереди: в плане 3 500 ₽, свободно 41 500 ₽ из 45 000 ₽.'));
+    assert.ok(page.includes('Будет свободно') && !page.includes('Куплено'));
+    assert.ok(page.includes('регулярная, вне бюджета · 7 ноября'));
+    assert.ok(page.includes('name="week" value="2026-11-02"'), 'a new purchase goes into the week shown');
+    assert.ok(render({ week: '2026-11-09' }, budget).includes('Неделя впереди, в плане пока ничего: свободны все 45 000 ₽.'));
+  });
+
+  it('opens a purchase with the week it is planned for, to move it to another', () => {
+    const page = render({ edit: 'purchase-1' });
+
+    assert.ok(page.includes('name="week"'));
+    assert.ok(page.includes('<option value="2026-10-05" selected>Эта неделя</option>'));
+    assert.ok(page.includes('<option value="2026-10-12">Следующая неделя</option>'));
+    assert.ok(page.includes('<optgroup label="Ноябрь">'));
   });
 });
 
@@ -143,6 +164,20 @@ describe('submitDashboard', () => {
 
     submitDashboard(settings, '/purchases', form({ title: 'Проезд', amount: '1000', week: '2026-10-07' }), context(settings));
     assert.equal(settings.purchases()[0]!.week, '2026-10-05');
+  });
+
+  it('plans a purchase into a week ahead and moves it to another week', () => {
+    using settings = new Settings(':memory:');
+    const submit = (path: string, fields: Record<string, string> = {}) => submitDashboard(settings, path, form(fields), context(settings));
+
+    submit('/purchases', { title: 'Стрижка', amount: '3500', week: '2026-10-19', envelope: 'week' });
+    const [haircut] = settings.purchases();
+    assert.equal(haircut!.week, '2026-10-19');
+
+    submit(`/purchases/${haircut!.id}`, { title: 'Стрижка', amount: '3500', week: '2026-11-16' });
+    assert.equal(settings.purchases()[0]!.week, '2026-11-16');
+    submit(`/purchases/${haircut!.id}`, { title: 'Стрижка', amount: '4000' });
+    assert.deepEqual(settings.purchases().map((p) => [p.amount, p.week]), [[4_000, '2026-11-16']], 'a form without the week keeps it');
   });
 
   it('plans a wish into the advised week and marks spending', () => {

@@ -56,6 +56,20 @@ function savedBudget(settings: Settings): SavedBudget {
   return { purchases: settings.purchases(), wishes: settings.wishes(), marks: settings.spendingMarks(), ...savedSorting(settings) };
 }
 
+// PROTOTYPE: purchases, wishes and spending marks live in memory, copied from data/settings.db on start, so trying
+// the variants out never changes what the user keeps; categories and regular expenses are read from the file.
+const memory = new Settings(':memory:');
+if (existsSync(SETTINGS_PATH)) {
+  using settings = new Settings(SETTINGS_PATH);
+  for (const { id: _, ...purchase } of settings.purchases()) memory.addPurchase(purchase);
+  for (const { id: _, ...wish } of settings.wishes()) memory.addWish(wish);
+  for (const [id, envelope] of settings.spendingMarks()) memory.markSpending(id, envelope);
+}
+
+function prototypeBudget(): SavedBudget {
+  return { ...loadSettings(savedBudget), purchases: memory.purchases(), wishes: memory.wishes(), marks: memory.spendingMarks() };
+}
+
 /** The page a form was sent from, without the entry it had open, so saving closes the form. */
 function backTo(request: IncomingMessage): URL {
   const back = new URL(request.headers.referer ?? '/', 'http://localhost');
@@ -97,12 +111,16 @@ function dashboardPage(
     today,
     view: params.get('view'),
     week: params.get('week'),
+    month: params.get('month'),
+    variant: params.get('variant'),
     edit: params.get('edit'),
     form,
     source: demo ? 'demo' : 'zenmoney',
     canSync: Boolean(token) && !demo,
   });
-  return renderDashboard(dashboard, href).toString();
+  // PROTOTYPE: links keep the variant shown.
+  const variant = params.get('variant');
+  return renderDashboard(dashboard, variant ? (path, more) => href(path, { variant, ...more }) : href).toString();
 }
 
 try {
@@ -130,11 +148,10 @@ createServer(async (request, response) => {
     }
     if (request.method === 'POST' && /^\/(purchases|wishes|spending)(\/|$)/.test(url.pathname)) {
       const body = await readForm(request);
-      using settings = new Settings(SETTINGS_PATH);
       const collections = loadCollections(demo, today);
-      const result = submitDashboard(settings, url.pathname, body, {
+      const result = submitDashboard(memory, url.pathname, body, {
         today,
-        budget: () => budgetOf(collections, savedBudget(settings), { today }),
+        budget: () => budgetOf(collections, prototypeBudget(), { today }),
       });
       const back = backTo(request);
       if (result.status === 'saved') {
@@ -142,7 +159,7 @@ createServer(async (request, response) => {
       } else if (result.status === 'missing') {
         send(response, 404, 'text/plain', 'Такой записи нет');
       } else {
-        send(response, 422, 'text/html', dashboardPage(collections, savedBudget(settings), back.searchParams, today, demo, href, result.form));
+        send(response, 422, 'text/html', dashboardPage(collections, prototypeBudget(), back.searchParams, today, demo, href, result.form));
       }
       return;
     }
@@ -192,7 +209,7 @@ createServer(async (request, response) => {
     }
     switch (url.pathname) {
       case '/':
-        send(response, 200, 'text/html', dashboardPage(loadCollections(demo, today), loadSettings(savedBudget), params, today, demo, href));
+        send(response, 200, 'text/html', dashboardPage(loadCollections(demo, today), prototypeBudget(), params, today, demo, href));
         return;
       case '/operations': {
         const operations = loadOperations(loadCollections(demo, today), loadSettings(savedSorting), {
