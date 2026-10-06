@@ -277,6 +277,10 @@ a.entry-row:hover { background: var(--fill); }
 .entry-text small { font-size: 12px; color: var(--muted); }
 .entry-amount { font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .entry-edit { color: var(--soft); }
+.entry.muted .entry-text b, .entry.muted .entry-amount { font-weight: 400; color: var(--muted); }
+.entry-divider { display: flex; align-items: center; gap: 10px; margin: 8px 0; padding: 0 12px; font-size: 12px; font-weight: 500; }
+.entry-divider span { padding: 3px 10px; border-radius: 999px; background: var(--ink); color: #fff; }
+.entry-divider::after { content: ''; flex: 1; height: 1px; background: var(--ink); }
 .entry-row:hover .entry-edit { color: var(--ink); }
 .entry-form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; margin: 6px 0; padding: 12px; border: 1px solid var(--line); border-radius: 16px; }
 .entry-form .entry-icon { margin-top: 19px; }

@@ -1,15 +1,19 @@
-// Regular expenses: the list to set them up, what they cost this month and its payment days.
+// Regular expenses: the list to set them up, what is left to pay of them this month and its payment days.
+// The list runs in the order things happen this month: what is behind, quieter, then a line at today, then what is
+// ahead. Expenses with no payment this month that start later go apart, under «Начнутся позже».
 // A row opens for editing by its link (?edit=id); its dates and icon fold under «Даты и иконка».
 // Forms post to /regular, /regular/:id and /regular/:id/delete.
 
 import { mainCurrency } from '../../balances.ts';
-import { dayOfMonth, monthOf } from '../../dates.ts';
+import { addDays, dateOf, dayOfMonth, daysInMonth, monthOf } from '../../dates.ts';
+import { listOperations, type Operation, type Sorting } from '../../ledger.ts';
 import {
-  nextPayment,
+  monthStatus,
   parseRegularExpense,
   paymentDate,
   regularTotals,
   regularValues,
+  type MonthStatus,
   type RegularErrors,
   type RegularExpense,
   type RegularValues,
@@ -17,14 +21,14 @@ import {
 import type { Settings } from '../../settings.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
-import { dayMonthYear, fromToday, money, monthName, plural } from '../format.ts';
+import { dayMonth, dayMonthYear, fromToday, money, monthName, plural } from '../format.ts';
 import type { Html } from '../html.ts';
 import { categoryIcon, ENTRY_ICONS, entryIcon, isEntryIcon } from '../icons.ts';
-import { categoryColor, toneColor } from '../tones.ts';
+import { categoryColor, toneColor, type Tone } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
-import { field, footnote, iconPicker, pageIntro } from '../widgets/basics.ts';
+import { field, footnote, iconPicker, pageIntro, section, shareBar } from '../widgets/basics.ts';
 import { monthCalendar, type CalendarDay } from '../widgets/calendar.ts';
-import { entryForm, entryList, entryRow } from '../widgets/entries.ts';
+import { entryDivider, entryForm, entryList, entryRow } from '../widgets/entries.ts';
 import { appShell, topBar } from '../widgets/shell.ts';
 import { appRail, userName, type Href } from './chrome.ts';
 
@@ -40,6 +44,8 @@ export interface RegularData {
   today: DateString;
   /** By day of the month. */
   expenses: RegularExpense[];
+  /** Expenses linked to regular expenses, from a month before the current one through its end, newest first. */
+  linked: Operation[];
   form: RegularForm | null;
   symbol: string;
   userName: string | null;
@@ -47,13 +53,18 @@ export interface RegularData {
 
 export function loadRegular(
   data: EntityCollections,
-  expenses: RegularExpense[],
+  saved: { categorizations: Sorting['categorizations']; regular: RegularExpense[] },
   options: { today: DateString; edit?: string | null; form?: RegularForm },
 ): RegularData {
+  const expenses = saved.regular;
   const editing = expenses.find((e) => String(e.id) === options.edit);
+  const month = monthOf(options.today);
+  // A month back, so that a payment of the 1st paid a week early is found as paid.
+  const range = { from: addDays(dateOf(month, 1), -31), to: dateOf(month, daysInMonth(month)) };
   return {
     today: options.today,
     expenses,
+    linked: listOperations(data, range, saved).filter((o) => o.kind === 'expense' && o.regular !== null),
     form: options.form ?? (editing ? { id: editing.id, values: regularValues(editing), errors: {} } : null),
     symbol: mainCurrency(data).symbol,
     userName: userName(data),
@@ -92,9 +103,13 @@ export function submitRegular(settings: Settings, path: string, body: URLSearchP
 const EMPTY: RegularValues = { title: '', amount: '', day: '', start: '', end: '', icon: '' };
 
 export function renderRegular(d: RegularData, href: Href): Html {
-  const { count, total } = regularTotals(d.expenses, d.today);
+  const totals = regularTotals(d.expenses, d.today, d.linked);
+  const { count, total } = totals;
   const newForm = d.form?.id === null ? d.form : null;
   const month = monthName(d.today, 'prepositional');
+  const { behind, ahead, later } = timeline(d);
+  const item = ({ expense, status }: Placed): Html =>
+    d.form?.id === expense.id ? editForm(expense, d.form, d.symbol, href) : row(expense, status, d, href);
 
   const body = appShell({
     rail: appRail('regular', d.userName, href),
@@ -104,7 +119,9 @@ export function renderRegular(d: RegularData, href: Href): Html {
       entryList({
         label: 'Регулярные траты',
         items: [
-          ...d.expenses.map((e) => (d.form?.id === e.id ? editForm(e, d.form, d.symbol, href) : row(e, d, href))),
+          ...behind.map(item),
+          behind.length > 0 && ahead.length > 0 ? entryDivider({ label: `Сегодня, ${dayMonth(d.today)}` }) : null,
+          ...ahead.map(item),
           entryForm({
             action: href('/regular'),
             submitLabel: 'Добавить',
@@ -112,20 +129,31 @@ export function renderRegular(d: RegularData, href: Href): Html {
             color: toneColor('gray'),
             ...formFields(newForm ?? { values: EMPTY, errors: {} }, d.symbol),
           }),
-        ],
+        ].filter((part): part is Html => part !== null),
       }),
+      later.length > 0 ? section({ title: 'Начнутся позже', body: entryList({ label: 'Начнутся позже', items: later.map(item) }) }) : null,
     ],
     side: [
-      topBar({ crumbs: [{ label: `В ${month}` }] }),
+      topBar({ crumbs: [{ label: `Осталось заплатить в ${month}` }] }),
       balanceTotal({
-        amount: total,
+        amount: totals.ahead,
         symbol: d.symbol,
         note: count
-          ? `на ${count} ${plural(count, ['платёж', 'платежа', 'платежей'])}`
+          ? `из ${money(total, d.symbol)} на ${count} ${plural(count, ['платёж', 'платежа', 'платежей'])}`
           : d.expenses.length
             ? `В ${month} платежей нет`
             : 'Регулярных трат пока нет',
       }),
+      count
+        ? shareBar({
+            label: `Платежи в ${month}`,
+            parts: [
+              { label: 'Оплачено', value: totals.paid, color: toneColor(STATUS_TONE.paid) },
+              { label: 'Прошли', value: totals.past, color: toneColor(STATUS_TONE.past) },
+              { label: 'Впереди', value: totals.ahead, color: toneColor(STATUS_TONE.ahead) },
+            ],
+          })
+        : null,
       calendar(d),
       footnote({ text: 'Регулярные траты хранятся в приложении, в data/settings.db, а не в ZenMoney.' }),
     ],
@@ -134,37 +162,73 @@ export function renderRegular(d: RegularData, href: Href): Html {
   return pageDocument({ title: 'Бюджет: регулярные траты', body });
 }
 
+/** What is left of this month and the nearest payment not paid yet. No phrase ends with an amount, since «руб.» has its own dot. */
 function sentence(d: RegularData): string {
   if (d.expenses.length === 0) {
     return 'Добавьте платежи, которые повторяются каждый месяц: аренду, кредит, связь. Они появятся в ближайших платежах на обзоре.';
   }
-  const { total, ahead } = regularTotals(d.expenses, d.today);
+  const { total, ahead } = regularTotals(d.expenses, d.today, d.linked);
   const month = monthName(d.today, 'prepositional');
-  const next = d.expenses
-    .flatMap((e) => {
-      const date = nextPayment(e, d.today);
-      return date === null ? [] : [{ title: e.title, date }];
-    })
-    .reduce<{ title: string; date: DateString } | null>((a, b) => (a === null || b.date < a.date ? b : a), null);
+  const { ahead: thisMonth, later } = timeline(d);
+  const next = thisMonth[0] ?? later[0] ?? null;
   if (total === 0) {
     const text = `В ${month} регулярных платежей нет.`;
-    return next ? `${text} Ближайший — «${next.title}», ${dayMonthYear(next.date, d.today)}.` : text;
+    return next ? `${text} Ближайший — «${next.expense.title}», ${dayMonthYear(next.status.date, d.today)}.` : text;
   }
-  const text = `В ${month} на них уходит ${money(total, d.symbol)}.`;
-  if (ahead === 0 || next === null) return `${text} Все платежи этого месяца уже позади.`;
-  return `${text} Осталось заплатить ${money(ahead, d.symbol)}, ближайший платёж — «${next.title}», ${fromToday(next.date, d.today)}.`;
+  if (ahead === 0 || next === null) return `В ${month} на них уходит ${money(total, d.symbol)}, все платежи этого месяца уже позади.`;
+  return `Осталось заплатить ${money(ahead, d.symbol)} из ${money(total, d.symbol)}, ближайший платёж — «${next.expense.title}», ${fromToday(next.status.date, d.today)}.`;
 }
 
-function row(e: RegularExpense, d: RegularData, href: Href): Html {
+/** An expense and where it stands this month. */
+interface Placed {
+  expense: RegularExpense;
+  status: MonthStatus;
+}
+
+type Ahead = Placed & { status: { kind: 'ahead' } };
+
+/**
+ * The month in the order things happen: what is behind by the day it was paid or passed, ended expenses first, and
+ * what is ahead this month by its date, soonest first. `later` have no payment this month and start in a later one,
+ * soonest first.
+ */
+function timeline(d: RegularData): { behind: Placed[]; ahead: Ahead[]; later: Ahead[] } {
+  const placed = d.expenses.map((expense) => ({ expense, status: monthStatus(expense, d.today, d.linked) }));
+  const happened = (s: MonthStatus): string => (s.kind === 'paid' ? s.on : s.kind === 'past' ? s.date : '');
+  const upcoming = placed.filter((p): p is Ahead => p.status.kind === 'ahead').sort((a, b) => a.status.date.localeCompare(b.status.date));
+  const month = monthOf(d.today);
+  return {
+    behind: placed.filter((p) => p.status.kind !== 'ahead').sort((a, b) => happened(a.status).localeCompare(happened(b.status))),
+    ahead: upcoming.filter((p) => monthOf(p.status.date) === month),
+    later: upcoming.filter((p) => monthOf(p.status.date) !== month),
+  };
+}
+
+/** Tones of the payments in the calendar and the bar: what linked expenses paid, what passed without them, what is ahead. */
+const STATUS_TONE = { paid: 'green', past: 'gray', ahead: 'teal' } as const satisfies Record<string, Tone>;
+
+/** A row of the list; what is behind is quieter, and a paid one gets a check. */
+function row(e: RegularExpense, status: MonthStatus, d: RegularData, href: Href): Html {
   return entryRow({
     title: e.title,
-    details: schedule(e, d.today),
-    icon: entryIcon(e.icon, e.title),
-    color: expenseColor(e),
+    details: details(e, status, d),
+    icon: status.kind === 'paid' ? 'check' : entryIcon(e.icon, e.title),
+    color: status.kind === 'ahead' ? expenseColor(e) : toneColor(status.kind === 'paid' ? STATUS_TONE.paid : STATUS_TONE.past),
     amount: e.amount,
     symbol: d.symbol,
     href: href('/regular', { edit: String(e.id) }),
+    muted: status.kind !== 'ahead',
   });
+}
+
+/** 10-го числа · оплачено 5 октября, 1-го числа · прошёл 1 октября, or when it is paid next. */
+function details(e: RegularExpense, status: MonthStatus, d: RegularData): string {
+  if (status.kind === 'paid') return `${e.day}-го числа · оплачено ${dayMonth(status.on)}`;
+  if (status.kind === 'past') return `${e.day}-го числа · прошёл ${dayMonth(status.date)}`;
+  if (status.kind === 'ahead' && status.covered > 0) {
+    return `${e.day}-го числа · оплачено ${money(status.covered, d.symbol)} из ${money(e.amount, d.symbol)} · ${fromToday(status.date, d.today)}`;
+  }
+  return schedule(e, status.kind === 'ahead' ? status.date : null, d.today);
 }
 
 function editForm(e: RegularExpense, form: RegularForm, symbol: string, href: Href): Html {
@@ -179,9 +243,8 @@ function editForm(e: RegularExpense, form: RegularForm, symbol: string, href: Hr
   });
 }
 
-/** When it is paid: 25-го числа · по 31 мая 2027 · через 20 дней. */
-function schedule(e: RegularExpense, today: DateString): string {
-  const next = nextPayment(e, today);
+/** When it is paid: 25-го числа · по 31 мая 2027 · через 20 дней. `next` is null when the payments are over. */
+function schedule(e: RegularExpense, next: DateString | null, today: DateString): string {
   return [
     `${e.day}-го числа`,
     e.start !== null && e.start > today ? `с ${dayMonthYear(e.start, today)}` : null,
@@ -224,19 +287,27 @@ function expenseColor(e: RegularExpense): string {
   return categoryColor(`regular:${e.id}`, null);
 }
 
-/** The current month with its payment days marked; the tooltip lists what is paid that day. */
+/** The current month with its payment days marked by where they stand; the tooltip lists what is paid that day. */
 function calendar(d: RegularData): Html {
   const month = monthOf(d.today);
-  const payments = new Map<number, string[]>();
+  const payments = new Map<number, Array<{ text: string; tone: Tone }>>();
   for (const e of d.expenses) {
     const date = paymentDate(e, month);
     if (date === null) continue;
+    const status = monthStatus(e, d.today, d.linked);
+    const tone = status.kind === 'paid' ? STATUS_TONE.paid : status.kind === 'past' ? STATUS_TONE.past : STATUS_TONE.ahead;
     const day = dayOfMonth(date);
-    payments.set(day, [...(payments.get(day) ?? []), `${e.title} ${money(e.amount, d.symbol)}`]);
+    payments.set(day, [...(payments.get(day) ?? []), { text: `${e.title} ${money(e.amount, d.symbol)}`, tone }]);
   }
   const days = Array.from({ length: 31 }, (_, i): CalendarDay => {
-    const titles = payments.get(i + 1);
-    return titles ? { marked: true, dots: ['teal'], title: titles.join(', ') } : {};
+    const list = payments.get(i + 1);
+    return list ? { marked: true, dots: [...new Set(list.map((p) => p.tone))], title: list.map((p) => p.text).join(', ') } : {};
   });
-  return monthCalendar({ month, today: d.today, days, legend: [{ tone: 'teal', label: `Платежи в ${monthName(month, 'prepositional')}` }] });
+  const tones = new Set([...payments.values()].flat().map((p) => p.tone));
+  const legend = [
+    { tone: STATUS_TONE.ahead, label: 'Впереди' },
+    { tone: STATUS_TONE.paid, label: 'Оплачено' },
+    { tone: STATUS_TONE.past, label: 'Прошли' },
+  ].filter((item) => tones.has(item.tone));
+  return monthCalendar({ month, today: d.today, days, legend });
 }

@@ -3,6 +3,7 @@
 
 import { addDays, clampedDate, daysBetween, monthOf, shiftMonth, type MonthString } from './dates.ts';
 import { amountText, parseAmount, parseDay, parseOptionalDate, parseTitle } from './input.ts';
+import type { Operation } from './ledger.ts';
 import { soonestFirst, type PlannedOperation } from './planned.ts';
 import type { DateString } from './zenmoney/types.ts';
 
@@ -53,6 +54,46 @@ export function nearestPayment(expense: RegularSchedule, date: DateString): Date
   return nearest;
 }
 
+/** An expense the user linked to a regular expense on /uncategorized, as the ledger lists it. */
+export type LinkedExpense = Pick<Operation, 'date' | 'amount' | 'regular'>;
+
+/**
+ * The linked expenses that paid the payment of `expense` on `date`: those whose nearest payment it is, so an expense
+ * paid a week early still counts towards it. They keep their order.
+ */
+export function paidBy<T extends LinkedExpense>(expense: RegularSchedule & Pick<RegularExpense, 'id'>, date: DateString, linked: readonly T[]): T[] {
+  return linked.filter((o) => o.regular?.id === expense.id && nearestPayment(expense, o.date) === date);
+}
+
+/**
+ * Where an expense stands in the month of `today`:
+ * - ahead: this month's payment is today or later and not paid in full, `covered` being what linked expenses paid of
+ *   it; when this month has no payment, its next one in a later month;
+ * - past: this month's payment day has gone by and linked expenses do not cover it;
+ * - paid: linked expenses cover this month's payment, even before its day; `on` is the date of the latest of them;
+ * - over: its payments have ended.
+ */
+export type MonthStatus =
+  | { kind: 'ahead'; date: DateString; covered: number }
+  | { kind: 'past'; date: DateString }
+  | { kind: 'paid'; date: DateString; on: DateString }
+  | { kind: 'over' };
+
+export function monthStatus(expense: RegularExpense, today: DateString, linked: readonly LinkedExpense[]): MonthStatus {
+  const date = paymentDate(expense, monthOf(today));
+  if (date === null) {
+    const next = nextPayment(expense, today);
+    return next === null ? { kind: 'over' } : { kind: 'ahead', date: next, covered: 0 };
+  }
+  const paid = paidBy(expense, date, linked);
+  const covered = paid.reduce((total, o) => total + o.amount, 0);
+  if (paid.length > 0 && covered >= expense.amount - 0.005) {
+    return { kind: 'paid', date, on: paid.reduce((latest, o) => (o.date > latest ? o.date : latest), paid[0]!.date) };
+  }
+  if (date < today) return { kind: 'past', date };
+  return { kind: 'ahead', date, covered };
+}
+
 /** Payments from today through the next `days` days as planned operations, soonest first. */
 export function upcomingRegular(expenses: RegularExpense[], options: { today: DateString; days?: number }): PlannedOperation[] {
   const { today, days = 45 } = options;
@@ -68,20 +109,29 @@ export function upcomingRegular(expenses: RegularExpense[], options: { today: Da
   return planned.sort(soonestFirst);
 }
 
-/** The payments of the current month: how many, what they cost and how much is still ahead, today included. */
-export function regularTotals(expenses: RegularExpense[], today: DateString): { count: number; total: number; ahead: number } {
-  const month = monthOf(today);
-  let count = 0;
-  let total = 0;
-  let ahead = 0;
+/**
+ * The payments of the current month: how many and what they cost, split into what linked expenses paid, what passed
+ * its day without them and what is still ahead, today included. Expenses with no payment this month count nowhere.
+ */
+export function regularTotals(
+  expenses: RegularExpense[],
+  today: DateString,
+  linked: readonly LinkedExpense[],
+): { count: number; total: number; paid: number; past: number; ahead: number } {
+  const totals = { count: 0, total: 0, paid: 0, past: 0, ahead: 0 };
   for (const expense of expenses) {
-    const date = paymentDate(expense, month);
-    if (date === null) continue;
-    count += 1;
-    total += expense.amount;
-    if (date >= today) ahead += expense.amount;
+    const status = monthStatus(expense, today, linked);
+    if (status.kind === 'over' || monthOf(status.date) !== monthOf(today)) continue;
+    totals.count += 1;
+    totals.total += expense.amount;
+    if (status.kind === 'paid') totals.paid += expense.amount;
+    if (status.kind === 'past') totals.past += expense.amount;
+    if (status.kind === 'ahead') {
+      totals.paid += status.covered;
+      totals.ahead += expense.amount - status.covered;
+    }
   }
-  return { count, total, ahead };
+  return totals;
 }
 
 export type RegularField = 'title' | 'amount' | 'day' | 'start' | 'end' | 'icon';

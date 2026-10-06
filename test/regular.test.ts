@@ -1,12 +1,24 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { nearestPayment, nextPayment, parseRegularExpense, paymentDate, regularTotals, regularValues, upcomingRegular, type RegularValues } from '../src/regular.ts';
+import {
+  monthStatus,
+  nearestPayment,
+  nextPayment,
+  parseRegularExpense,
+  paymentDate,
+  regularTotals,
+  regularValues,
+  upcomingRegular,
+  type RegularValues,
+} from '../src/regular.ts';
 import { regular } from './fixtures.ts';
 
 const today = '2026-10-05';
 /** Paid on the day of every month, or only between `start` and `end`. */
 const monthly = (day: number, start: string | null = null, end: string | null = null) => ({ day, start, end });
 const typed = (values: Partial<RegularValues>): RegularValues => ({ title: '', amount: '', day: '', start: '', end: '', icon: '', ...values });
+/** An expense linked on /uncategorized to the regular expense `id`. */
+const linked = (id: number, date: string, amount: number) => ({ date, amount, regular: { id, title: '' } });
 
 describe('regular expenses', () => {
   it('fall on the last day of a month shorter than their day', () => {
@@ -72,7 +84,28 @@ describe('regular expenses', () => {
     assert.equal(new Set(planned.map((p) => p.id)).size, planned.length, 'ids are unique');
   });
 
-  it('total the payments of this month and what is still ahead of it, today included', () => {
+  it('stand in this month as paid by linked expenses, even early or late, past their day, ahead, or over', () => {
+    const rent = regular({ id: 1, title: 'Аренда', amount: 40_000, day: 10 });
+
+    assert.deepEqual(monthStatus(rent, today, []), { kind: 'ahead', date: '2026-10-10', covered: 0 });
+    assert.deepEqual(
+      monthStatus(rent, today, [linked(1, '2026-10-03', 15_000), linked(1, '2026-10-04', 25_000)]),
+      { kind: 'paid', date: '2026-10-10', on: '2026-10-04' },
+      'a week early, by two expenses',
+    );
+    assert.deepEqual(monthStatus(rent, today, [linked(1, '2026-10-03', 15_000)]), { kind: 'ahead', date: '2026-10-10', covered: 15_000 });
+    assert.deepEqual(
+      monthStatus(rent, today, [linked(2, '2026-10-03', 40_000), linked(1, '2026-09-10', 40_000)]),
+      { kind: 'ahead', date: '2026-10-10', covered: 0 },
+      'another expense, and the payment of September',
+    );
+    assert.deepEqual(monthStatus(rent, '2026-10-12', []), { kind: 'past', date: '2026-10-10' });
+    assert.deepEqual(monthStatus(rent, '2026-10-12', [linked(1, '2026-10-11', 40_000)]), { kind: 'paid', date: '2026-10-10', on: '2026-10-11' }, 'a day late');
+    assert.deepEqual(monthStatus({ ...rent, start: '2026-11-01' }, today, []), { kind: 'ahead', date: '2026-11-10', covered: 0 }, 'not started yet');
+    assert.deepEqual(monthStatus({ ...rent, end: '2026-09-30' }, today, []), { kind: 'over' });
+  });
+
+  it('total the payments of this month: paid by linked expenses, past their day and still ahead, today included', () => {
     const expenses = [
       regular({ id: 1, title: 'Телефон', amount: 1_500, day: 2 }),
       regular({ id: 2, title: 'Машина', amount: 91_000, day: 5 }),
@@ -80,8 +113,13 @@ describe('regular expenses', () => {
       regular({ id: 4, title: 'Секция', amount: 5_000, day: 15, end: '2026-09-30' }),
       regular({ id: 5, title: 'Кредит', amount: 9_000, day: 20, start: '2026-11-01' }),
     ];
-    assert.deepEqual(regularTotals(expenses, today), { count: 3, total: 137_500, ahead: 136_000 });
-    assert.deepEqual(regularTotals([], today), { count: 0, total: 0, ahead: 0 });
+    assert.deepEqual(regularTotals(expenses, today, []), { count: 3, total: 137_500, paid: 0, past: 1_500, ahead: 136_000 });
+    assert.deepEqual(
+      regularTotals(expenses, today, [linked(1, '2026-09-30', 1_500), linked(2, '2026-10-03', 41_000)]),
+      { count: 3, total: 137_500, paid: 42_500, past: 0, ahead: 95_000 },
+      'the phone paid early, the car in part',
+    );
+    assert.deepEqual(regularTotals([], today, []), { count: 0, total: 0, paid: 0, past: 0, ahead: 0 });
   });
 });
 

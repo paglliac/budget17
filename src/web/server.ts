@@ -167,7 +167,7 @@ createServer(async (request, response) => {
       } else if (result.status === 'missing') {
         send(response, 404, 'text/plain', 'Такой регулярной траты нет');
       } else {
-        const page = loadRegular(loadCollections(demo, today), settings.regularExpenses(), { today, form: result.form });
+        const page = loadRegular(loadCollections(demo, today), savedSorting(settings), { today, form: result.form });
         send(response, 422, 'text/html', renderRegular(page, href).toString());
       }
       return;
@@ -215,7 +215,7 @@ createServer(async (request, response) => {
         return;
       }
       case '/regular': {
-        const page = loadRegular(loadCollections(demo, today), loadSettings((s) => s.regularExpenses()), { today, edit: params.get('edit') });
+        const page = loadRegular(loadCollections(demo, today), loadSettings(savedSorting), { today, edit: params.get('edit') });
         send(response, 200, 'text/html', renderRegular(page, href).toString());
         return;
       }

@@ -5,7 +5,7 @@
 
 import { addDays, monthOf, weekday, type MonthString } from './dates.ts';
 import type { Operation } from './ledger.ts';
-import { nearestPayment, paymentDate, type RegularExpense } from './regular.ts';
+import { paidBy, paymentDate, type RegularExpense } from './regular.ts';
 import type { DateString } from './zenmoney/types.ts';
 
 /** Ordinary spending allowed in a week. */
@@ -104,8 +104,7 @@ export function summarizeWeek(budget: Budget, week: DateString): WeekSummary {
     .flatMap((month) => budget.regular.flatMap((expense) => {
       const date = paymentDate(expense, month);
       if (date === null || date < week || date > end) return [];
-      const paid = budget.expenses.filter((o) => o.regular?.id === expense.id && nearestPayment(expense, o.date) === date);
-      return [{ expense, date, paid }];
+      return [{ expense, date, paid: paidBy(expense, date, budget.expenses) }];
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
   return { week, spent, planned, free: WEEK_LIMIT - spent - planned, spending, purchases, regular };

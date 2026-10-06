@@ -1,33 +1,44 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Settings } from '../src/settings.ts';
+import type { Categorization } from '../src/categorization.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { createHref } from '../src/web/pages/chrome.ts';
 import { loadRegular, renderRegular, submitRegular } from '../src/web/pages/regular.ts';
-import { regular, regularInput, RUB, user } from './fixtures.ts';
+import { account, regular, regularInput, RUB, transaction, user } from './fixtures.ts';
 
 const today = '2026-10-05';
-const data: EntityCollections = { instrument: [RUB], user: [user()] };
+const data: EntityCollections = {
+  instrument: [RUB],
+  user: [user()],
+  account: [account({ id: 'card' })],
+  transaction: [
+    transaction({ id: 'car', date: '2026-10-03', outcome: 91_000, payee: 'Автосалон' }),
+    transaction({ id: 'part', date: '2026-10-04', outcome: 41_000, payee: 'Автосалон' }),
+  ],
+};
 const expenses = [
   regular({ id: 1, title: 'Телефон', amount: 1_500, day: 2 }),
   regular({ id: 2, title: 'Машина', amount: 91_000, day: 5 }),
   regular({ id: 3, title: '<b>Офис</b> аренда', amount: 13_000, day: 25 }),
 ];
-const render = (options: Parameters<typeof loadRegular>[2], list = expenses) =>
-  String(renderRegular(loadRegular(data, list, options), createHref())).replaceAll('\u00a0', ' ');
+/** The page with non-breaking spaces as plain ones; `links` are expenses linked to regular ones on /uncategorized. */
+const render = (options: Parameters<typeof loadRegular>[2], list = expenses, links: Array<[string, Categorization]> = []) =>
+  String(renderRegular(loadRegular(data, { categorizations: new Map(links), regular: list }, options), createHref())).replaceAll('\u00a0', ' ');
 const form = (fields: Record<string, string>) => new URLSearchParams(fields);
 
 describe('regular expenses page', () => {
-  it('lists expenses with their next payment, the month’s total and what is left of it', () => {
+  it('lists expenses with when they are paid, the month’s total and what is left of it', () => {
     const page = render({ today });
 
-    assert.ok(page.includes('В октябре на них уходит 105 500 ₽. Осталось заплатить 104 000 ₽, ближайший платёж — «Машина», сегодня.'));
-    assert.ok(page.includes('2-го числа · через 28 дней'));
+    assert.ok(page.includes('Осталось заплатить 104 000 ₽ из 105 500 ₽, ближайший платёж — «Машина», сегодня.'));
+    assert.ok(page.includes('2-го числа · прошёл 2 октября'));
     assert.ok(page.includes('25-го числа · через 20 дней'));
     assert.ok(page.includes('&lt;b&gt;Офис&lt;/b&gt; аренда'));
     assert.ok(!page.includes('<b>Офис</b>'));
     assert.ok(page.includes('href="/regular?edit=2"'));
-    assert.ok(page.includes('на 3 платежа'));
+    assert.ok(page.includes('Осталось заплатить в октябре') && page.includes('104 000<span>,00 ₽</span>'));
+    assert.ok(page.includes('из 105 500 ₽ на 3 платежа'));
     assert.ok(page.includes('title="Машина 91 000 ₽"'), 'the calendar marks payment days');
     assert.ok(page.includes('action="/regular"'), 'there is always a form to add one');
   });
@@ -40,7 +51,7 @@ describe('regular expenses page', () => {
       regular({ id: 6, title: 'Бассейн', amount: 4_000, day: 28, end: '2026-12-31' }),
     ]);
 
-    assert.ok(page.includes('В октябре на них уходит 109 500 ₽.'), 'the loan has not started and the club is over');
+    assert.ok(page.includes('из 109 500 ₽ на 4 платежа'), 'the loan has not started and the club is over');
     assert.ok(page.includes('20-го числа · с 1 ноября · по 20 марта 2027 · через 46 дней'));
     assert.ok(page.includes('15-го числа · по 15 сентября · платежи закончились'));
     assert.ok(page.includes('28-го числа · по 31 декабря · через 23 дня'));
@@ -53,6 +64,40 @@ describe('regular expenses page', () => {
 
     assert.ok(page.includes('В октябре регулярных платежей нет. Ближайший — «Кредит», 20 ноября.'));
     assert.ok(page.includes('В октябре платежей нет'));
+  });
+
+  it('lists what is behind first and quieter, then a line at today and what is ahead, and apart what starts later', () => {
+    const page = render({ today }, [...expenses, regular({ id: 4, title: 'Кредит', amount: 9_000, day: 20, start: '2026-11-01' })], [['car', { regular: 2 }]]);
+    const titles = [...page.matchAll(/<b>([^<]*)<\/b><small>([^<]*)<\/small>|<li class="entry-divider"[^>]*><span>([^<]*)|<h2>([^<]*)/g)].map(
+      (m) => m[3] ?? m[4] ?? `${m[1]}: ${m[2]}`,
+    );
+
+    assert.deepEqual(titles, [
+      'Телефон: 2-го числа · прошёл 2 октября',
+      'Машина: 5-го числа · оплачено 3 октября',
+      'Сегодня, 5 октября',
+      '&lt;b&gt;Офис&lt;/b&gt; аренда: 25-го числа · через 20 дней',
+      'Начнутся позже',
+      'Кредит: 20-го числа · с 1 ноября · через 46 дней',
+    ]);
+    assert.ok(page.indexOf('action="/regular"') < page.indexOf('<h2>Начнутся позже'), 'the form to add one stays under the month');
+    assert.ok(!render({ today }).includes('Начнутся позже'), 'no group when nothing starts later');
+    assert.equal(page.split('<li class="entry muted">').length - 1, 2);
+    assert.ok(page.includes('Осталось заплатить 13 000 ₽ из 105 500 ₽, ближайший платёж — «&lt;b&gt;Офис&lt;/b&gt; аренда», через 20 дней.'), 'the car is paid before its day');
+    assert.ok(page.includes('13 000<span>,00 ₽</span>') && page.includes('из 105 500 ₽ на 3 платежа'), 'the loan starts next month');
+    assert.ok(page.includes('title="Оплачено"') && page.includes('title="Прошли"') && page.includes('title="Впереди"'));
+  });
+
+  it('says how much of a payment linked expenses paid, and when everything this month is behind', () => {
+    const car = regular({ id: 2, title: 'Машина', amount: 91_000, day: 5 });
+    const part = render({ today }, [car], [['part', { regular: 2 }]]);
+
+    assert.ok(part.includes('5-го числа · оплачено 41 000 ₽ из 91 000 ₽ · сегодня'));
+    assert.ok(part.includes('Осталось заплатить 50 000 ₽ из 91 000 ₽'));
+    assert.ok(!part.includes('entry-divider'), 'no line with nothing behind');
+    const behind = render({ today }, [expenses[0]!, car], [['car', { regular: 2 }]]);
+    assert.ok(behind.includes('В октябре на них уходит 92 500 ₽, все платежи этого месяца уже позади.'));
+    assert.ok(!behind.includes('entry-divider'), 'no line with nothing ahead');
   });
 
   it('shows the icon picked for an expense instead of the one by its title', () => {
