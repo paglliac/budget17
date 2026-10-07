@@ -292,7 +292,7 @@ describe('dashboard', () => {
     const page = render({}, budget);
 
     assert.ok(page.includes('Неделя 1–7 октября'), 'from Thursday to Wednesday');
-    assert.ok(page.includes('Можно потратить ещё 9 527 ₽. Потрачено 70 473 ₽ из 80 000 ₽. Бюджет этой недели изменён в настройках: 80 000 ₽ вместо 45 000 ₽.'));
+    assert.ok(page.includes('Можно потратить ещё 9 527 ₽. Потрачено 70 473 ₽ из 80 000 ₽. Бюджет этой недели изменён: 80 000 ₽ вместо 45 000 ₽.'));
     assert.ok(page.includes('из 80 000 ₽ на неделю'));
     assert.ok(page.includes('href="/?week=2026-09-24">← Раньше</a>') && page.includes('href="/?week=2026-10-08">Позже →</a>'));
     assert.ok(render({ week: '2026-10-05' }, budget).includes('Неделя 1–7 октября'), 'a Monday is no first day of a week now');
@@ -301,6 +301,29 @@ describe('dashboard', () => {
     const month = render({ view: 'month' }, budget);
     assert.ok(month.includes('Неделя 22–28 октября') && !month.includes('Неделя 29 октября'), 'the week of 29 October has most of its days in November');
     assert.ok(month.includes('По неделям потрачено 70 473 ₽ из 215 000 ₽.'));
+  });
+
+  it('shows what the week allows under what is left, and opens it to change the amount or give the usual back', () => {
+    const usual = render();
+    const side = usual.slice(usual.indexOf('<aside'));
+    const row = (/id="limit".*?<\/li>/s.exec(side)?.[0] ?? '').replace(/>\s+</g, '><');
+    assert.ok(side.indexOf('Можно потратить') < side.indexOf('id="limit"') && side.indexOf('id="limit"') < side.indexOf('aria-label="План на неделю"'));
+    assert.ok(row.includes('<b>Бюджет недели</b><small>как обычно</small>') && row.includes('<b class="entry-amount">45 000 ₽</b>') && row.includes('href="/?edit=limit"'));
+
+    const open = render({ edit: 'limit' });
+    assert.ok(open.includes('action="/week-limits/2026-10-05"') && open.includes('name="amount" value="45000"'));
+    assert.ok(!open.includes('Вернуть 45 000 ₽'), 'the usual amount has nothing to give back');
+
+    const cut = { ...saved(), weekLimits: new Map([['2026-10-05', 30_000]]) };
+    assert.ok(render({}, cut).includes('<small>вместо 45 000 ₽</small>'));
+    assert.ok(render({ edit: 'limit' }, cut).includes('formaction="/week-limits/2026-10-05/delete">Вернуть 45 000 ₽</button>'));
+
+    const ahead = render({ week: '2026-10-19' });
+    assert.ok(ahead.includes('href="/?week=2026-10-19&amp;edit=limit"'), 'a week ahead is changed the same way');
+    const invalid = render(
+      { week: '2026-10-19', form: { kind: 'limit', id: null, values: { title: '', amount: 'много' }, errors: { amount: 'Сумма в рублях, например 13 000' }, envelope: 'week', week: '2026-10-19' } },
+    );
+    assert.ok(invalid.includes('action="/week-limits/2026-10-19"') && invalid.includes('value="много"') && invalid.includes('Сумма в рублях, например 13 000'));
   });
 
   it('opens a purchase with the week it is planned for, to move it to another', () => {
@@ -316,6 +339,28 @@ describe('dashboard', () => {
 describe('submitDashboard', () => {
   const context = (settings: Settings) => ({ today, budget: () => budgetOf(data(), { ...saved(), purchases: settings.purchases(), wishes: settings.wishes() }, { today }) });
   const form = (fields: Record<string, string>) => new URLSearchParams(fields);
+
+  it('sets what a week allows, takes the usual amount as none of its own, and gives the usual back', () => {
+    using settings = new Settings(':memory:');
+    const submit = (path: string, fields: Record<string, string> = {}) => submitDashboard(settings, path, form(fields), context(settings));
+
+    assert.deepEqual(submit('/week-limits/2026-10-05', { amount: '30 000' }), { status: 'saved' });
+    assert.deepEqual(submit('/week-limits/2026-09-28', { amount: '50000' }), { status: 'saved' }, 'a week that is over too');
+    assert.deepEqual([...settings.weekLimits()], [['2026-09-28', 50_000], ['2026-10-05', 30_000]]);
+    submit('/week-limits/2026-09-28', { amount: '45 000' });
+    assert.deepEqual(submit('/week-limits/2026-10-05/delete'), { status: 'saved' });
+    assert.deepEqual([...settings.weekLimits()], []);
+
+    assert.deepEqual(submit('/week-limits/2026-10-12', { amount: '0' }), {
+      status: 'invalid',
+      form: { kind: 'limit', id: null, values: { title: '', amount: '0' }, errors: { amount: 'Сумма в рублях, например 13 000' }, envelope: 'week', week: '2026-10-12' },
+    });
+    assert.deepEqual(submit('/week-limits/2026-10-06', { amount: '30000' }), { status: 'missing' }, 'not the first day of a week');
+    assert.deepEqual(submit('/week-limits/2027-10-11', { amount: '30000' }), { status: 'missing' }, 'more than a year ahead');
+    settings.setWeekStart(2);
+    assert.deepEqual(submit('/week-limits/2026-10-07', { amount: '30000' }), { status: 'saved' }, 'weeks from Wednesday');
+    assert.deepEqual([...settings.weekLimits()], [['2026-10-07', 30_000]]);
+  });
 
   it('adds purchases to a week, marks them bought, moves them to extras and deletes them', () => {
     using settings = new Settings(':memory:');

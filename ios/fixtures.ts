@@ -37,7 +37,7 @@ settings.addWish({ title: 'Укладка для волос', amount: 4_500 });
 settings.addIncome({ title: 'Зарплата', model: 'salary', params: { salary: 200_000, advanceDay: 20, payDay: 5 } });
 settings.addIncome({ title: 'Сдача квартиры', model: 'fixed', params: { amount: 30_000, day: 1 } });
 settings.addOwnCategory('Дети');
-settings.setWeekLimit('2026-10-12', 30_000);
+settings.setWeekLimit('2026-10-05', 30_000);
 
 const saved = (): SavedBudget => ({
   categorizations: settings.categorizations(),
@@ -70,7 +70,7 @@ const screens: Record<string, unknown> = {
   regular: regularScreen(data, saved(), { today }),
   income: incomeScreen(data, settings.incomes(), { today }),
   categories: categoriesScreen(data, saved(), { today }),
-  'budget-settings': budgetSettingsScreen(data, saved(), { today }),
+  'budget-settings': budgetSettingsScreen(data, saved()),
   widget: widgetScreen(data, saved(), { today }),
 };
 for (const [name, screen] of Object.entries(screens)) writeFileSync(join(folder, `${name}.json`), JSON.stringify(screen, null, 2));

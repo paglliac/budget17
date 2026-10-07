@@ -164,6 +164,29 @@ struct BigAmount: View {
     }
 }
 
+/// A small button beside the figure, such as what the week allows, to change it; violet when it is not the usual.
+struct SummaryChip: View {
+    let text: String
+    var highlighted = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Text(text).monospacedDigit()
+                Image(systemName: "pencil").font(.caption2.weight(.bold))
+            }
+            .font(.footnote.weight(.semibold))
+            .padding(.horizontal, 11)
+            .frame(height: 30)
+            .foregroundStyle(highlighted ? Ink.violet : Ink.muted)
+            .background(highlighted ? Ink.violet.opacity(0.12) : Ink.canvas, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+    }
+}
+
 /// A total's parts as one bar, with a legend of figures under it.
 struct SummaryBar: View {
     let parts: [Total.Part]

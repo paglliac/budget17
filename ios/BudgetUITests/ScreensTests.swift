@@ -35,6 +35,14 @@ final class ScreensTests: XCTestCase {
             XCTFail("the expense opens")
         }
 
+        app.buttons["week-limit"].tap()
+        if app.buttons["Сохранить"].waitForExistence(timeout: 5) {
+            shot("week-limit")
+            app.buttons["Отмена"].tap()
+        } else {
+            XCTFail("the week's budget opens")
+        }
+
         pill("План").tap()
         shot("week-plan")
         if app.buttons["Добавить в план"].waitForExistence(timeout: 5) {
@@ -88,11 +96,6 @@ final class ScreensTests: XCTestCase {
         if app.navigationBars["Настройки"].waitForExistence(timeout: 5) {
             sleep(1)
             shot("settings")
-            if app.buttons["Изменить бюджет недели"].waitForExistence(timeout: 5) {
-                app.buttons["Изменить бюджет недели"].tap()
-                if app.navigationBars["Бюджет недели"].waitForExistence(timeout: 5) { shot("week-limit") }
-                app.buttons["Отмена"].tap()
-            }
             app.buttons["Готово"].tap()
         }
     }

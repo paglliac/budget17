@@ -155,12 +155,22 @@ struct WeekScreen: Decodable {
     let prev: String
     let next: String?
     let total: Total
+    let limit: WeekLimit
     let days: [Day<Expense>]
     let plan: [PlanItem]
     /// Only the current week has them.
     let wishes: [WishItem]?
     let weekChoices: [OptionGroup]
     let source: String
+}
+
+/// What a week allows and the usual amount. Another amount posts to /api/week-limits/:week, the usual one back to
+/// /api/week-limits/:week/delete.
+struct WeekLimit: Decodable, Hashable {
+    let amount: Double
+    let usual: Double
+
+    var changed: Bool { amount != usual }
 }
 
 struct WeekLine: Decodable, Hashable, Identifiable {
@@ -460,8 +470,7 @@ struct CategoriesScreen: Decodable {
     let hidden: [CategoryItem]
 }
 
-/// The budget's setup: the day a week begins on and the weeks with an amount of their own. The day posts to
-/// /api/budget/week-start/:day, a week's amount to /api/budget/weeks or /api/budget/weeks/:week.
+/// The day a week begins on, which posts to /api/budget/week-start/:day.
 struct BudgetSettingsScreen: Decodable {
     let symbol: String
     /// 0 for Monday to 6 for Sunday.
@@ -470,10 +479,6 @@ struct BudgetSettingsScreen: Decodable {
     let weekdays: [Weekday]
     /// What a week allows unless it has an amount of its own.
     let limit: Double
-    let weeks: [WeekLine]
-    /// The first day of the current week.
-    let current: String
-    let weekChoices: [OptionGroup]
 
     struct Weekday: Decodable, Hashable {
         let value: Int

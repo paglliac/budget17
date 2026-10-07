@@ -1,6 +1,6 @@
 // Web UI and the JSON API of the iPhone app: the week's budget at /, operations at /operations, expenses without a
-// category at /uncategorized, incomes at /income, regular expenses at /regular, the budget's setup and categories at
-// /settings, the widget
+// category at /uncategorized, incomes at /income, regular expenses at /regular, the day a week begins on and categories
+// at /settings, the widget
 // storyboard at /storyboard, and the same screens as JSON under /api (see api.ts). Forms post to the same paths
 // whether they come from a page or, under /api, from the app, which gets JSON back instead of a redirect. Reads the
 // local ZenMoney copy (data/zenmoney.db) and syncs it on start, every SYNC_MINUTES and on POST /sync when
@@ -41,7 +41,7 @@ import { renderLogin } from './pages/login.ts';
 import { loadOperations, renderOperations } from './pages/operations.ts';
 import { submitMarking, type SavedMarking } from './pages/marking.ts';
 import { loadRegular, renderRegular, submitRegular } from './pages/regular.ts';
-import { loadSettingsPage, renderSettings, submitBudget, submitSettings, type SavedSettings } from './pages/settings.ts';
+import { loadSettingsPage, renderSettings, submitBudget, submitSettings } from './pages/settings.ts';
 import { renderStoryboard } from './pages/storyboard.ts';
 import { loadUncategorized, renderUncategorized } from './pages/uncategorized.ts';
 import { WIDGET_DOCS } from './stories.ts';
@@ -96,12 +96,8 @@ function savedMarking(settings: Settings): SavedMarking {
   };
 }
 
-function savedSettings(settings: Settings): SavedSettings {
-  return { ...savedMarking(settings), weekLimits: settings.weekLimits() };
-}
-
 function savedBudget(settings: Settings): SavedBudget {
-  return { ...savedSettings(settings), wishes: settings.wishes() };
+  return { ...savedMarking(settings), weekLimits: settings.weekLimits(), wishes: settings.wishes() };
 }
 
 /** The page a form was sent from, without the entry it had open, so saving closes the form. */
@@ -180,7 +176,7 @@ type FormResult =
 /** Applies a form posted to `path`, a page's form path; null when no form posts there. */
 function submitForm(path: string, body: URLSearchParams, request: IncomingMessage, context: Context): FormResult | null {
   const { today, demo, href } = context;
-  if (/^\/(purchases|wishes)(\/|$)/.test(path)) {
+  if (/^\/(purchases|wishes|week-limits)(\/|$)/.test(path)) {
     using settings = new Settings(SETTINGS_PATH);
     const collections = loadCollections(demo, today);
     const result = submitDashboard(settings, path, body, { today, budget: () => budgetOf(collections, savedBudget(settings), { today }) });
@@ -202,16 +198,12 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     const result = submitSettings(settings, collections, path, body);
     if (result.status === 'saved') return { status: 'saved', next: href('/settings') };
     if (result.status === 'missing') return { status: 'missing', message: 'Такой категории нет' };
-    const page = () => renderSettings(loadSettingsPage(collections, loadSettings(savedSettings), { today, form: result.form }), href).toString();
+    const page = () => renderSettings(loadSettingsPage(collections, loadSettings(savedMarking), { today, form: result.form }), href).toString();
     return { status: 'invalid', errors: { title: result.form.error }, page };
   }
   if (path.startsWith('/budget/')) {
     using settings = new Settings(SETTINGS_PATH);
-    const result = submitBudget(settings, path, body, today);
-    if (result.status === 'saved') return { status: 'saved', next: href('/settings') };
-    if (result.status === 'missing') return { status: 'missing', message: 'У этой недели нет своей суммы' };
-    const page = () => renderSettings(loadSettingsPage(loadCollections(demo, today), loadSettings(savedSettings), { today, weekForm: result.form }), href).toString();
-    return { status: 'invalid', errors: { [result.form.error === 'Выберите неделю' ? 'week' : 'amount']: result.form.error }, page };
+    return submitBudget(settings, path).status === 'saved' ? { status: 'saved', next: href('/settings') } : { status: 'missing', message: 'Такого дня недели нет' };
   }
   if (/^\/regular(\/|$)/.test(path)) {
     using settings = new Settings(SETTINGS_PATH);
@@ -261,9 +253,9 @@ function apiScreen(path: string, params: URLSearchParams, { today, demo }: Conte
     case '/api/income':
       return incomeScreen(loadCollections(demo, today), loadSettings((s) => s.incomes()), { today });
     case '/api/categories':
-      return categoriesScreen(loadCollections(demo, today), loadSettings(savedSettings), { today });
+      return categoriesScreen(loadCollections(demo, today), loadSettings(savedMarking), { today });
     case '/api/budget-settings':
-      return budgetSettingsScreen(loadCollections(demo, today), loadSettings(savedSettings), { today });
+      return budgetSettingsScreen(loadCollections(demo, today), loadSettings(savedMarking));
     case '/api/widget':
       return widgetScreen(loadCollections(demo, today), loadSettings(savedBudget), { today });
     default:
@@ -378,7 +370,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       return;
     }
     case '/settings': {
-      const page = loadSettingsPage(loadCollections(demo, today), loadSettings(savedSettings), { today, edit: params.get('edit') });
+      const page = loadSettingsPage(loadCollections(demo, today), loadSettings(savedMarking), { today, edit: params.get('edit') });
       send(response, 200, 'text/html', renderSettings(page, href).toString());
       return;
     }

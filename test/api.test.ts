@@ -248,13 +248,15 @@ describe('api', () => {
 
     assert.deepEqual([week.week, week.current, week.title, week.prev, week.next], ['2026-10-01', '2026-10-01', 'Неделя 1–7 октября', '2026-09-24', '2026-10-08']);
     assert.equal(week.total.note, 'из 80 000 ₽ на неделю');
+    assert.deepEqual(week.limit, { amount: 80_000, usual: 45_000 });
+    assert.deepEqual(plain(weekScreen(data(), saved(), budget)).limit, { amount: 45_000, usual: 45_000 });
     assert.equal(week.total.amount, 80_000 - 70_473);
     assert.equal(plain(widgetScreen(data(), settings, { today })).note, 'из 80 000 ₽ на неделю');
     assert.deepEqual(plain(monthScreen(data(), settings, budget)).weeks.map((w: { week: string }) => w.week), ['2026-10-01', '2026-10-08', '2026-10-15', '2026-10-22']);
   });
 
-  it('gives the budget’s setup: the day a week begins on and the weeks with an amount of their own', () => {
-    const screen = plain(budgetSettingsScreen(data(), { weekStart: 2, weekLimits: new Map([['2026-10-14', 30_000], ['2026-09-23', 40_000]]) }, { today }));
+  it('gives the day a week begins on, to pick from the days Monday first', () => {
+    const screen = plain(budgetSettingsScreen(data(), { weekStart: 2 }));
 
     assert.equal(screen.weekStart, 2);
     assert.deepEqual(screen.weekdays.slice(0, 3), [
@@ -263,18 +265,6 @@ describe('api', () => {
       { value: 2, label: 'Среда' },
     ]);
     assert.equal(screen.limit, 45_000);
-    assert.equal(screen.current, '2026-09-30');
-    assert.deepEqual(
-      screen.weeks.map((w: { week: string; title: string; details: string; amount: number; muted: boolean }) => [w.week, w.title, w.details, w.amount, w.muted]),
-      [
-        ['2026-09-23', '23–29 сентября', 'прошла · вместо 45 000 ₽', 40_000, true],
-        ['2026-10-14', '14–20 октября', 'впереди · вместо 45 000 ₽', 30_000, false],
-      ],
-    );
-    assert.deepEqual(screen.weekChoices[0].options.slice(0, 2), [
-      { value: '2026-09-30', label: 'Эта неделя' },
-      { value: '2026-10-07', label: 'Следующая неделя' },
-    ]);
   });
 
   it('gives categories with the hidden ones apart', () => {

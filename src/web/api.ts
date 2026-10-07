@@ -44,7 +44,7 @@ import {
 } from './pages/marking.ts';
 import { loadOperations, operationCategory, operationLine } from './pages/operations.ts';
 import { loadRegular, regularLine, regularTotalNote, STATUS_TONE, timeline, type Placed } from './pages/regular.ts';
-import { categoryDetails, loadBudgetSetup, loadSettingsPage, weekLimitLine, type SavedSettings } from './pages/settings.ts';
+import { categoryDetails, loadBudgetSetup, loadSettingsPage } from './pages/settings.ts';
 import { loadUncategorized, suggestedChoice, suggestionName } from './pages/uncategorized.ts';
 import { categoryColor, toneColor } from './tones.ts';
 
@@ -181,6 +181,8 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
     prev: addDays(w.week, -7),
     next: next <= addDays(current, 7 * PLAN_AHEAD) ? next : null,
     total: weekTotal(w, current, d.symbol),
+    /** What the week allows and the usual amount; another amount posts to /api/week-limits/:week, the usual one back to /api/week-limits/:week/delete. */
+    limit: { amount: w.limit, usual: WEEK_LIMIT },
     days: expenseDays(d.marking, w.spending, today),
     plan: [...w.purchases.map((p) => purchaseRow(p, current, d.symbol)), ...w.regular.map((r) => regularPaymentRow(r, d.symbol))],
     wishes:
@@ -482,29 +484,19 @@ export function widgetScreen(data: EntityCollections, saved: SavedBudget, option
   };
 }
 
-/**
- * The budget's setup: the day a week begins on, to pick from the days Monday first, the usual amount of a week and the
- * weeks with an amount of their own. The day posts to /api/budget/week-start/:day, a week's amount to
- * /api/budget/weeks (with `week`) or /api/budget/weeks/:week, and /api/budget/weeks/:week/delete gives the usual back.
- */
-export function budgetSettingsScreen(data: EntityCollections, saved: Pick<SavedSettings, 'weekStart' | 'weekLimits'>, options: { today: DateString }) {
-  const b = loadBudgetSetup(data, saved, options.today);
+/** The day a week begins on, to pick from the days Monday first; it posts to /api/budget/week-start/:day. */
+export function budgetSettingsScreen(data: EntityCollections, saved: Pick<SavedMarking, 'weekStart'>) {
+  const b = loadBudgetSetup(data, saved);
   return {
     symbol: b.symbol,
     weekStart: b.weekStart,
     weekdays: WEEKDAYS_FULL.map((day, value) => ({ value, label: capitalize(day) })),
     limit: WEEK_LIMIT,
-    weeks: b.weeks.map(({ week, amount }) => {
-      const line = weekLimitLine(b, week);
-      return { ...row({ id: `week-${week}`, title: weekLabel(week), details: line.details, icon: 'calendar', color: toneColor(line.tone), amount, muted: line.muted }), week };
-    }),
-    current: b.current,
-    weekChoices: weekChoices(b.current),
   };
 }
 
 /** Categories in the order marking offers them, the hidden ones apart. */
-export function categoriesScreen(data: EntityCollections, saved: SavedSettings, options: { today: DateString }) {
+export function categoriesScreen(data: EntityCollections, saved: SavedMarking, options: { today: DateString }) {
   const d = loadSettingsPage(data, saved, options);
   const item = ({ category: c, count }: (typeof d.categories)[number]) => ({
     ...row({

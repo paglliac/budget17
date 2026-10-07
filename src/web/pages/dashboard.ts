@@ -1,10 +1,11 @@
 // The overview: the budget by weeks. The week tab is a week's spending by days, with what is left to spend, the plan
 // and, in the current week, the wishes on the side; a week ahead has its plan in the main column and what it leaves
-// free on the side. The month tab is a month's weeks and its extras. Both step back and forth, ?week=2026-10-19 and
-// ?month=2026-11, up to a year ahead. Built from widgets only. Entries open by ?edit=purchase-1, wish-1,
-// spending-<ZenMoney id>, or new-purchase and new-wish for the forms folded on the side; an open expense is marked as
-// on every page (see marking.ts). Forms post to /purchases and /wishes (see submitDashboard) and to /spending (see
-// submitMarking), and the server sends the browser back to the page they came from.
+// free on the side. Under what is left a week shows what it allows, which opens by ?edit=limit to give the week
+// another amount than the usual one. The month tab is a month's weeks and its extras. Both step back and forth,
+// ?week=2026-10-19 and ?month=2026-11, up to a year ahead. Built from widgets only. Entries open by ?edit=purchase-1,
+// wish-1, spending-<ZenMoney id>, or new-purchase and new-wish for the forms folded on the side; an open expense is
+// marked as on every page (see marking.ts). Forms post to /purchases, /wishes and /week-limits (see submitDashboard)
+// and to /spending (see submitMarking), and the server sends the browser back to the page they came from.
 
 import { summarizeBalances } from '../../balances.ts';
 import { addDays, shiftMonth, type MonthString } from '../../dates.ts';
@@ -68,16 +69,16 @@ export interface SavedBudget extends SavedMarking {
 
 export type FormField = 'title' | 'amount';
 
-/** A purchase or wish form shown again with its errors after a submission failed. */
+/** A purchase, wish or week's amount form shown again with its errors after a submission failed. */
 export interface DashboardForm {
-  kind: 'purchase' | 'wish';
+  kind: 'purchase' | 'wish' | 'limit';
   /** null for a new one. */
   id: number | null;
   values: Record<FormField, string>;
   errors: Partial<Record<FormField, string>>;
   /** Which list a new purchase was added to. */
   envelope: 'week' | 'extra';
-  /** The week the purchase was sent with, as sent. */
+  /** The week the purchase or the amount was sent for, as sent. */
   week: string | null;
 }
 
@@ -183,8 +184,9 @@ export type DashboardSubmission = { status: 'saved' } | { status: 'missing' } | 
 /**
  * Applies a form posted to /purchases (add), /purchases/:id (save), /purchases/:id/move (save and switch between
  * the week's money and extras), /purchases/:id/done (bought or not), /purchases/:id/delete, /wishes (add),
- * /wishes/:id (save), /wishes/:id/plan (into the advised week) or /wishes/:id/delete. `budget` is needed only to
- * plan a wish.
+ * /wishes/:id (save), /wishes/:id/plan (into the advised week), /wishes/:id/delete, /week-limits/:week (what the
+ * week allows; the usual amount means none of its own) or /week-limits/:week/delete (the usual amount back).
+ * `budget` is needed only to plan a wish.
  */
 export function submitDashboard(
   settings: Settings,
@@ -219,6 +221,24 @@ export function submitDashboard(
       const week = body.has('week') ? parseWeek(body.get('week'), current, start) : existing.week;
       settings.updatePurchase(existing.id, { ...parsed.entry, envelope: moved, week });
     }
+    return { status: 'saved' };
+  }
+
+  const limit = /^\/week-limits\/(\d{4}-\d{2}-\d{2})(\/delete)?$/.exec(path);
+  if (limit) {
+    const [, week = '', remove] = limit;
+    const start = settings.weekStart();
+    if (parseWeek(week, weekOf(context.today, start), start) !== week) return { status: 'missing' };
+    if (remove) {
+      settings.setWeekLimit(week, null);
+      return { status: 'saved' };
+    }
+    const text = body.get('amount') ?? '';
+    const amount = parseAmount(text);
+    if ('error' in amount) {
+      return { status: 'invalid', form: { kind: 'limit', id: null, values: { title: '', amount: text }, errors: { amount: amount.error }, envelope: 'week', week } };
+    }
+    settings.setWeekLimit(week, amount.value === WEEK_LIMIT ? null : amount.value);
     return { status: 'saved' };
   }
 
@@ -314,13 +334,14 @@ function weekView(page: Page): { main: Html[]; side: Html[] } {
   if (w.week > current) {
     return {
       main: [...head, section({ title: 'План', body: entryList({ label: 'План на неделю', items: [...planItems(page, w), newPurchaseForm(page, w.week, 'week')] }) })],
-      side: totalSide(weekTotal(w, current, d.symbol), d.symbol, 'Неделя'),
+      side: [...totalSide(weekTotal(w, current, d.symbol), d.symbol, 'Неделя'), limitList(page, w)],
     };
   }
   return {
     main: [...head, section({ title: 'Траты недели', body: w.spending.length === 0 ? emptyState({ text: 'Трат пока нет.' }) : spendingByDay(page, w.spending) })],
     side: [
       ...totalSide(weekTotal(w, current, d.symbol), d.symbol, 'Неделя'),
+      limitList(page, w),
       topBar({ crumbs: [{ label: 'План' }] }),
       entryList({ label: 'План на неделю', items: [...planItems(page, w), foldedPurchaseForm(page, w.week)] }),
       ...(w.week === current
@@ -331,6 +352,48 @@ function weekView(page: Page): { main: Html[]; side: Html[] } {
         : []),
     ],
   };
+}
+
+/**
+ * What the week allows, under what is left: the usual amount or the week's own. It opens to give the week another
+ * amount, such as less when something happened and the week has to do with less, or the usual one back.
+ */
+function limitList(page: Page, w: WeekSummary): Html {
+  const { d, href, here } = page;
+  const own = w.limit !== WEEK_LIMIT;
+  const color = toneColor(own ? 'violet' : 'gray');
+  const form = d.form?.kind === 'limit' && d.form.week === w.week ? d.form : null;
+  const item =
+    form || d.edit === 'limit'
+      ? entryForm({
+          id: 'limit',
+          action: href(`/week-limits/${w.week}`),
+          submitLabel: 'Сохранить',
+          icon: 'sliders',
+          color,
+          fields: field({
+            label: `Бюджет недели, ${d.symbol}`,
+            name: 'amount',
+            type: 'decimal',
+            value: form?.values.amount ?? amountText(w.limit),
+            placeholder: amountText(WEEK_LIMIT),
+            required: true,
+            error: form?.errors.amount,
+          }),
+          extraActions: own ? [{ label: `Вернуть ${money(WEEK_LIMIT, d.symbol)}`, action: href(`/week-limits/${w.week}/delete`) }] : [],
+          cancelHref: here(),
+        })
+      : entryRow({
+          id: 'limit',
+          title: 'Бюджет недели',
+          details: own ? `вместо ${money(WEEK_LIMIT, d.symbol)}` : 'как обычно',
+          icon: 'sliders',
+          color,
+          amount: w.limit,
+          symbol: d.symbol,
+          href: here({ edit: 'limit' }),
+        });
+  return entryList({ label: 'Бюджет недели', items: [item] });
 }
 
 function planItems(page: Page, w: WeekSummary): Html[] {
@@ -738,7 +801,7 @@ function sentence(text: string): string {
 }
 
 export function weekSentence(w: WeekSummary, current: DateString, s: string): string {
-  const changed = w.limit === WEEK_LIMIT ? '' : ` ${sentence(`Бюджет этой недели изменён в настройках: ${money(w.limit, s)} вместо ${money(WEEK_LIMIT, s)}`)}`;
+  const changed = w.limit === WEEK_LIMIT ? '' : ` ${sentence(`Бюджет этой недели изменён: ${money(w.limit, s)} вместо ${money(WEEK_LIMIT, s)}`)}`;
   return `${weekFigures(w, current, s)}${changed}`;
 }
 

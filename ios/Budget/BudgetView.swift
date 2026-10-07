@@ -137,7 +137,15 @@ struct WeekView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     // In the current week the figure is what can still be spent, which goes without saying.
                     if s.phase != "current" { SummaryLabel(s.total.label) }
-                    BigAmount(amount: s.total.amount, symbol: s.symbol)
+                    HStack(alignment: .center, spacing: 8) {
+                        BigAmount(amount: s.total.amount, symbol: s.symbol)
+                        Spacer(minLength: 0)
+                        SummaryChip(text: "из \(Money.number(s.limit.amount))", highlighted: s.limit.changed) {
+                            sheet = .weekLimit(WeekLimitDraft(week: s.week, title: s.title, limit: s.limit, symbol: s.symbol))
+                        }
+                        .accessibilityIdentifier("week-limit")
+                        .accessibilityLabel("Бюджет недели \(Money.text(s.limit.amount, s.symbol))")
+                    }
                     SummaryBar(parts: s.total.parts ?? [])
                 }
             } band: {

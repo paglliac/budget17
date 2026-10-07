@@ -1,11 +1,13 @@
 import SwiftUI
 
-/// What opens over a list: an expense to mark, a purchase or a wish to add or change, a regular expense.
+/// What opens over a list: an expense to mark, a purchase or a wish to add or change, a regular expense, what a week
+/// allows.
 enum BudgetSheet: Identifiable, Hashable {
     case spending(String)
     case purchase(PurchaseDraft)
     case wish(WishItem?)
     case regular(Int)
+    case weekLimit(WeekLimitDraft)
 
     var id: String {
         switch self {
@@ -13,8 +15,17 @@ enum BudgetSheet: Identifiable, Hashable {
         case .purchase(let draft): "purchase-\(draft.purchase.map { String($0.id) } ?? "new-\(draft.envelope)")"
         case .wish(let item): "wish-\(item.map { String($0.wish.id) } ?? "new")"
         case .regular(let id): "regular-\(id)"
+        case .weekLimit(let draft): "week-limit-\(draft.week)"
         }
     }
+}
+
+/// What a week allows, to change: its first day, its title and its amount with the usual one.
+struct WeekLimitDraft: Hashable {
+    let week: String
+    let title: String
+    let limit: WeekLimit
+    let symbol: String
 }
 
 /// A purchase to add, into a week and the week's money or the extras, or one to change.
@@ -34,12 +45,66 @@ extension View {
             case .purchase(let draft): PurchaseSheet(draft: draft)
             case .wish(let item): WishSheet(item: item)
             case .regular(let id): RegularLoader(id: id)
+            case .weekLimit(let draft): WeekLimitSheet(draft: draft)
             }
         }
     }
 }
 
 // MARK: - Purchases and wishes
+
+/// Another amount for a week, such as less when something happened, or the usual one back.
+struct WeekLimitSheet: View {
+    let draft: WeekLimitDraft
+    @Environment(Session.self) private var session
+    @Environment(\.dismiss) private var dismiss
+    @State private var amount = ""
+    @State private var errors: [String: String] = [:]
+    @State private var error: String?
+    @State private var busy = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(draft.title) {
+                    TextField(Money.input(draft.limit.usual), text: $amount).decimalKeyboard()
+                    FieldError(text: errors["amount"])
+                }
+                if draft.limit.changed {
+                    Section {
+                        Button("Вернуть \(Money.text(draft.limit.usual, draft.symbol))") { submit("week-limits/\(draft.week)/delete", [:]) }
+                    }
+                }
+            }
+            .navigationTitle("Бюджет недели")
+            .inlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Сохранить") { submit("week-limits/\(draft.week)", ["amount": amount]) }.disabled(busy)
+                }
+            }
+            .presentationDetents([.medium])
+            .errorAlert($error)
+            .onAppear { amount = Money.input(draft.limit.amount) }
+        }
+    }
+
+    private func submit(_ path: String, _ form: [String: String]) {
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                try await session.send(path, form)
+                dismiss()
+            } catch APIError.invalid(let errors) {
+                self.errors = errors
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+}
 
 struct PurchaseSheet: View {
     let draft: PurchaseDraft
