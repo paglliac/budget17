@@ -125,8 +125,11 @@ const LIST_WEEKS_BEFORE = 4;
 const LIST_WEEKS_AFTER = 13;
 
 const ENVELOPE_CHOICE: Record<Envelope, string> = { week: 'Неделя', extra: 'Дополнительные', outside: 'Вне бюджета', ignored: 'Не учитывать' };
-/** Where an expense counts, as a dot before its amount: yellow as what the week spent, violet as the extras. */
-const ENVELOPE_MARK: Record<Envelope, { label: string; tone?: Tone }> = {
+/**
+ * Where an expense or a purchase counts, as a dot before its amount: yellow as what the week spent, violet as the
+ * extras, an empty ring outside the budget.
+ */
+export const ENVELOPE_MARK: Record<Envelope, { label: string; tone?: Tone }> = {
   week: { label: 'В неделе', tone: 'yellow' },
   extra: { label: 'Дополнительные', tone: 'violet' },
   outside: { label: 'Вне бюджета' },

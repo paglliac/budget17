@@ -114,7 +114,10 @@ const accountChips = new Html(
 export const WIDGET_DOCS: WidgetDoc[] = [
   doc(
     appShell,
-    { group: 'Каркас', description: 'Рамка страницы: рейка слева, вкладки, основная панель и боковая панель справа.' },
+    {
+      group: 'Каркас',
+      description: 'Рамка страницы: рейка слева, вкладки, основная панель и боковая панель справа. Широкая боковая панель вмещает свои списки, например план недели.',
+    },
     [
       {
         name: 'С боковой панелью',
@@ -124,6 +127,16 @@ export const WIDGET_DOCS: WidgetDoc[] = [
           tabs: tabs({ label: 'Месяц', items: [{ label: 'Октябрь', href: '#', active: true }, { label: 'Сентябрь', href: '#' }] }),
           main: emptyState({ text: 'Основное содержимое страницы' }),
           side: emptyState({ text: 'Боковая панель' }),
+        },
+      },
+      {
+        name: 'С широкой боковой панелью',
+        surface: 'page',
+        props: {
+          rail: rail({ groups: [{ title: 'Меню', items: [{ icon: 'home', label: 'Обзор', href: '#', active: true }] }] }),
+          main: emptyState({ text: 'Траты недели' }),
+          side: emptyState({ text: 'Можно потратить и план' }),
+          wideSide: true,
         },
       },
     ],
@@ -407,9 +420,25 @@ export const WIDGET_DOCS: WidgetDoc[] = [
 
   doc(operationRow, {
     group: 'Операции',
-    description: 'Одна операция: кто, за что, с какого счёта и сколько. У расхода минус, доход зелёный с плюсом, перевод приглушён. Расход открывается на месте для разметки.',
+    description: 'Одна операция: кто, за что, с какого счёта и сколько. У расхода минус, доход зелёный с плюсом, перевод приглушён. Расход открывается на месте для разметки. Точка перед суммой говорит, где расход считается; в списке одних расходов минус можно убрать.',
   }, [
     { name: 'Расход', width: 520, props: { title: 'Пятёрочка', details: 'Продукты, Т-Банк Black', icon: 'cart', color: '#4FAE7F', kind: 'expense', amount: 1_247.9, symbol: '₽' } },
+    {
+      name: 'С отметкой, где считается',
+      width: 520,
+      props: {
+        title: 'Коммуналка Московский 18к5',
+        details: 'Основной · prostoplatSBP',
+        icon: 'repeat',
+        color: 'var(--orange)',
+        kind: 'expense',
+        amount: 8_309,
+        symbol: '₽',
+        href: '#',
+        mark: { label: 'Вне бюджета' },
+        unsigned: true,
+      },
+    },
     {
       name: 'Доход с комментарием',
       width: 520,
@@ -493,7 +522,8 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       width: 520,
       props: {
         title: 'Ботинки Савве',
-        details: 'ждёт покупки · обычные',
+        details: 'ждёт покупки',
+        mark: { label: 'В неделе', tone: 'yellow' },
         icon: 'shirt',
         color: 'var(--blue)',
         amount: 8_000,

@@ -3,14 +3,17 @@
 import { html, type Content, type Html } from '../html.ts';
 import { icon, type IconName } from '../icons.ts';
 
-/** Icon rail on the left, optional tabs, the main panel and an optional side panel on the right. */
-export function appShell(options: { rail: Content; tabs?: Content; main: Content; side?: Content }): Html {
+/**
+ * Icon rail on the left, optional tabs, the main panel and an optional side panel on the right. A wide side panel
+ * has room for lists of its own, such as a plan.
+ */
+export function appShell(options: { rail: Content; tabs?: Content; main: Content; side?: Content; wideSide?: boolean }): Html {
   return html`
     <div class="shell">
       ${options.rail}
       <div class="shell-body">
         ${options.tabs}
-        <div class="shell-columns${options.side ? ' has-side' : ''}">
+        <div class="shell-columns${options.side ? ' has-side' : ''}${options.side && options.wideSide ? ' wide-side' : ''}">
           <main class="panel panel-main">${options.main}</main>
           ${options.side ? html`<aside class="panel panel-side">${options.side}</aside>` : null}
         </div>

@@ -6,13 +6,15 @@ import type { DateString } from '../../zenmoney/types.ts';
 import { dayMonth, dayTitle, money, WEEKDAYS_FULL } from '../format.ts';
 import { html, type Content, type Html } from '../html.ts';
 import { icon, type IconName } from '../icons.ts';
+import { toneColor, type Tone } from '../tones.ts';
 import { badge } from './basics.ts';
 
 /**
  * One operation: who, what for and from which account, and the amount in the main currency.
- * Expenses get a minus, incomes a plus and green, transfers stay quiet.
+ * Expenses get a minus, incomes a plus and green, transfers stay quiet; `unsigned` drops the sign in a list of
+ * expenses only.
  * With `href` the row links to its marking; with `panel` it is open: the panel shows under the row, `actions` next
- * to it, and the row's link closes it.
+ * to it, and the row's link closes it. `mark` is a dot before the amount telling where it counts, named on hover.
  */
 export function operationRow(options: {
   /** Keeps the row in place on the screen when the page comes back, as entries do. */
@@ -36,10 +38,13 @@ export function operationRow(options: {
   panel?: Content;
   /** Buttons next to the open row, each posting a form to its URL. */
   actions?: Array<{ label: string; action: string }>;
+  /** Without a tone the dot is an empty ring, for an amount that counts nowhere in particular. */
+  mark?: { label: string; tone?: Tone };
+  unsigned?: boolean;
 }): Html {
   const { kind, amount, symbol } = options;
   const open = options.panel !== undefined;
-  const value = kind === 'transfer' ? money(amount, symbol) : money(kind === 'income' ? amount : -amount, symbol, { sign: true });
+  const value = kind === 'transfer' || options.unsigned ? money(amount, symbol) : money(kind === 'income' ? amount : -amount, symbol, { sign: true });
   const inner = html`
       <span class="operation-icon" style="--color:${options.color}">${icon(options.icon, 16)}</span>
       <span class="operation-text">
@@ -48,6 +53,11 @@ export function operationRow(options: {
         ${options.comment ? html`<small class="operation-comment">${icon('message', 12)}${options.comment}</small>` : null}
       </span>
       ${options.hold ? badge({ text: 'в обработке', tone: 'yellow' }) : null}
+      ${options.mark
+        ? html`<span class="operation-mark${options.mark.tone ? '' : ' ring'}"${
+            options.mark.tone ? html` style="--tone:${toneColor(options.mark.tone)}"` : null
+          } role="img" title="${options.mark.label}" aria-label="${options.mark.label}"></span>`
+        : null}
       <span class="operation-amount ${kind}">
         <b>${value}</b>
         ${options.original ? html`<small>${money(options.original.amount, options.original.symbol, { cents: true })}</small>` : null}
