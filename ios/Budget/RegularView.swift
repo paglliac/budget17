@@ -16,7 +16,7 @@ struct RegularPanel: View {
                     SummaryLabel(s.total.label)
                     BigAmount(amount: s.total.amount, symbol: s.symbol)
                     Text(s.total.note).font(.footnote).foregroundStyle(Ink.muted)
-                    if let parts = s.total.parts, !parts.isEmpty { SummaryBar(parts: parts) }
+                    if let parts = s.total.parts, !parts.isEmpty { SummaryBar(parts: parts, total: s.total.amount) }
                 }
             } band: {
                 frame.band

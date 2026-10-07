@@ -45,17 +45,25 @@ final class ScreensTests: XCTestCase {
 
         pill("План").tap()
         shot("week-plan")
-        if app.buttons["Добавить в план"].waitForExistence(timeout: 5) {
-            app.buttons["Добавить в план"].tap()
+        let addToPlan = app.buttons["Добавить в план"]
+        if addToPlan.waitForExistence(timeout: 5) {
+            // A long plan puts it at the bottom edge, under the tab bar.
+            app.swipeUp()
+            addToPlan.tap()
             if app.navigationBars["Новая покупка"].waitForExistence(timeout: 5) { shot("purchase-new") }
             app.buttons["Отмена"].tap()
         }
         pill("Хочу").tap()
         shot("week-wishes")
 
-        app.descendants(matching: .any)["Развернуть список"].firstMatch.tap()
+        // Dragging the band up gives the sheet the summary's room, down gives it back.
+        let band = app.descendants(matching: .any)["band"].firstMatch
+        let middle = band.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
+        middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: -200)))
+        XCTAssert(app.buttons["Раньше"].exists && !app.staticTexts["Окт"].exists, "the band drags the sheet over the summary")
         shot("week-expanded")
-        app.descendants(matching: .any)["Показать сводку"].firstMatch.tap()
+        let raised = band.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
+        raised.press(forDuration: 0.1, thenDragTo: raised.withOffset(CGVector(dx: 0, dy: 200)))
 
         app.buttons["Месяц"].tap()
         sleep(2)

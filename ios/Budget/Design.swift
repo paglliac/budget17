@@ -1,7 +1,8 @@
 import SwiftUI
 
 // The look of the app, after the reference the user picked: a light top that tells what the screen is about, a dark
-// band that switches what is under it, and a sheet of cards below, each with its date or icon beside it.
+// band that switches what is under it, and a sheet of cards below, each with its icon on a tile. The room goes to the
+// cards: the top and the band keep only what tells something.
 
 enum Ink {
     /// The sheet of cards.
@@ -20,7 +21,8 @@ enum Ink {
 }
 
 /// A screen of the app: the header that always stays, the summary under it that the sheet can cover, the band that
-/// switches the sheet, and the sheet of cards. Dragging or tapping the grabber gives the sheet the summary's room.
+/// switches the sheet, and the sheet of cards. Dragging the band up gives the sheet the summary's room, down gives it
+/// back.
 struct SplitScreen<Header: View, Summary: View, Band: View, Content: View>: View {
     @ViewBuilder var header: Header
     @ViewBuilder var summary: Summary
@@ -30,15 +32,14 @@ struct SplitScreen<Header: View, Summary: View, Band: View, Content: View>: View
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 10) {
                 header
                 if !expanded {
                     summary.transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.top, 4)
-            .padding(.bottom, 18)
+            .padding(.bottom, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 UnevenRoundedRectangle(bottomLeadingRadius: 28, bottomTrailingRadius: 28, style: .continuous)
@@ -47,12 +48,22 @@ struct SplitScreen<Header: View, Summary: View, Band: View, Content: View>: View
             }
             band
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 8).onEnded { value in
+                    withAnimation(.snappy) { expanded = value.translation.height < 0 }
+                })
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("band")
+                .accessibilityAction(named: expanded ? "Показать сводку" : "Развернуть список") {
+                    withAnimation(.snappy) { expanded.toggle() }
+                }
+            // The gap over the list keeps cards out of the sheet's round corners as they scroll by.
             VStack(spacing: 0) {
-                grabber
+                Color.clear.frame(height: 10)
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) { content }
+                    LazyVStack(alignment: .leading, spacing: 6) { content }
                         .padding(.horizontal, 16)
                         .padding(.bottom, 24)
                 }
@@ -64,21 +75,6 @@ struct SplitScreen<Header: View, Summary: View, Band: View, Content: View>: View
             }
         }
         .background(Ink.band.ignoresSafeArea())
-    }
-
-    private var grabber: some View {
-        Capsule()
-            .fill(Ink.muted.opacity(0.35))
-            .frame(width: 38, height: 5)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-            .onTapGesture { withAnimation(.snappy) { expanded.toggle() } }
-            .gesture(DragGesture(minimumDistance: 8).onEnded { value in
-                withAnimation(.snappy) { expanded = value.translation.height < 0 }
-            })
-            .accessibilityLabel(expanded ? "Показать сводку" : "Развернуть список")
-            .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -93,7 +89,7 @@ struct TopHeader<Leading: View, Trailing: View>: View {
             Spacer(minLength: 8)
             trailing
         }
-        .frame(minHeight: 44)
+        .frame(minHeight: 34)
     }
 }
 
@@ -112,8 +108,8 @@ struct HeaderButton: View {
     var body: some View {
         Button { action?() } label: {
             Image(systemName: systemImage)
-                .font(.body.weight(.semibold))
-                .frame(width: 36, height: 36)
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 32, height: 32)
                 .background(Ink.canvas, in: Circle())
         }
         .buttonStyle(.plain)
@@ -136,7 +132,7 @@ struct PeriodSteps: View {
                 Button("Сейчас", action: toCurrent)
                     .font(.subheadline.weight(.medium))
                     .padding(.horizontal, 12)
-                    .frame(height: 36)
+                    .frame(height: 32)
                     .background(Ink.canvas, in: Capsule())
                     .buttonStyle(.plain)
             }
@@ -146,17 +142,20 @@ struct PeriodSteps: View {
     }
 }
 
-/// The figure a screen is about, large, with its kopecks and symbol quieter; red when it is below zero.
+/// The figure a screen is about, large, in whole rubles with the symbol quieter; red when it is below zero. An expense,
+/// whose figure is exact, shows its kopecks.
 struct BigAmount: View {
     let amount: Double
     let symbol: String
     var size: CGFloat = 38
+    var kopecks = false
 
     var body: some View {
-        let kopecks = Int((abs(amount) * 100).rounded())
-        let whole = Double(kopecks / 100) * (amount < 0 ? -1 : 1)
-        (Text(Money.number(whole)).foregroundStyle(amount < 0 ? Palette.color("red") : Color.primary)
-            + Text(String(format: ",%02d\u{00A0}%@", kopecks % 100, symbol)).foregroundStyle(Ink.muted))
+        let cents = Int((abs(amount) * 100).rounded())
+        let whole = Double(cents / 100) * (amount < 0 ? -1 : 1)
+        let rest = kopecks ? String(format: ",%02d\u{00A0}%@", cents % 100, symbol) : "\u{00A0}\(symbol)"
+        (Text(Money.number(kopecks ? whole : amount)).foregroundStyle(amount < 0 ? Palette.color("red") : Color.primary)
+            + Text(rest).foregroundStyle(Ink.muted))
             .font(.system(size: size, weight: .semibold, design: .rounded))
             .monospacedDigit()
             .lineLimit(1)
@@ -187,9 +186,11 @@ struct SummaryChip: View {
     }
 }
 
-/// A total's parts as one bar, with a legend of figures under it.
+/// A total's parts as one bar, with a legend of figures under it. The legend leaves out a part of nothing and the part
+/// that only repeats the figure over the bar, such as what is free under what can be spent.
 struct SummaryBar: View {
     let parts: [Total.Part]
+    let total: Double
 
     var body: some View {
         let shown = parts.filter { $0.value > 0.5 }
@@ -206,7 +207,7 @@ struct SummaryBar: View {
             }
             .frame(height: 6)
             HStack(spacing: 12) {
-                ForEach(parts, id: \.label) { part in
+                ForEach(parts.filter { $0.value >= 0.5 && abs($0.value - total) >= 0.5 }, id: \.label) { part in
                     HStack(spacing: 5) {
                         Circle().fill(Palette.color(part.tone)).frame(width: 6, height: 6)
                         Text("\(part.label.lowercased()) \(Money.number(part.value))")
@@ -277,8 +278,8 @@ struct BandPill: View {
                 if let label { Text(label).lineLimit(1) }
             }
             .font(.subheadline.weight(.medium))
-            .padding(.horizontal, label == nil ? 11 : 14)
-            .frame(height: 36)
+            .padding(.horizontal, label == nil ? 9 : 12)
+            .frame(height: 32)
             .foregroundStyle(selected ? Ink.band : .white.opacity(0.9))
             .background(selected ? Color.white : Ink.pill, in: Capsule())
         }
@@ -301,49 +302,45 @@ struct DayHeading: View {
             if let total { Text(total).font(.subheadline.monospacedDigit()).foregroundStyle(Ink.muted) }
         }
         .padding(.horizontal, 4)
-        .padding(.top, 10)
+        .padding(.top, 8)
     }
 }
 
-/// A card of the sheet: the title with the amount, then the icon, the details and where it counts.
+/// A card of the sheet: the icon on a tile at its left, the title with the amount over the details and where it counts.
 struct Card<Accessory: View>: View {
     let row: Row
     let symbol: String
     var signed = false
     var amountColor: Color = .primary
-    /// The small icon before the details; left out when the icon stands beside the card.
-    var showsIcon = true
     @ViewBuilder var accessory: () -> Accessory
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(row.title).font(.body.weight(.medium)).lineLimit(2)
-                Spacer(minLength: 8)
-                if let amount = row.amount {
-                    Text(Money.text(amount, symbol, sign: signed))
-                        .font(.body.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(amountColor)
-                        .fixedSize()
-                }
-            }
-            if !row.details.isEmpty || row.mark != nil {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if showsIcon {
-                        Image(systemName: Icons.symbol(row.icon))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Palette.color(row.color))
+        HStack(alignment: .center, spacing: 12) {
+            IconTile(icon: row.icon, color: Palette.color(row.color))
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(row.title).font(.body.weight(.medium)).lineLimit(2)
+                    Spacer(minLength: 8)
+                    if let amount = row.amount {
+                        Text(Money.text(amount, symbol, sign: signed))
+                            .font(.body.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(amountColor)
+                            .fixedSize()
                     }
-                    Text(row.details).font(.footnote).foregroundStyle(Ink.muted).lineLimit(2)
-                    Spacer(minLength: 6)
-                    MarkDot(mark: row.mark)
                 }
+                if !row.details.isEmpty || row.mark != nil {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(row.details).font(.footnote).foregroundStyle(Ink.muted).lineLimit(2)
+                        Spacer(minLength: 6)
+                        MarkDot(mark: row.mark)
+                    }
+                }
+                accessory()
             }
-            accessory()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Ink.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .opacity(row.muted ? 0.55 : 1)
@@ -352,8 +349,22 @@ struct Card<Accessory: View>: View {
 }
 
 extension Card where Accessory == EmptyView {
-    init(row: Row, symbol: String, signed: Bool = false, amountColor: Color = .primary, showsIcon: Bool = true) {
-        self.init(row: row, symbol: symbol, signed: signed, amountColor: amountColor, showsIcon: showsIcon, accessory: { EmptyView() })
+    init(row: Row, symbol: String, signed: Bool = false, amountColor: Color = .primary) {
+        self.init(row: row, symbol: symbol, signed: signed, amountColor: amountColor, accessory: { EmptyView() })
+    }
+}
+
+/// The icon of a card on a tile of its colour.
+struct IconTile: View {
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        Image(systemName: Icons.symbol(icon))
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(color)
+            .frame(width: 40, height: 40)
+            .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

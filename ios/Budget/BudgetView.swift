@@ -54,27 +54,18 @@ struct ModeTabs: View {
     }
 }
 
-/// The days of a week from the day it begins on, under its month and year; today is dark, a picked day shows only its
-/// spending.
+/// The days of a week from the day it begins on, after its month; today is dark, a picked day shows only its spending.
 struct WeekStrip: View {
     /// The week's first day, the one picked in the settings.
     let start: String
     let today: String
-    /// Days that have spending, marked with a dot.
-    let busy: Set<String>
     @Binding var selected: String?
 
     var body: some View {
         let days = (0..<7).map { Dates.adding($0, to: start) }
-        // The week belongs to the month of its fourth day, as the server counts it.
-        let middle = Dates.parts(days[3])
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(middle?.year ?? "").font(.caption).foregroundStyle(Ink.muted)
-                Text(middle?.month ?? "").font(.title3.weight(.bold))
-            }
-            .frame(width: 52, alignment: .leading)
-            Rectangle().fill(Ink.hairline).frame(width: 1, height: 40).padding(.trailing, 4)
+            // The week belongs to the month of its fourth day, as the server counts it.
+            StripMonth(text: Dates.parts(days[3])?.month ?? "")
             ForEach(days, id: \.self) { day in
                 dayButton(day, letter: Dates.weekdayLetter(day))
             }
@@ -89,14 +80,13 @@ struct WeekStrip: View {
             guard !ahead else { return }
             withAnimation(.snappy) { selected = selected == day ? nil : day }
         } label: {
-            VStack(spacing: 5) {
+            VStack(spacing: 3) {
                 Text(letter).font(.caption2.weight(.medium)).foregroundStyle(Ink.muted)
                 Text(Dates.parts(day)?.day ?? "")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(picked ? Ink.onStrong : ahead ? Ink.muted : Color.primary)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 30, height: 30)
                     .background(picked ? Ink.strong : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                Circle().fill(busy.contains(day) ? Palette.week : .clear).frame(width: 4, height: 4)
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
@@ -133,8 +123,8 @@ struct WeekView: View {
                     )
                 }
             } summary: {
-                WeekStrip(start: s.week, today: s.today, busy: Set(s.days.map(\.date)), selected: $day)
-                VStack(alignment: .leading, spacing: 10) {
+                WeekStrip(start: s.week, today: s.today, selected: $day)
+                VStack(alignment: .leading, spacing: 8) {
                     // In the current week the figure is what can still be spent, which goes without saying.
                     if s.phase != "current" { SummaryLabel(s.total.label) }
                     HStack(alignment: .center, spacing: 8) {
@@ -146,7 +136,7 @@ struct WeekView: View {
                         .accessibilityIdentifier("week-limit")
                         .accessibilityLabel("Бюджет недели \(Money.text(s.limit.amount, s.symbol))")
                     }
-                    SummaryBar(parts: s.total.parts ?? [])
+                    SummaryBar(parts: s.total.parts ?? [], total: s.total.amount)
                 }
             } band: {
                 BandSwitch(items: parts(s), selection: Binding(get: { shown }, set: { part = $0 }))
@@ -293,10 +283,10 @@ struct MonthView: View {
                 }
             } summary: {
                 MonthStrip(screen: s, openWeek: openWeek)
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     SummaryLabel(s.total.label)
                     BigAmount(amount: s.total.amount, symbol: s.symbol)
-                    SummaryBar(parts: s.total.parts ?? [])
+                    SummaryBar(parts: s.total.parts ?? [], total: s.total.amount)
                 }
             } band: {
                 BandSwitch(
@@ -348,23 +338,17 @@ struct MonthStrip: View {
     let openWeek: (String) -> Void
 
     var body: some View {
-        let parts = Dates.parts("\(screen.month)-01")
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(parts?.year ?? "").font(.caption).foregroundStyle(Ink.muted)
-                Text(parts?.month ?? "").font(.title3.weight(.bold))
-            }
-            .frame(width: 52, alignment: .leading)
-            Rectangle().fill(Ink.hairline).frame(width: 1, height: 40).padding(.trailing, 4)
+            StripMonth(text: Dates.parts("\(screen.month)-01")?.month ?? "")
             ForEach(screen.weeks) { line in
                 Button { openWeek(line.week) } label: {
-                    VStack(spacing: 5) {
+                    VStack(spacing: 3) {
                         Text(Dates.parts(line.week)?.month ?? "").font(.caption2.weight(.medium)).foregroundStyle(Ink.muted)
                         Text(range(line.week))
                             .font(.footnote.weight(.semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
-                            .frame(height: 32)
+                            .frame(height: 30)
                         Circle().fill(Palette.color(line.row.color)).frame(width: 4, height: 4)
                     }
                     .frame(maxWidth: .infinity)
@@ -378,5 +362,14 @@ struct MonthStrip: View {
     /// 5–11 for the week that begins on the 5th.
     private func range(_ start: String) -> String {
         "\(Dates.parts(start)?.day ?? "")–\(Dates.parts(Dates.adding(6, to: start))?.day ?? "")"
+    }
+}
+
+/// The month at the start of a strip, to tell where the days or weeks are; the year goes without saying.
+struct StripMonth: View {
+    let text: String
+
+    var body: some View {
+        Text(text).font(.subheadline.weight(.bold)).frame(width: 36, alignment: .leading)
     }
 }
