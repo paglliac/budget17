@@ -102,7 +102,7 @@ struct MarkingSheet: View {
     private func header(_ s: SpendingScreen) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(s.title).font(.title3.weight(.semibold))
-            BigAmount(amount: s.amount, symbol: s.symbol)
+            BigAmount(amount: s.amount, symbol: s.symbol, kopecks: true)
             Text("\(s.when) · \(s.account)").font(.subheadline).foregroundStyle(Ink.muted)
             ForEach(s.notes, id: \.self) { note in
                 Text(note).font(.footnote).foregroundStyle(Ink.muted)

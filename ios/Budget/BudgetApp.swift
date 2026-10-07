@@ -77,7 +77,7 @@ struct TabBar: View {
                 Image(systemName: "plus")
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 54, height: 54)
+                    .frame(width: 48, height: 48)
                     .background(Ink.band, in: Circle())
                     .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
             }
@@ -86,8 +86,7 @@ struct TabBar: View {
             item(.sort, "tag", "Разобрать", badge: pending)
             item(.more, "ellipsis", "Ещё")
         }
-        .padding(.top, 8)
-        .padding(.bottom, 2)
+        .padding(.top, 4)
         .background(Ink.surface.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) { Rectangle().fill(Ink.hairline).frame(height: 0.5) }
     }
