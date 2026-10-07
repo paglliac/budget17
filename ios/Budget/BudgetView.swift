@@ -47,7 +47,7 @@ struct ModeTabs: View {
     private func tab(_ title: String, _ value: BudgetView.Mode) -> some View {
         Button { withAnimation(.snappy) { mode = value } } label: {
             Text(title)
-                .font(mode == value ? (variant.tight ? Font.title3 : .title2).weight(.bold) : (variant.tight ? Font.body : .title3).weight(.medium))
+                .font(mode == value ? (variant.tight && !variant.cards ? Font.title3 : .title2).weight(.bold) : (variant.tight && !variant.cards ? Font.body : .title3).weight(.medium))
                 .foregroundStyle(mode == value ? Color.primary : Ink.muted)
         }
         .buttonStyle(.plain)

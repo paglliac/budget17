@@ -171,7 +171,7 @@ struct BigAmount: View {
         let rest = variant.tight && !exact ? "\u{00A0}\(symbol)" : String(format: ",%02d\u{00A0}%@", kopecks % 100, symbol)
         (Text(Money.number(variant.tight && !exact ? amount : whole)).foregroundStyle(amount < 0 ? Palette.color("red") : Color.primary)
             + Text(rest).foregroundStyle(Ink.muted))
-            .font(.system(size: variant.tight && !exact ? size - 4 : size, weight: .semibold, design: .rounded))
+            .font(.system(size: variant.tight && !variant.cards && !exact ? size - 4 : size, weight: .semibold, design: .rounded))
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.6)
@@ -330,10 +330,10 @@ struct Card<Accessory: View>: View {
 
     var body: some View {
         Group {
-            if variant.essential { line } else { stacked }
+            if variant.essential { line } else if variant.tiles { tiled } else { stacked }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, variant.essential ? 8 : variant.tight ? 10 : 12)
+        .padding(.horizontal, variant.tiles ? 10 : 14)
+        .padding(.vertical, variant.essential ? 8 : variant.tiles ? 9 : variant.tight ? 10 : 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             if !inRowGroup { RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Ink.surface) }
@@ -371,6 +371,40 @@ struct Card<Accessory: View>: View {
                 }
             }
             accessory()
+        }
+    }
+
+    /// Variant E: the icon on a tile at the left, the title and amount over the details and the dot.
+    private var tiled: some View {
+        HStack(alignment: .center, spacing: 12) {
+            if showsIcon {
+                Image(systemName: Icons.symbol(row.icon))
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Palette.color(row.color))
+                    .frame(width: 40, height: 40)
+                    .background(Palette.color(row.color).opacity(0.15), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(row.title).font(.body.weight(.medium)).lineLimit(1)
+                    Spacer(minLength: 8)
+                    if let amount = row.amount {
+                        Text(Money.text(amount, symbol, sign: signed))
+                            .font(.body.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(amountColor)
+                            .fixedSize()
+                    }
+                }
+                if !row.details.isEmpty || row.mark != nil {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(row.details).font(.footnote).foregroundStyle(Ink.muted).lineLimit(1)
+                        Spacer(minLength: 6)
+                        MarkDot(mark: row.mark)
+                    }
+                }
+                accessory()
+            }
         }
     }
 

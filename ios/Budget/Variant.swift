@@ -1,15 +1,23 @@
 import SwiftUI
 
 // Prototype: the looks being compared, switched by a floating pill. A is the app as it is; B takes the air out of the
-// same blocks; C also keeps only what asks for a decision in sight and folds the rest.
+// same blocks; C also keeps only what asks for a decision in sight and folds the rest. B read as a settings page, so
+// D and E keep B's top but its cards stay cards: D as A draws them, E with a coloured tile on the left.
 
 enum Variant: String, CaseIterable {
-    case a = "A", b = "B", c = "C"
+    case a = "A", b = "B", c = "C", d = "D", e = "E"
 
-    /// B and C: the same blocks with less air.
+    /// What the switch offers: C was passed over.
+    static let offered: [Variant] = [.a, .b, .d, .e]
+
+    /// B to E: the same blocks with less air.
     var tight: Bool { self != .a }
     /// C: what needs no decision is folded or left out.
     var essential: Bool { self == .c }
+    /// D and E: every item its own card, and the type of the top as large as in A.
+    var cards: Bool { self == .d || self == .e }
+    /// E: the icon on a coloured tile at the card's left.
+    var tiles: Bool { self == .e }
 
     /// The variant to start with, from a launch argument: -variant C.
     static var launch: Variant { UserDefaults.standard.string(forKey: "variant").flatMap(Variant.init(rawValue:)) ?? .a }
@@ -27,7 +35,7 @@ struct VariantSwitch: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            ForEach(Variant.allCases, id: \.self) { item in
+            ForEach(Variant.offered, id: \.self) { item in
                 Button { withAnimation(.snappy) { variant = item } } label: {
                     Text(item.rawValue)
                         .font(.caption.weight(.bold))
@@ -45,17 +53,23 @@ struct VariantSwitch: View {
     }
 }
 
-/// Cards of one day or one list as rows of a single rounded block, split by hairlines.
+/// Cards of one day or one list as rows of a single rounded block, split by hairlines; in D and E they stay cards,
+/// closer together.
 struct RowGroup<Content: View>: View {
     @ViewBuilder var content: Content
+    @Environment(\.variant) private var variant
 
     var body: some View {
-        VStack(spacing: 0) { content }
-            .environment(\.inRowGroup, true)
-            .background(Ink.surface)
-            // Every row draws a hairline over itself; the first one's is covered.
-            .overlay(alignment: .top) { Rectangle().fill(Ink.surface).frame(height: 1) }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        if variant.cards {
+            VStack(spacing: 6) { content }
+        } else {
+            VStack(spacing: 0) { content }
+                .environment(\.inRowGroup, true)
+                .background(Ink.surface)
+                // Every row draws a hairline over itself; the first one's is covered.
+                .overlay(alignment: .top) { Rectangle().fill(Ink.surface).frame(height: 1) }
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
     }
 }
 
