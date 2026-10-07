@@ -76,7 +76,8 @@ export function listOperations(
   const main = mainCurrency(data);
   const toMain = mainCurrencyConverter(data);
   const instruments = new Map((data.instrument ?? []).map((i) => [i.id, i]));
-  const accounts = new Map((data.account ?? []).map((a) => [a.id, a.title]));
+  // Titles may come with stray spaces from ZenMoney, such as «Основной », which would double the space before a dot.
+  const accounts = new Map((data.account ?? []).map((a) => [a.id, a.title.trim()]));
   const banks = new Map((data.account ?? []).map((a) => [a.id, a.company]));
   const tags = new Map((data.tag ?? []).map((t) => [t.id, t]));
   const merchants = new Map((data.merchant ?? []).map((m) => [m.id, m.title]));

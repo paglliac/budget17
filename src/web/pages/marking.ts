@@ -161,40 +161,63 @@ export function markingPanel(m: Marking, o: Operation, href: Href): Html[] {
 }
 
 /** When, from where and how the bank put it, with whatever else it said: comment, foreign amount, not settled yet. */
-function facts(m: Marking, o: Operation): Html {
+export function markingFacts(m: Pick<Marking, 'symbol'>, o: Operation): Array<{ label: string; value: string }> {
   const time = timeOn(o.date, o.created);
-  return factList({
-    label: 'О трате',
-    items: [
-      { label: 'Когда', value: time ? `${dayMonth(o.date)}, ${time}` : dayMonth(o.date) },
-      { label: 'Сумма', value: money(o.amount, m.symbol, { cents: true }) },
-      { label: 'Счёт', value: o.account },
-      o.originalPayee ? { label: 'В банке', value: o.originalPayee } : null,
-      o.comment ? { label: 'Комментарий', value: o.comment } : null,
-      o.original ? { label: 'В валюте', value: money(o.original.amount, o.original.instrument.symbol, { cents: true }) } : null,
-      o.hold ? { label: 'Статус', value: 'банк ещё не провёл' } : null,
-    ].filter((item) => item !== null),
-  });
+  return [
+    { label: 'Когда', value: time ? `${dayMonth(o.date)}, ${time}` : dayMonth(o.date) },
+    { label: 'Сумма', value: money(o.amount, m.symbol, { cents: true }) },
+    { label: 'Счёт', value: o.account },
+    o.originalPayee ? { label: 'В банке', value: o.originalPayee } : null,
+    o.comment ? { label: 'Комментарий', value: o.comment } : null,
+    o.original ? { label: 'В валюте', value: money(o.original.amount, o.original.instrument.symbol, { cents: true }) } : null,
+    o.hold ? { label: 'Статус', value: 'банк ещё не провёл' } : null,
+  ].filter((item) => item !== null);
+}
+
+function facts(m: Marking, o: Operation): Html {
+  return factList({ label: 'О трате', items: markingFacts(m, o) });
+}
+
+/** A choice made in one click on an open expense, as /spending/:id/:choice takes it. */
+export interface MarkingChoice {
+  choice: string;
+  label: string;
+  detail?: string;
+  /** A category's colour. */
+  color?: string;
+  current?: boolean;
+  suggested?: boolean;
+}
+
+/** Undoing what the user marked an open expense as. */
+export function undoChoices(m: Pick<Marking, 'categorizations'>, o: Operation): MarkingChoice[] {
+  const sorted = m.categorizations.get(o.id);
+  return [
+    o.regular || o.purchase ? { choice: 'unlink', label: 'Отвязать' } : null,
+    sorted && 'tag' in sorted && !o.zenmoneyCategory ? { choice: 'uncategorize', label: 'Убрать категорию' } : null,
+  ].filter((a) => a !== null);
 }
 
 /** Undoing what the user marked an open expense as, next to its row. */
 export function markingActions(m: Marking, o: Operation, href: Href): Array<{ label: string; action: string }> {
-  const sorted = m.categorizations.get(o.id);
-  return [
-    o.regular || o.purchase ? { label: 'Отвязать', action: href(`/spending/${o.id}/unlink`) } : null,
-    sorted && 'tag' in sorted && !o.zenmoneyCategory ? { label: 'Убрать категорию', action: href(`/spending/${o.id}/uncategorize`) } : null,
-  ].filter((a) => a !== null);
+  return undoChoices(m, o).map((c) => ({ label: c.label, action: href(`/spending/${o.id}/${c.choice}`) }));
 }
 
 function paymentKey(choice: PaymentChoice): string {
   return 'regular' in choice ? `regular-${choice.regular.id}` : `purchase-${choice.purchase.id}`;
 }
 
+/** What an expense could have paid: the likeliest as buttons and the rest in lists by kind. */
+export interface PaymentOptions {
+  choices: MarkingChoice[];
+  others: Array<{ label: string; options: Array<{ value: string; label: string }> }>;
+}
+
 /**
  * The likeliest payments as buttons, the one the expense paid and the suggested one always among them, and the
  * other regular expenses and purchases in a list.
  */
-function paymentGroup(m: Marking, o: Operation, href: Href, suggestion: Suggestion | null): Html {
+export function paymentOptions(m: Marking, o: Operation, suggestion: Suggestion | null): PaymentOptions {
   const week = weekOf(o.date);
   const others = m.expenses.filter((e) => e.id !== o.id);
   const choices = paymentChoices(o, m);
@@ -217,30 +240,48 @@ function paymentGroup(m: Marking, o: Operation, href: Href, suggestion: Suggesti
     .filter((p) => !purchaseStatus(p, others).bought)
     .map((p) => ({ value: `purchase-${p.id}`, label: `${p.title} · ${weekLabel(p.week)} · ${money(p.amount, m.symbol)}` }));
 
-  return choiceGroup({
-    label: 'Оплата',
+  return {
     choices: shown.map((c) => ({
+      choice: paymentKey(c),
       label: 'regular' in c ? c.regular.title : c.purchase.title,
       detail: paymentDetail(c, week, m.symbol),
-      action: href(`/spending/${o.id}/${paymentKey(c)}`),
       current: paymentKey(c) === currentKey,
       suggested: paymentKey(c) === suggestedKey,
     })),
-    other:
+    others:
       regular.length + purchases.length > 0
+        ? [
+            { label: 'Регулярные траты', options: regular },
+            { label: 'Покупки', options: purchases },
+          ]
+        : [],
+  };
+}
+
+/** Labels of the payment choices: the list of the others and what is said when there is nothing to pay. */
+export const PAYMENT_WORDS = {
+  other: 'Другой платёж',
+  otherAlone: 'Регулярная трата или покупка',
+  empty: 'Нет ни регулярных трат, ни покупок в плане.',
+};
+
+function paymentGroup(m: Marking, o: Operation, href: Href, suggestion: Suggestion | null): Html {
+  const { choices, others } = paymentOptions(m, o, suggestion);
+  return choiceGroup({
+    label: 'Оплата',
+    choices: choices.map((c) => ({ ...c, action: href(`/spending/${o.id}/${c.choice}`) })),
+    other:
+      others.length > 0
         ? {
-            label: shown.length > 0 ? 'Другой платёж' : 'Регулярная трата или покупка',
+            label: choices.length > 0 ? PAYMENT_WORDS.other : PAYMENT_WORDS.otherAlone,
             action: href(`/spending/${o.id}`),
             name: 'target',
             placeholder: 'Выберите, что она оплатила',
             submitLabel: 'Привязать',
-            groups: [
-              { label: 'Регулярные траты', options: regular },
-              { label: 'Покупки', options: purchases },
-            ],
+            groups: others,
           }
         : undefined,
-    empty: 'Нет ни регулярных трат, ни покупок в плане.',
+    empty: PAYMENT_WORDS.empty,
   });
 }
 
@@ -264,42 +305,43 @@ function paymentDetail(c: PaymentChoice, week: DateString, symbol: string): stri
  * Categories most popular first, the expense's one highlighted. The one ZenMoney gave it is marked, and picking it
  * again drops the pick made in the app. A payment of a regular expense keeps its category while it is linked.
  */
-function categoryGroup(m: Marking, o: Operation, href: Href, suggestion: Suggestion | null): Html {
-  if (o.regular) return choiceGroup({ label: 'Категория', choices: [], empty: `«${o.category?.title ?? ''}», пока трата привязана к платежу` });
+export function categoryOptions(m: Marking, o: Operation, suggestion: Suggestion | null): { choices: MarkingChoice[]; empty: string } {
+  if (o.regular) return { choices: [], empty: `«${o.category?.title ?? ''}», пока трата привязана к платежу` };
   const sorted = m.categorizations.get(o.id);
   const picked = sorted && 'tag' in sorted ? sorted.tag : null;
   const zenmoney = o.zenmoneyCategory?.id ?? null;
   const current = picked ?? zenmoney;
   const suggested = suggestion && 'category' in suggestion ? suggestion.category.id : null;
-  return choiceGroup({
-    label: 'Категория',
+  return {
     choices: m.categories
       .filter((c) => !c.hidden || c.id === current || c.id === zenmoney)
       .map((c) => ({
+        choice: c.id === zenmoney ? 'uncategorize' : `tag-${c.id}`,
         label: c.title,
         detail: c.id === zenmoney ? 'из ZenMoney' : undefined,
         color: categoryColor(c.id, c.color),
-        action: href(`/spending/${o.id}/${c.id === zenmoney ? 'uncategorize' : `tag-${c.id}`}`),
         current: c.id === current,
         suggested: c.id === suggested,
       })),
     empty: 'Категорий нет: добавьте их в настройках.',
-  });
+  };
+}
+
+function categoryGroup(m: Marking, o: Operation, href: Href, suggestion: Suggestion | null): Html {
+  const { choices, empty } = categoryOptions(m, o, suggestion);
+  return choiceGroup({ label: 'Категория', choices: choices.map((c) => ({ ...c, action: href(`/spending/${o.id}/${c.choice}`) })), empty });
 }
 
 /**
  * Where the expense counts. Back to the week means dropping the mark, so it is offered only to an expense that
  * counts in the week unless moved: not to a payment of a regular expense or of an extra purchase.
  */
-function envelopeGroup(m: Marking, o: Operation, href: Href): Html {
+export function envelopeOptions(m: Pick<Marking, 'marks' | 'purchases'>, o: Operation): MarkingChoice[] {
   const current = envelopeOf(m, o);
   const unmoved = envelopeOf({ marks: new Map(), purchases: m.purchases }, o);
-  return choiceGroup({
-    label: 'Бюджет',
-    choices: ENVELOPES.filter((e) => e !== 'week' || unmoved === 'week').map((e) => ({
-      label: ENVELOPE_CHOICE[e],
-      action: href(`/spending/${o.id}/${e}`),
-      current: e === current,
-    })),
-  });
+  return ENVELOPES.filter((e) => e !== 'week' || unmoved === 'week').map((e) => ({ choice: e, label: ENVELOPE_CHOICE[e], current: e === current }));
+}
+
+function envelopeGroup(m: Marking, o: Operation, href: Href): Html {
+  return choiceGroup({ label: 'Бюджет', choices: envelopeOptions(m, o).map((c) => ({ ...c, action: href(`/spending/${o.id}/${c.choice}`) })) });
 }

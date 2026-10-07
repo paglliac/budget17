@@ -13,7 +13,7 @@ import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { money, monthName, plural } from '../format.ts';
 import type { Html } from '../html.ts';
-import { categoryIcon } from '../icons.ts';
+import { categoryIcon, type IconName } from '../icons.ts';
 import { categoryColor, toneColor } from '../tones.ts';
 import { emptyState, filterTag, pageIntro, searchField, segmentedLinks } from '../widgets/basics.ts';
 import { categoryList, dayGroup, operationRow } from '../widgets/operations.ts';
@@ -97,7 +97,7 @@ export function renderOperations(d: OperationsData, href: Href): Html {
     tabs: monthTabs(current, d.month, (month) => to({ month })),
     main: [
       topBar({ crumbs: [{ label: 'Бюджет' }, { label: 'Операции', icon: 'list' }] }),
-      pageIntro({ title: `Операции за ${monthName(d.month)}`, text: sentence(d) }),
+      pageIntro({ title: `Операции за ${monthName(d.month)}`, text: operationsSentence(d) }),
       toolbar({
         items: [
           segmentedLinks({
@@ -152,7 +152,7 @@ export function renderOperations(d: OperationsData, href: Href): Html {
   return pageDocument({ title: 'Бюджет: операции', body });
 }
 
-function sentence(d: OperationsData): string {
+export function operationsSentence(d: Pick<OperationsData, 'operations' | 'symbol'>): string {
   const count = d.operations.length;
   if (count === 0) return 'Под эти условия операций нет.';
   const expense = d.operations.filter((o) => o.kind === 'expense' && !o.ignored).reduce((s, o) => s + o.amount, 0);
@@ -191,18 +191,33 @@ function feed(d: OperationsData, href: Href, to: (changes: { edit?: string | nul
   });
 }
 
+/** What an operation's row says under the payee: what it went for and from where, and its icon and colour. */
+export function operationLine(o: Operation): { details: string; icon: IconName; color: string } {
+  const isTransfer = o.kind === 'transfer';
+  return {
+    details: isTransfer ? `${o.account} → ${o.toAccount}` : `${operationCategory(o)}, ${o.account}`,
+    icon: isTransfer ? 'arrows' : o.category ? categoryIcon(o.category.title) : o.kind === 'income' ? 'arrowDownLeft' : 'tag',
+    color: isTransfer ? toneColor('gray') : o.kind === 'income' && !o.category ? toneColor('green') : categoryColor(o.category?.id ?? null, o.category?.color ?? null),
+  };
+}
+
+/** What an operation went for: what it paid, its category, or what kind it is when it has none. */
+export function operationCategory(o: Operation): string {
+  if (o.ignored) return 'не учитывается';
+  return o.regular?.title ?? o.purchase?.title ?? o.category?.title ?? (o.kind === 'income' ? 'Доход' : o.kind === 'transfer' ? 'Перевод' : 'Без категории');
+}
+
 /** An operation; an expense opens in place to be marked. */
 function row(d: OperationsData, o: Operation, href: Href, to: (changes: { edit?: string | null }) => string): Html {
-  const isTransfer = o.kind === 'transfer';
-  const category = o.regular?.title ?? o.purchase?.title ?? o.category?.title ?? (o.kind === 'income' ? 'Доход' : isTransfer ? 'Перевод' : 'Без категории');
   const key = `spending-${o.id}`;
   const open = o.kind === 'expense' && d.edit === key;
+  const line = operationLine(o);
   return operationRow({
     id: o.kind === 'expense' ? key : undefined,
     title: o.payee,
-    details: isTransfer ? `${o.account} → ${o.toAccount}` : `${o.ignored ? 'не учитывается' : category}, ${o.account}`,
-    icon: isTransfer ? 'arrows' : o.category ? categoryIcon(o.category.title) : o.kind === 'income' ? 'arrowDownLeft' : 'tag',
-    color: isTransfer ? toneColor('gray') : o.kind === 'income' && !o.category ? toneColor('green') : categoryColor(o.category?.id ?? null, o.category?.color ?? null),
+    details: line.details,
+    icon: line.icon,
+    color: line.color,
     kind: o.kind,
     amount: o.amount,
     symbol: d.symbol,

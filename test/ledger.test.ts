@@ -58,6 +58,11 @@ describe('listOperations', () => {
     });
   });
 
+  it('drops stray spaces around account titles', () => {
+    const [shop] = listOperations({ ...base, account: [account({ id: 'card', title: 'Основной ' })], transaction: [transaction({ outcome: 1 })] }, october);
+    assert.equal(shop?.account, 'Основной');
+  });
+
   it('names a transfer by its accounts and gives it no category', () => {
     const [transfer] = listOperations(
       { ...base, transaction: [transaction({ outcome: 1000, income: 1000, outcomeAccount: 'card', incomeAccount: 'savings', tag: [transport.id] })] },

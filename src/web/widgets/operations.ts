@@ -1,9 +1,8 @@
 // Operations as a list: rows grouped by day, and spending by category that filters the list.
 
-import { weekday } from '../../dates.ts';
 import type { OperationKind } from '../../operations.ts';
 import type { DateString } from '../../zenmoney/types.ts';
-import { dayMonth, dayTitle, money, WEEKDAYS_FULL } from '../format.ts';
+import { dayHeading, money } from '../format.ts';
 import { html, type Content, type Html } from '../html.ts';
 import { icon, type IconName } from '../icons.ts';
 import { toneColor, type Tone } from '../tones.ts';
@@ -79,9 +78,7 @@ export function operationRow(options: {
 
 /** Operations of one day under a heading with the day's balance of incomes and expenses. */
 export function dayGroup(options: { date: DateString; today: DateString; net?: { amount: number; symbol: string }; rows: Html[] }): Html {
-  const title = dayTitle(options.date, options.today);
-  const day = WEEKDAYS_FULL[weekday(options.date)];
-  const subtitle = title === 'Сегодня' || title === 'Вчера' ? `${dayMonth(options.date)}, ${day}` : day;
+  const { title, subtitle } = dayHeading(options.date, options.today);
   return html`
     <section class="day">
       <header class="day-head">

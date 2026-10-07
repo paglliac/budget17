@@ -1,6 +1,6 @@
 // Russian formatting for the web UI: money, months, plurals.
 
-import { addDays, daysBetween, localDate, monthName } from '../dates.ts';
+import { addDays, daysBetween, localDate, monthName, weekday } from '../dates.ts';
 import type { DateString } from '../zenmoney/types.ts';
 
 const integerFormat = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
@@ -101,4 +101,11 @@ export function dayTitle(date: DateString, today: DateString): string {
   if (days === 0) return 'Сегодня';
   if (days === 1) return 'Вчера';
   return dayMonth(date);
+}
+
+/** A day's heading: Вчера with 6 октября, вторник under it, or 3 октября with суббота. */
+export function dayHeading(date: DateString, today: DateString): { title: string; subtitle: string } {
+  const title = dayTitle(date, today);
+  const day = WEEKDAYS_FULL[weekday(date)]!;
+  return { title, subtitle: title === 'Сегодня' || title === 'Вчера' ? `${dayMonth(date)}, ${day}` : day };
 }

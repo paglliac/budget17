@@ -23,7 +23,7 @@ import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { dayMonth, dayMonthYear, fromToday, money, monthName, plural } from '../format.ts';
 import type { Html } from '../html.ts';
-import { categoryIcon, ENTRY_ICONS, entryIcon, isEntryIcon } from '../icons.ts';
+import { categoryIcon, ENTRY_ICONS, entryIcon, isEntryIcon, type IconName } from '../icons.ts';
 import { categoryColor, toneColor, type Tone } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
 import { field, footnote, iconPicker, pageIntro, section, shareBar } from '../widgets/basics.ts';
@@ -115,7 +115,7 @@ export function renderRegular(d: RegularData, href: Href): Html {
     rail: appRail('regular', d.userName, href),
     main: [
       topBar({ crumbs: [{ label: 'Бюджет' }, { label: 'Регулярные траты', icon: 'repeat' }] }),
-      pageIntro({ title: 'Регулярные траты', text: sentence(d) }),
+      pageIntro({ title: 'Регулярные траты', text: regularSentence(d) }),
       entryList({
         label: 'Регулярные траты',
         items: [
@@ -138,11 +138,7 @@ export function renderRegular(d: RegularData, href: Href): Html {
       balanceTotal({
         amount: totals.ahead,
         symbol: d.symbol,
-        note: count
-          ? `из ${money(total, d.symbol)} на ${count} ${plural(count, ['платёж', 'платежа', 'платежей'])}`
-          : d.expenses.length
-            ? `В ${month} платежей нет`
-            : 'Регулярных трат пока нет',
+        note: regularTotalNote(d),
       }),
       count
         ? shareBar({
@@ -163,7 +159,7 @@ export function renderRegular(d: RegularData, href: Href): Html {
 }
 
 /** What is left of this month and the nearest payment not paid yet. No phrase ends with an amount, since «руб.» has its own dot. */
-function sentence(d: RegularData): string {
+export function regularSentence(d: RegularData): string {
   if (d.expenses.length === 0) {
     return 'Добавьте платежи, которые повторяются каждый месяц: аренду, кредит, связь. Они появятся в ближайших платежах на обзоре.';
   }
@@ -180,7 +176,7 @@ function sentence(d: RegularData): string {
 }
 
 /** An expense and where it stands this month. */
-interface Placed {
+export interface Placed {
   expense: RegularExpense;
   status: MonthStatus;
 }
@@ -192,7 +188,7 @@ type Ahead = Placed & { status: { kind: 'ahead' } };
  * what is ahead this month by its date, soonest first. `later` have no payment this month and start in a later one,
  * soonest first.
  */
-function timeline(d: RegularData): { behind: Placed[]; ahead: Ahead[]; later: Ahead[] } {
+export function timeline(d: RegularData): { behind: Placed[]; ahead: Ahead[]; later: Ahead[] } {
   const placed = d.expenses.map((expense) => ({ expense, status: monthStatus(expense, d.today, d.linked) }));
   const happened = (s: MonthStatus): string => (s.kind === 'paid' ? s.on : s.kind === 'past' ? s.date : '');
   const upcoming = placed.filter((p): p is Ahead => p.status.kind === 'ahead').sort((a, b) => a.status.date.localeCompare(b.status.date));
@@ -205,21 +201,39 @@ function timeline(d: RegularData): { behind: Placed[]; ahead: Ahead[]; later: Ah
 }
 
 /** Tones of the payments in the calendar and the bar: what linked expenses paid, what passed without them, what is ahead. */
-const STATUS_TONE = { paid: 'green', past: 'gray', ahead: 'teal' } as const satisfies Record<string, Tone>;
+export const STATUS_TONE = { paid: 'green', past: 'gray', ahead: 'teal' } as const satisfies Record<string, Tone>;
 
 /** A row of the list; what is behind is quieter, and a paid one gets a check. */
 function row(e: RegularExpense, status: MonthStatus, d: RegularData, href: Href): Html {
   return entryRow({
     id: `regular-${e.id}`,
     title: e.title,
-    details: details(e, status, d),
-    icon: status.kind === 'paid' ? 'check' : entryIcon(e.icon, e.title),
-    color: status.kind === 'ahead' ? expenseColor(e) : toneColor(status.kind === 'paid' ? STATUS_TONE.paid : STATUS_TONE.past),
+    ...regularLine(e, status, d),
     amount: e.amount,
     symbol: d.symbol,
     href: href('/regular', { edit: String(e.id) }),
-    muted: status.kind !== 'ahead',
   });
+}
+
+/** What a regular expense's row says, its icon and colour; what is behind is quieter, and a paid one gets a check. */
+export function regularLine(e: RegularExpense, status: MonthStatus, d: RegularData): { details: string; icon: IconName; color: string; muted: boolean } {
+  return {
+    details: details(e, status, d),
+    icon: status.kind === 'paid' ? 'check' : entryIcon(e.icon, e.title),
+    color: status.kind === 'ahead' ? expenseColor(e) : toneColor(status.kind === 'paid' ? STATUS_TONE.paid : STATUS_TONE.past),
+    muted: status.kind !== 'ahead',
+  };
+}
+
+/** What the total of the month is out of. */
+export function regularTotalNote(d: RegularData): string {
+  const { count, total } = regularTotals(d.expenses, d.today, d.linked);
+  const month = monthName(d.today, 'prepositional');
+  return count
+    ? `из ${money(total, d.symbol)} на ${count} ${plural(count, ['платёж', 'платежа', 'платежей'])}`
+    : d.expenses.length
+      ? `В ${month} платежей нет`
+      : 'Регулярных трат пока нет';
 }
 
 /** 10-го числа · оплачено 5 октября, 1-го числа · прошёл 1 октября, or when it is paid next. */

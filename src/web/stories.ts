@@ -623,6 +623,17 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       },
     },
     {
+      name: 'Вход с паролем',
+      width: 640,
+      props: {
+        action: '#',
+        submitLabel: 'Войти',
+        icon: 'wallet',
+        color: 'var(--violet)',
+        fields: field({ label: 'Токен доступа', name: 'token', type: 'password', required: true, error: 'Токен не подошёл' }),
+      },
+    },
+    {
       name: 'Правка с ошибкой',
       width: 640,
       props: {

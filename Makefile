@@ -3,7 +3,7 @@
 DB := data/zenmoney.db
 
 .DEFAULT_GOAL := help
-.PHONY: help install sync balances web resync test typecheck check
+.PHONY: help install sync balances web resync test typecheck ios-check ios-install check
 
 help: ## Список команд
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-10s %s\n", $$1, $$2}'
@@ -30,4 +30,10 @@ test: ## Тесты
 typecheck: ## Проверка типов
 	npm run typecheck
 
-check: test typecheck ## Тесты и проверка типов
+ios-check: ## Приложение для iPhone: собирается и читает JSON сервера
+	@ios/check.sh
+
+ios-install: ## Поставить приложение на iPhone (и переподписать раз в 7 дней)
+	@ios/install.sh
+
+check: test typecheck ios-check ## Тесты, проверка типов и приложение для iPhone

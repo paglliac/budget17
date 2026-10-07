@@ -30,6 +30,12 @@ describe('income page', () => {
     assert.ok(page.includes('href="/income?edit=1"'));
   });
 
+  it('puts no second dot after a symbol that ends with one', () => {
+    const rubles = { ...data, instrument: [{ ...RUB, symbol: 'руб.' }] };
+    const page = String(renderIncome(loadIncome(rubles, incomes, { today }), createHref())).replaceAll('\u00a0', ' ');
+    assert.ok(page.includes('В месяц приходит 300 000 руб. Ближайшее поступление'));
+  });
+
   it('offers a form for each model, starting with a fixed sum', () => {
     const fixed = render({ today });
     assert.ok(fixed.includes('name="model" value="fixed"'));

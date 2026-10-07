@@ -106,13 +106,14 @@ export function filterTag(options: { label: string; href: string; color?: string
 
 /**
  * A labelled input of a form. `decimal` and `integer` bring up a number keyboard on phones; `date` a date picker,
- * which sends 2026-10-25. Without `width` the field takes the free space of its row. An error shows under it and marks it invalid.
+ * which sends 2026-10-25; `password` hides what is typed. Without `width` the field takes the free space of its row.
+ * An error shows under it and marks it invalid.
  */
 export function field(options: {
   label: string;
   name: string;
   value?: string;
-  type?: 'text' | 'decimal' | 'integer' | 'date';
+  type?: 'text' | 'decimal' | 'integer' | 'date' | 'password';
   min?: number;
   max?: number;
   maxLength?: number;
@@ -127,8 +128,8 @@ export function field(options: {
     <input class="field-input" name="${options.name}" value="${options.value ?? ''}" autocomplete="off"${
       type === 'integer'
         ? html` type="number" inputmode="numeric" step="1"`
-        : type === 'date'
-          ? html` type="date"`
+        : type === 'date' || type === 'password'
+          ? html` type="${type}"`
           : html` type="text"${type === 'decimal' ? html` inputmode="decimal"` : null}`
     }${options.min === undefined ? null : html` min="${options.min}"`}${options.max === undefined ? null : html` max="${options.max}"`}${
       options.maxLength === undefined ? null : html` maxlength="${options.maxLength}"`

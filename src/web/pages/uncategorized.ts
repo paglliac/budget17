@@ -69,7 +69,7 @@ export function renderUncategorized(d: UncategorizedData, href: Href): Html {
     tabs: monthTabs(current, d.month, (month) => href('/uncategorized', { month })),
     main: [
       topBar({ crumbs: [{ label: 'Бюджет' }, { label: 'Без категории', icon: 'tag' }] }),
-      pageIntro({ title: 'Траты без категории', text: sentence(d, left) }),
+      pageIntro({ title: 'Траты без категории', text: uncategorizedSentence(d, left) }),
       section({
         title: 'Разобрать',
         body: d.pending.length
@@ -99,7 +99,7 @@ interface Page {
   here: (params?: Record<string, string | null>) => string;
 }
 
-function sentence(d: UncategorizedData, left: number): string {
+export function uncategorizedSentence(d: UncategorizedData, left: number): string {
   const month = monthName(d.month, 'prepositional');
   if (d.pending.length === 0) return d.count ? `В ${month} у всех трат есть категория.` : `В ${month} трат пока нет.`;
   const n = d.pending.length;
@@ -150,15 +150,15 @@ function sortedItem({ d, href, here }: Page, o: Operation): Html {
 }
 
 /** How a suggestion is accepted: tag-<id> or regular-<id>, as /spending/:id/:choice takes it. */
-function suggestedChoice(suggestion: Suggestion): string {
+export function suggestedChoice(suggestion: Suggestion): string {
   return 'category' in suggestion ? `tag-${suggestion.category.id}` : `regular-${suggestion.regular.id}`;
 }
 
 /** When and from where: 5 октября, Основной, and the comment when there is one. */
-function where(o: Operation): string {
+export function where(o: Operation): string {
   return [`${dayMonth(o.date)}, ${o.account}`, o.comment].filter(Boolean).join(' · ');
 }
 
-function suggestionName(suggestion: Suggestion): string {
+export function suggestionName(suggestion: Suggestion): string {
   return 'category' in suggestion ? `«${suggestion.category.title}»` : `регулярную «${suggestion.regular.title}»`;
 }

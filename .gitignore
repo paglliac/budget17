@@ -1,3 +1,5 @@
 node_modules/
 .env
 data/
+ios/.build/
+xcuserdata/

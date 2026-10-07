@@ -112,7 +112,7 @@ export function renderIncome(d: IncomeData, href: Href): Html {
     rail: appRail('income', d.userName, href),
     main: [
       topBar({ crumbs: [{ label: 'Бюджет' }, { label: 'Доходы', icon: 'arrowDownLeft' }] }),
-      pageIntro({ title: 'Доходы', text: sentence(d) }),
+      pageIntro({ title: 'Доходы', text: incomeSentence(d) }),
       count > 0 ? entryList({ label: 'Доходы', items: d.incomes.map((i) => (d.form?.id === i.id ? editForm(i, d.form, d.symbol, href) : row(i, d, href))) }) : null,
       d.upcoming.length > 0 ? section({ title: 'Ближайшие поступления', body: upcoming(d) }) : null,
       section({
@@ -146,7 +146,7 @@ export function renderIncome(d: IncomeData, href: Href): Html {
       balanceTotal({
         amount: monthlyIncome(d.incomes),
         symbol: d.symbol,
-        note: count ? `из ${count} ${plural(count, ['источника', 'источников', 'источников'])}` : 'Доходов пока нет',
+        note: incomeTotalNote(d),
       }),
       calendar(d),
       footnote({
@@ -161,11 +161,13 @@ export function renderIncome(d: IncomeData, href: Href): Html {
   return pageDocument({ title: 'Бюджет: доходы', body });
 }
 
-function sentence(d: IncomeData): string {
+export function incomeSentence(d: IncomeData): string {
   if (d.incomes.length === 0) {
     return 'Добавьте, откуда и когда приходят деньги: фиксированную сумму в определённое число или зарплату с авансом. Поступления появятся на обзоре.';
   }
-  let text = `В месяц приходит ${money(monthlyIncome(d.incomes), d.symbol)}.`;
+  // The symbol may end with a dot of its own, as «руб.» does.
+  const monthly = money(monthlyIncome(d.incomes), d.symbol);
+  let text = `В месяц приходит ${monthly}${monthly.endsWith('.') ? '' : '.'}`;
   const next = d.upcoming[0];
   if (next) {
     text += ` Ближайшее поступление — «${next.label ?? next.income.title}», ${money(next.amount, d.symbol)}, ${fromToday(next.date, d.today)}.`;
@@ -173,20 +175,19 @@ function sentence(d: IncomeData): string {
   return text;
 }
 
-const ICONS: Record<IncomeModelId, IconName> = { fixed: 'banknote', salary: 'briefcase' };
+export const INCOME_ICONS: Record<IncomeModelId, IconName> = { fixed: 'banknote', salary: 'briefcase' };
 
-function incomeColor(income: Income): string {
+export function incomeColor(income: Income): string {
   return categoryColor(`income:${income.id}`, null);
 }
 
 function row(income: Income, d: IncomeData, href: Href): Html {
   const model = incomeModel(income.model);
-  const next = d.upcoming.find((p) => p.income.id === income.id);
   return entryRow({
     id: `income-${income.id}`,
     title: income.title,
-    details: [model.schedule(income.params), next ? fromToday(next.date, d.today) : ''].filter(Boolean).join(' · '),
-    icon: ICONS[income.model],
+    details: incomeDetails(income, d),
+    icon: INCOME_ICONS[income.model],
     color: incomeColor(income),
     amount: model.monthly(income.params),
     symbol: d.symbol,
@@ -194,12 +195,24 @@ function row(income: Income, d: IncomeData, href: Href): Html {
   });
 }
 
+/** When an income comes, and in how long its next payment does. */
+export function incomeDetails(income: Income, d: Pick<IncomeData, 'upcoming' | 'today'>): string {
+  const next = d.upcoming.find((p) => p.income.id === income.id);
+  return [incomeModel(income.model).schedule(income.params), next ? fromToday(next.date, d.today) : ''].filter(Boolean).join(' · ');
+}
+
+/** What the monthly total is made of. */
+export function incomeTotalNote(d: IncomeData): string {
+  const count = d.incomes.length;
+  return count ? `из ${count} ${plural(count, ['источника', 'источников', 'источников'])}` : 'Доходов пока нет';
+}
+
 function editForm(income: Income, form: IncomeForm, symbol: string, href: Href): Html {
   return entryForm({
     id: `income-${income.id}`,
     action: href(`/income/${income.id}`),
     submitLabel: 'Сохранить',
-    icon: ICONS[income.model],
+    icon: INCOME_ICONS[income.model],
     color: incomeColor(income),
     fields: fields(income.model, form, symbol),
     deleteAction: href(`/income/${income.id}/delete`),
@@ -232,7 +245,7 @@ function upcoming(d: IncomeData): Html {
           operationRow({
             title: p.label ?? p.income.title,
             details: p.label ? p.income.title : incomeModel(p.income.model).schedule(p.income.params),
-            icon: ICONS[p.income.model],
+            icon: INCOME_ICONS[p.income.model],
             color: incomeColor(p.income),
             kind: 'income',
             amount: p.amount,

@@ -98,7 +98,7 @@ export function renderSettings(d: SettingsData, href: Href): Html {
     rail: appRail('settings', d.userName, href),
     main: [
       topBar({ crumbs: [{ label: 'Бюджет' }, { label: 'Настройки', icon: 'sliders' }] }),
-      pageIntro({ title: 'Настройки', text: sentence(d) }),
+      pageIntro({ title: 'Настройки', text: settingsSentence(d) }),
       section({
         title: 'Категории',
         body: [
@@ -125,7 +125,7 @@ export function renderSettings(d: SettingsData, href: Href): Html {
   return pageDocument({ title: 'Бюджет: настройки', body });
 }
 
-function sentence(d: SettingsData): string {
+export function settingsSentence(d: SettingsData): string {
   const zenmoney = d.categories.filter((c) => c.category.zenmoneyTitle !== null).length;
   const own = d.categories.length - zenmoney;
   const hidden = d.categories.filter((c) => c.category.hidden).length;
@@ -137,12 +137,17 @@ function sentence(d: SettingsData): string {
   return `${head} При разметке трат они идут в этом порядке: сначала те, куда трат больше всего за три месяца. В ZenMoney ничего не меняется.`;
 }
 
-function categoryRow(c: CategoryEntry, count: number, href: Href): Html {
+/** Where a category comes from and how many expenses went into it lately. */
+export function categoryDetails(c: CategoryEntry, count: number): string {
   const origin = c.zenmoneyTitle === null ? 'своя' : c.name === c.zenmoneyTitle ? 'из ZenMoney' : `в ZenMoney «${c.zenmoneyTitle}»`;
+  return `${origin} · ${count > 0 ? `${count} ${plural(count, ['трата', 'траты', 'трат'])} за три месяца` : 'за три месяца трат нет'}`;
+}
+
+function categoryRow(c: CategoryEntry, count: number, href: Href): Html {
   return entryRow({
     id: `category-${c.id}`,
     title: c.title,
-    details: `${origin} · ${count > 0 ? `${count} ${plural(count, ['трата', 'траты', 'трат'])} за три месяца` : 'за три месяца трат нет'}`,
+    details: categoryDetails(c, count),
     icon: categoryIcon(c.title),
     color: c.hidden ? toneColor('gray') : categoryColor(c.id, c.color),
     href: href('/settings', { edit: c.id }),
