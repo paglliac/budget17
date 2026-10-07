@@ -5,7 +5,8 @@ import { OWN_CATEGORY_PREFIX, type CategorySetup, type OwnCategory } from './cat
 import type { Categorization } from './categorization.ts';
 import { isIncomeModel, type Income, type IncomeInput } from './income.ts';
 import type { RegularExpense, RegularExpenseInput } from './regular.ts';
-import type { Envelope, Purchase, PurchaseInput, Wish, WishInput } from './week.ts';
+import { alignWeek, type Envelope, type Purchase, type PurchaseInput, type WeekStart, type Wish, type WishInput } from './week.ts';
+import type { DateString } from './zenmoney/types.ts';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS regular_expense (
@@ -26,7 +27,7 @@ const SCHEMA = `
     params TEXT NOT NULL
   ) STRICT;
 
-  -- week is the Monday of the week the purchase is planned for.
+  -- week is the first day of the week the purchase is planned for.
   CREATE TABLE IF NOT EXISTS purchase (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
@@ -81,6 +82,18 @@ const SCHEMA = `
     title TEXT NOT NULL,
     hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))
   ) STRICT;
+
+  -- Single values the user picked, such as week_start, the day a week begins on (0 for Monday).
+  CREATE TABLE IF NOT EXISTS preference (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  ) STRICT;
+
+  -- What the user allowed for ordinary spending in a week instead of the usual limit; week is its first day.
+  CREATE TABLE IF NOT EXISTS week_limit (
+    week TEXT PRIMARY KEY,
+    amount REAL NOT NULL CHECK (amount > 0)
+  ) STRICT;
 `;
 
 /** Columns added after their table was created: databases made before them get them on open. */
@@ -91,8 +104,9 @@ const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> 
 ];
 
 /**
- * What the user sets up in the app itself: regular expenses, incomes, the weeks' purchases, wishes, where spending
- * counts, what expenses paid or which category they go into, and the categories themselves. It lives in its own
+ * What the user sets up in the app itself: regular expenses, incomes, the day a week begins on, what a week allows,
+ * the weeks' purchases, wishes, where spending counts, what expenses paid or which category they go into, and the
+ * categories themselves. It lives in its own
  * SQLite file, apart from the ZenMoney copy, so make resync never deletes it.
  */
 export class Settings {
@@ -183,6 +197,53 @@ export class Settings {
   /** False when there is no such income. */
   deleteIncome(id: number): boolean {
     return Number(this.#db.prepare('DELETE FROM income WHERE id = ?').run(id).changes) > 0;
+  }
+
+  /** The day a week begins on: 0 for Monday, the default, to 6 for Sunday. */
+  weekStart(): WeekStart {
+    const row = this.#db.prepare("SELECT value FROM preference WHERE key = 'week_start'").get();
+    const start = Number(row?.value);
+    return Number.isInteger(start) && start >= 0 && start <= 6 ? start : 0;
+  }
+
+  /**
+   * Makes weeks begin on another day. Purchases and the limits of weeks move to the weeks that share most days with
+   * the ones they were in, so a purchase planned for the week of 12 October stays about there.
+   */
+  setWeekStart(start: WeekStart): void {
+    this.#transaction(() => {
+      this.#db
+        .prepare("INSERT INTO preference (key, value) VALUES ('week_start', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+        .run(String(start));
+      const move = this.#db.prepare('UPDATE purchase SET week = ? WHERE id = ?');
+      for (const p of this.purchases()) move.run(alignWeek(p.week, start), p.id);
+      // Weeks map one to one, but each limit is moved apart from the others so that none overwrites one not yet moved.
+      const limits = this.weekLimits();
+      this.#db.prepare('DELETE FROM week_limit').run();
+      const insert = this.#db.prepare('INSERT INTO week_limit (week, amount) VALUES (?, ?)');
+      for (const [week, amount] of limits) insert.run(alignWeek(week, start), amount);
+    });
+  }
+
+  /** What the user allowed for a week instead of the usual limit, by the week's first day, in the order of weeks. */
+  weekLimits(): Map<DateString, number> {
+    return new Map(
+      this.#db
+        .prepare('SELECT week, amount FROM week_limit ORDER BY week')
+        .all()
+        .map((row) => [String(row.week), Number(row.amount)] as const),
+    );
+  }
+
+  /** Sets what a week allows; null gives it the usual limit back. */
+  setWeekLimit(week: DateString, amount: number | null): void {
+    if (amount === null) {
+      this.#db.prepare('DELETE FROM week_limit WHERE week = ?').run(week);
+      return;
+    }
+    this.#db
+      .prepare('INSERT INTO week_limit (week, amount) VALUES (?, ?) ON CONFLICT (week) DO UPDATE SET amount = excluded.amount')
+      .run(week, amount);
   }
 
   /** Purchases by week, then in the order they were added. */

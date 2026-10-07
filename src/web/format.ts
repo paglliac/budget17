@@ -60,7 +60,7 @@ export function timeOn(date: DateString, seconds: number): string | null {
   return moment.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
-/** A week by its Monday: 5–11 октября, or 28 сентября – 4 октября across months. */
+/** A week by its first day: 5–11 октября, or 28 сентября – 4 октября across months. */
 export function weekLabel(week: DateString): string {
   const end = addDays(week, 6);
   return week.slice(0, 7) === end.slice(0, 7) ? `${Number(week.slice(8, 10))}–${dayMonth(end)}` : `${dayMonth(week)} – ${dayMonth(end)}`;
@@ -94,6 +94,9 @@ export function greeting(hour: number): string {
 }
 
 export const WEEKDAYS_FULL = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'] as const;
+
+/** On a day of the week: в понедельник, во вторник. */
+export const WEEKDAYS_ON = ['в понедельник', 'во вторник', 'в среду', 'в четверг', 'в пятницу', 'в субботу', 'в воскресенье'] as const;
 
 /** Сегодня, Вчера or 3 октября. */
 export function dayTitle(date: DateString, today: DateString): string {

@@ -11,7 +11,7 @@ import { addDays } from '../../dates.ts';
 import { listOperations, PURCHASE_CATEGORY, REGULAR_CATEGORY, type Operation } from '../../ledger.ts';
 import { nearestPayment, type RegularExpense } from '../../regular.ts';
 import type { Settings } from '../../settings.ts';
-import { envelopeOf, purchaseStatus, weekOf, type Envelope, type Purchase } from '../../week.ts';
+import { envelopeOf, purchaseStatus, weekOf, type Envelope, type Purchase, type WeekStart } from '../../week.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { dayMonth, money, timeOn, weekLabel } from '../format.ts';
 import type { Html } from '../html.ts';
@@ -29,6 +29,7 @@ export interface SavedMarking {
   /** Envelopes of spending moved out of where it counts by default. */
   marks: ReadonlyMap<string, Envelope>;
   categories: CategorySetup;
+  weekStart: WeekStart;
 }
 
 /** What marking an expense needs besides the expense. */
@@ -43,6 +44,7 @@ export interface Marking {
   categorizations: ReadonlyMap<string, Categorization>;
   suggest: (expense: Operation) => Suggestion | null;
   symbol: string;
+  weekStart: WeekStart;
 }
 
 /** All expenses, as the user sorted them, newest first. */
@@ -61,6 +63,7 @@ export function loadMarking(data: EntityCollections, saved: SavedMarking, expens
     categorizations: saved.categorizations,
     suggest: suggester(expenses, saved.regular),
     symbol: mainCurrency(data).symbol,
+    weekStart: saved.weekStart,
   };
 }
 
@@ -218,7 +221,7 @@ export interface PaymentOptions {
  * always among them, and the other regular expenses and purchases in a list.
  */
 export function paymentOptions(m: Marking, o: Operation, suggestion: Suggestion | null): PaymentOptions {
-  const week = weekOf(o.date);
+  const week = weekOf(o.date, m.weekStart);
   const others = m.expenses.filter((e) => e.id !== o.id);
   const choices = paymentChoices(o, m);
   const current = currentPayment(m, o, others);

@@ -39,6 +39,7 @@ function saved(overrides: Partial<SavedMarking> = {}): SavedMarking {
     purchases: [{ id: 5, title: 'Ласты', amount: 300, week: '2026-09-28', envelope: 'week', done: false }],
     marks: new Map(),
     categories: NO_SETUP,
+    weekStart: 0,
     ...overrides,
   };
 }

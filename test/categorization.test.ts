@@ -106,6 +106,7 @@ describe('paymentChoices', () => {
       regular: [workshop, phone, oldCar, mortgage],
       purchases: [shoes, groceries, purchase(3, 'Пальто', 15_000, '2026-11-02'), purchase(4, 'Куртка', 20_000, '2026-10-26', { envelope: 'extra' })],
       expenses: [],
+      weekStart: 0,
     });
 
     assert.deepEqual(
@@ -121,6 +122,7 @@ describe('paymentChoices', () => {
       regular: [phone, internet, workshop],
       purchases: [groceries, purchase(5, 'Подарок', 5_000, '2026-10-05'), purchase(6, 'Стрижка', 2_200, '2026-10-12'), purchase(7, 'Ласты', 8_000, '2026-10-05')],
       expenses: [],
+      weekStart: 0,
     };
 
     assert.deepEqual(
@@ -138,6 +140,7 @@ describe('paymentChoices', () => {
       regular: [phone],
       purchases: [groceries, purchase(5, 'Подарок', 2_000, '2026-10-05', { done: true })],
       expenses: [paidPhone, someGroceries],
+      weekStart: 0,
     });
 
     assert.deepEqual(named(choices), ['Продукты 2000']);
@@ -146,6 +149,6 @@ describe('paymentChoices', () => {
   it('still offers what the expense itself paid', () => {
     const self = expense('Т-Мобайл', 1_500, '2026-10-01', { category: REGULAR_CATEGORY, regular: { id: phone.id, title: phone.title } });
 
-    assert.deepEqual(named(paymentChoices(self, { regular: [phone], purchases: [], expenses: [self] })), ['Телефон 2026-10-02 1500']);
+    assert.deepEqual(named(paymentChoices(self, { regular: [phone], purchases: [], expenses: [self], weekStart: 0 })), ['Телефон 2026-10-02 1500']);
   });
 });

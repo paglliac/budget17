@@ -7,7 +7,7 @@ import { daysBetween } from './dates.ts';
 import { isUntitled, type Operation } from './ledger.ts';
 import type { Category } from './operations.ts';
 import { nearestPayment, paidBy, type RegularExpense } from './regular.ts';
-import { monthOfWeek, purchaseStatus, weekOf, type Purchase } from './week.ts';
+import { monthOfWeek, purchaseStatus, weekOf, type Purchase, type WeekStart } from './week.ts';
 import type { DateString, TagId } from './zenmoney/types.ts';
 
 /** Where the user put an expense: a category, or the regular expense it paid. A purchase it paid is kept apart. */
@@ -96,10 +96,10 @@ export type PaymentChoice = { regular: RegularExpense; date: DateString; left: n
  */
 export function paymentChoices(
   expense: Operation,
-  context: { regular: readonly RegularExpense[]; purchases: readonly Purchase[]; expenses: readonly Operation[] },
+  context: { regular: readonly RegularExpense[]; purchases: readonly Purchase[]; expenses: readonly Operation[]; weekStart: WeekStart },
 ): PaymentChoice[] {
   const others = context.expenses.filter((o) => o.id !== expense.id);
-  const week = weekOf(expense.date);
+  const week = weekOf(expense.date, context.weekStart);
   /** 0 for a bill of the expense's amount, 1 for a purchase planned in its week, 2 for the rest. */
   const choices: Array<{ choice: PaymentChoice; rank: number; days: number }> = [];
   for (const e of context.regular) {

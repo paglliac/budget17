@@ -36,6 +36,8 @@ function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
     categorizations: new Map(),
     purchasePayments: new Map(),
     categories: NO_SETUP,
+    weekStart: 0,
+    weekLimits: new Map(),
   };
 }
 
@@ -283,6 +285,22 @@ describe('dashboard', () => {
     assert.ok(page.includes('регулярная · 7 ноября'));
     assert.ok(page.includes('name="week" value="2026-11-02"'), 'a new purchase goes into the week shown');
     assert.ok(render({ week: '2026-11-09' }, budget).includes('Неделя впереди, в плане пока ничего: свободны все 45 000 ₽.'));
+  });
+
+  it('begins weeks on the day picked in the settings and takes the amount set for a week', () => {
+    const budget = { ...saved(), purchases: [], weekStart: 3, weekLimits: new Map([['2026-10-01', 80_000]]) };
+    const page = render({}, budget);
+
+    assert.ok(page.includes('Неделя 1–7 октября'), 'from Thursday to Wednesday');
+    assert.ok(page.includes('Можно потратить ещё 9 527 ₽. Потрачено 70 473 ₽ из 80 000 ₽. Бюджет этой недели изменён в настройках: 80 000 ₽ вместо 45 000 ₽.'));
+    assert.ok(page.includes('из 80 000 ₽ на неделю'));
+    assert.ok(page.includes('href="/?week=2026-09-24">← Раньше</a>') && page.includes('href="/?week=2026-10-08">Позже →</a>'));
+    assert.ok(render({ week: '2026-10-05' }, budget).includes('Неделя 1–7 октября'), 'a Monday is no first day of a week now');
+    assert.ok(render({ week: '2026-10-08' }, budget).includes('Неделя впереди, в плане пока ничего: свободны все 45 000 ₽.'));
+
+    const month = render({ view: 'month' }, budget);
+    assert.ok(month.includes('Неделя 22–28 октября') && !month.includes('Неделя 29 октября'), 'the week of 29 October has most of its days in November');
+    assert.ok(month.includes('По неделям потрачено 70 473 ₽ из 215 000 ₽.'));
   });
 
   it('opens a purchase with the week it is planned for, to move it to another', () => {

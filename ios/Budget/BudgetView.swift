@@ -54,26 +54,29 @@ struct ModeTabs: View {
     }
 }
 
-/// The days of a week under its month and year; today is dark, a picked day shows only its spending.
+/// The days of a week from the day it begins on, under its month and year; today is dark, a picked day shows only its
+/// spending.
 struct WeekStrip: View {
-    let monday: String
+    /// The week's first day, the one picked in the settings.
+    let start: String
     let today: String
     /// Days that have spending, marked with a dot.
     let busy: Set<String>
     @Binding var selected: String?
 
     var body: some View {
-        let days = (0..<7).map { Dates.adding($0, to: monday) }
-        let thursday = Dates.parts(days[3])
+        let days = (0..<7).map { Dates.adding($0, to: start) }
+        // The week belongs to the month of its fourth day, as the server counts it.
+        let middle = Dates.parts(days[3])
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(thursday?.year ?? "").font(.caption).foregroundStyle(Ink.muted)
-                Text(thursday?.month ?? "").font(.title3.weight(.bold))
+                Text(middle?.year ?? "").font(.caption).foregroundStyle(Ink.muted)
+                Text(middle?.month ?? "").font(.title3.weight(.bold))
             }
             .frame(width: 52, alignment: .leading)
             Rectangle().fill(Ink.hairline).frame(width: 1, height: 40).padding(.trailing, 4)
-            ForEach(Array(days.enumerated()), id: \.offset) { index, day in
-                dayButton(day, letter: Dates.weekdays[index])
+            ForEach(days, id: \.self) { day in
+                dayButton(day, letter: Dates.weekdayLetter(day))
             }
         }
     }
@@ -130,7 +133,7 @@ struct WeekView: View {
                     )
                 }
             } summary: {
-                WeekStrip(monday: s.week, today: s.today, busy: Set(s.days.map(\.date)), selected: $day)
+                WeekStrip(start: s.week, today: s.today, busy: Set(s.days.map(\.date)), selected: $day)
                 VStack(alignment: .leading, spacing: 10) {
                     // In the current week the figure is what can still be spent, which goes without saying.
                     if s.phase != "current" { SummaryLabel(s.total.label) }
@@ -331,7 +334,7 @@ struct MonthView: View {
     }
 }
 
-/// The month's weeks as days from Monday to Sunday, each opening its week; the dot tells how it goes.
+/// The month's weeks as their days, from the day a week begins on, each opening its week; the dot tells how it goes.
 struct MonthStrip: View {
     let screen: MonthScreen
     let openWeek: (String) -> Void
@@ -364,8 +367,8 @@ struct MonthStrip: View {
         }
     }
 
-    /// 5–11 for the week of Monday the 5th.
-    private func range(_ monday: String) -> String {
-        "\(Dates.parts(monday)?.day ?? "")–\(Dates.parts(Dates.adding(6, to: monday))?.day ?? "")"
+    /// 5–11 for the week that begins on the 5th.
+    private func range(_ start: String) -> String {
+        "\(Dates.parts(start)?.day ?? "")–\(Dates.parts(Dates.adding(6, to: start))?.day ?? "")"
     }
 }

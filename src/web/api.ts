@@ -8,9 +8,9 @@ import { addDays, monthOf, shiftMonth, type MonthString } from '../dates.ts';
 import { INCOME_MODEL_IDS, incomeModel, incomeValues, monthlyIncome, type IncomeModelId } from '../income.ts';
 import { listOperations, type Operation } from '../ledger.ts';
 import { regularTotals, regularValues, type RegularExpense } from '../regular.ts';
-import { adviceTarget, envelopeOf, monthOfWeek, weekOf, type Envelope, type PurchaseStatus, type WeekSummary } from '../week.ts';
+import { adviceTarget, envelopeOf, monthOfWeek, WEEK_LIMIT, type Envelope, type PurchaseStatus, type WeekSummary } from '../week.ts';
 import type { DateString, EntityCollections } from '../zenmoney/types.ts';
-import { capitalize, dayHeading, dayMonth, money, monthName, plural, timeOn, weekLabel } from './format.ts';
+import { capitalize, dayHeading, dayMonth, money, monthName, plural, timeOn, weekLabel, WEEKDAYS_FULL } from './format.ts';
 import { categoryIcon, ENTRY_ICONS, entryIcon, type IconName } from './icons.ts';
 import { recentMonths } from './pages/chrome.ts';
 import {
@@ -44,7 +44,7 @@ import {
 } from './pages/marking.ts';
 import { loadOperations, operationCategory, operationLine } from './pages/operations.ts';
 import { loadRegular, regularLine, regularTotalNote, STATUS_TONE, timeline, type Placed } from './pages/regular.ts';
-import { categoryDetails, loadSettingsPage } from './pages/settings.ts';
+import { categoryDetails, loadBudgetSetup, loadSettingsPage, weekLimitLine, type SavedSettings } from './pages/settings.ts';
 import { loadUncategorized, suggestedChoice, suggestionName } from './pages/uncategorized.ts';
 import { categoryColor, toneColor } from './tones.ts';
 
@@ -167,7 +167,7 @@ export interface BudgetOptions {
 export function weekScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { week?: string | null }) {
   const { today } = options;
   const d = loadDashboard(data, saved, { ...options, week: options.week });
-  const current = weekOf(today);
+  const { current } = d;
   const w = d.week;
   const phase = w.week > current ? 'ahead' : w.week < current ? 'past' : 'current';
   const next = addDays(w.week, 7);
@@ -186,7 +186,7 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
     wishes:
       phase === 'current'
         ? d.wishes.map(({ wish, advice }) => ({
-            ...row({ id: `wish-${wish.id}`, title: wish.title, details: adviceText(advice, today, d.symbol), icon: 'sparkles', color: toneColor('yellow'), amount: wish.amount }),
+            ...row({ id: `wish-${wish.id}`, title: wish.title, details: adviceText(advice, current, d.symbol), icon: 'sparkles', color: toneColor('yellow'), amount: wish.amount }),
             wish,
             plannable: adviceTarget(advice) !== null,
           }))
@@ -201,7 +201,7 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
 export function monthScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { month?: string | null }) {
   const { today } = options;
   const d = loadDashboard(data, saved, { ...options, view: 'month', month: options.month });
-  const current = weekOf(today);
+  const { current } = d;
   const thisMonth = monthOfWeek(current);
   const m = d.extras;
   const prev = shiftMonth(m.month, -1);
@@ -465,7 +465,7 @@ export function incomeScreen(data: EntityCollections, incomes: Parameters<typeof
 export function widgetScreen(data: EntityCollections, saved: SavedBudget, options: { today: DateString }) {
   const { today } = options;
   const d = loadDashboard(data, saved, { today, source: 'zenmoney', canSync: false });
-  const total = weekTotal(d.week, weekOf(today), d.symbol);
+  const total = weekTotal(d.week, d.current, d.symbol);
   const { pending } = loadUncategorized(data, saved, { today });
   const count = pending.length;
   return {
@@ -482,8 +482,29 @@ export function widgetScreen(data: EntityCollections, saved: SavedBudget, option
   };
 }
 
+/**
+ * The budget's setup: the day a week begins on, to pick from the days Monday first, the usual amount of a week and the
+ * weeks with an amount of their own. The day posts to /api/budget/week-start/:day, a week's amount to
+ * /api/budget/weeks (with `week`) or /api/budget/weeks/:week, and /api/budget/weeks/:week/delete gives the usual back.
+ */
+export function budgetSettingsScreen(data: EntityCollections, saved: Pick<SavedSettings, 'weekStart' | 'weekLimits'>, options: { today: DateString }) {
+  const b = loadBudgetSetup(data, saved, options.today);
+  return {
+    symbol: b.symbol,
+    weekStart: b.weekStart,
+    weekdays: WEEKDAYS_FULL.map((day, value) => ({ value, label: capitalize(day) })),
+    limit: WEEK_LIMIT,
+    weeks: b.weeks.map(({ week, amount }) => {
+      const line = weekLimitLine(b, week);
+      return { ...row({ id: `week-${week}`, title: weekLabel(week), details: line.details, icon: 'calendar', color: toneColor(line.tone), amount, muted: line.muted }), week };
+    }),
+    current: b.current,
+    weekChoices: weekChoices(b.current),
+  };
+}
+
 /** Categories in the order marking offers them, the hidden ones apart. */
-export function categoriesScreen(data: EntityCollections, saved: SavedMarking, options: { today: DateString }) {
+export function categoriesScreen(data: EntityCollections, saved: SavedSettings, options: { today: DateString }) {
   const d = loadSettingsPage(data, saved, options);
   const item = ({ category: c, count }: (typeof d.categories)[number]) => ({
     ...row({

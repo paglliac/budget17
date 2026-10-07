@@ -84,9 +84,15 @@ final class ScreensTests: XCTestCase {
         pill("Категории").tap()
         sleep(1)
         shot("categories")
-        app.buttons["Сервер"].tap()
-        if app.navigationBars["Сервер"].waitForExistence(timeout: 5) {
-            shot("server")
+        app.buttons["Настройки"].tap()
+        if app.navigationBars["Настройки"].waitForExistence(timeout: 5) {
+            sleep(1)
+            shot("settings")
+            if app.buttons["Изменить бюджет недели"].waitForExistence(timeout: 5) {
+                app.buttons["Изменить бюджет недели"].tap()
+                if app.navigationBars["Бюджет недели"].waitForExistence(timeout: 5) { shot("week-limit") }
+                app.buttons["Отмена"].tap()
+            }
             app.buttons["Готово"].tap()
         }
     }

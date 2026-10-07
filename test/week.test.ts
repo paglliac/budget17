@@ -4,6 +4,7 @@ import type { Operation } from '../src/ledger.ts';
 import {
   adviceTarget,
   adviseWish,
+  alignWeek,
   envelopeOf,
   monthOfWeek,
   summarizeExtras,
@@ -40,23 +41,52 @@ function budget(overrides: Partial<Budget> = {}, marks: Array<[string, Envelope]
     ],
     marks: new Map(marks),
     regular: [regular({ id: 1, title: 'Школа', amount: 45_000, day: 7 })],
+    weekStart: 0,
+    weekLimits: new Map(),
     ...overrides,
   };
 }
 
 describe('weeks', () => {
   it('start on Monday and belong to the month that holds their Thursday', () => {
-    assert.equal(weekOf('2026-10-11'), '2026-10-05');
-    assert.equal(weekOf('2026-10-05'), '2026-10-05');
-    assert.equal(weekOf('2026-11-01'), '2026-10-26');
+    assert.equal(weekOf('2026-10-11', 0), '2026-10-05');
+    assert.equal(weekOf('2026-10-05', 0), '2026-10-05');
+    assert.equal(weekOf('2026-11-01', 0), '2026-10-26');
     assert.equal(monthOfWeek('2026-09-28'), '2026-10', '28 September – 4 October has four days in October');
     assert.equal(monthOfWeek('2026-10-26'), '2026-10');
-    assert.deepEqual(weeksOfMonth('2026-10'), ['2026-09-28', '2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26']);
-    assert.deepEqual(weeksOfMonth('2026-11'), ['2026-11-02', '2026-11-09', '2026-11-16', '2026-11-23']);
+    assert.deepEqual(weeksOfMonth('2026-10', 0), ['2026-09-28', '2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26']);
+    assert.deepEqual(weeksOfMonth('2026-11', 0), ['2026-11-02', '2026-11-09', '2026-11-16', '2026-11-23']);
+  });
+
+  it('start on the day the user picked and belong to the month that holds most of their days', () => {
+    assert.equal(weekOf('2026-10-07', 2), '2026-10-07', 'a Wednesday begins its week');
+    assert.equal(weekOf('2026-10-06', 2), '2026-09-30', 'a Tuesday ends it');
+    assert.equal(weekOf('2026-10-11', 6), '2026-10-11');
+    assert.deepEqual(weeksOfMonth('2026-10', 2), ['2026-09-30', '2026-10-07', '2026-10-14', '2026-10-21', '2026-10-28']);
+    assert.deepEqual(weeksOfMonth('2026-11', 4), ['2026-10-30', '2026-11-06', '2026-11-13', '2026-11-20', '2026-11-27'], '30 October – 5 November has five days in November');
+  });
+
+  it('move to the week that shares most of their days when another first day is picked, and back', () => {
+    assert.equal(alignWeek('2026-10-12', 4), '2026-10-09', 'Friday 9 – Thursday 15 holds four days of 12–18 October');
+    assert.equal(alignWeek('2026-10-12', 1), '2026-10-13', 'Tuesday 13 – Monday 19 holds six of them');
+    assert.equal(alignWeek('2026-10-09', 0), '2026-10-12');
+    assert.equal(alignWeek('2026-10-12', 0), '2026-10-12', 'a week that already begins on the day stays');
   });
 });
 
 describe('summarizeWeek', () => {
+  it('takes the amount the user set for the week instead of the usual limit', () => {
+    const w = summarizeWeek(budget({ weekLimits: new Map([[week, 30_000]]) }), week);
+    assert.deepEqual([w.limit, w.spent, w.planned, w.free], [30_000, 40_473, 22_000, 30_000 - 40_473 - 22_000]);
+    assert.equal(summarizeWeek(budget({ weekLimits: new Map([[week, 30_000]]) }), '2026-10-12').limit, 45_000, 'other weeks keep the usual');
+  });
+
+  it('counts the spending of the days from the first day the user picked', () => {
+    const b = budget({ weekStart: 6, purchases: [] });
+    assert.deepEqual(summarizeWeek(b, '2026-10-04').spending.map((o) => o.id), ['groceries', 'transfer', 'last-week'], 'Sunday 4 – Saturday 10 October');
+    assert.deepEqual(summarizeWeek(b, '2026-09-27').spending.map((o) => o.id), []);
+  });
+
   it('counts all spending of the week and what the plan still needs', () => {
     const w = summarizeWeek(budget(), week);
 

@@ -25,6 +25,7 @@ import {
   type Budget,
   type ExtrasSummary,
   type PurchaseStatus,
+  type WeekStart,
   type WeekSummary,
   type Wish,
 } from '../../week.ts';
@@ -61,6 +62,8 @@ const WEEK_CHOICES = 13;
 /** What the user keeps in the app for the budget. */
 export interface SavedBudget extends SavedMarking {
   wishes: Wish[];
+  /** What the user allowed for a week instead of WEEK_LIMIT, by the week's first day. */
+  weekLimits: ReadonlyMap<DateString, number>;
 }
 
 export type FormField = 'title' | 'amount';
@@ -80,6 +83,9 @@ export interface DashboardForm {
 
 export interface DashboardData {
   today: DateString;
+  /** The first day of the current week. */
+  current: DateString;
+  weekStart: WeekStart;
   view: 'week' | 'month';
   /** The week tab's week: the current one, an earlier one opened from the month, or a later one being planned. */
   week: WeekSummary;
@@ -105,11 +111,12 @@ export interface DashboardData {
  * it, so that a regular payment made early is found as paid.
  */
 export function budgetOf(data: EntityCollections, saved: SavedBudget, options: { today: DateString; from?: DateString }): Budget {
-  const current = weekOf(options.today);
-  const monthStart = weeksOfMonth(monthOfWeek(current))[0] ?? current;
+  const { weekStart, weekLimits } = saved;
+  const current = weekOf(options.today, weekStart);
+  const monthStart = weeksOfMonth(monthOfWeek(current), weekStart)[0] ?? current;
   const from = options.from && options.from < monthStart ? options.from : monthStart;
   const expenses = listOperations(data, { from: addDays(from, -31), to: addDays(current, 6) }, saved).filter((o) => o.kind === 'expense');
-  return { expenses, purchases: saved.purchases, marks: saved.marks, regular: saved.regular };
+  return { expenses, purchases: saved.purchases, marks: saved.marks, regular: saved.regular, weekStart, weekLimits };
 }
 
 export function loadDashboard(
@@ -127,16 +134,19 @@ export function loadDashboard(
   },
 ): DashboardData {
   const { today } = options;
-  const current = weekOf(today);
-  const week = parseWeek(options.week, current);
+  const current = weekOf(today, saved.weekStart);
+  const week = parseWeek(options.week, current, saved.weekStart);
   const month = parseMonthOfWeeks(options.month, current);
-  const monthStart = weeksOfMonth(month)[0] ?? current;
+  const weeks = weeksOfMonth(month, saved.weekStart);
+  const monthStart = weeks[0] ?? current;
   const budget = budgetOf(data, saved, { today, from: week < monthStart ? week : monthStart });
   return {
     today,
+    current,
+    weekStart: saved.weekStart,
     view: options.view === 'month' ? 'month' : 'week',
     week: summarizeWeek(budget, week),
-    weeks: weeksOfMonth(month).map((w) => summarizeWeek(budget, w)),
+    weeks: weeks.map((w) => summarizeWeek(budget, w)),
     extras: summarizeExtras(budget, month),
     wishes: saved.wishes.map((wish) => ({ wish, advice: adviseWish(budget, wish, today) })),
     marking: loadMarking(data, saved, allExpenses(data, saved), today),
@@ -149,12 +159,12 @@ export function loadDashboard(
   };
 }
 
-/** A Monday from a query param, at most PLAN_AHEAD weeks after the current one; the current week otherwise. */
-function parseWeek(value: string | null | undefined, current: DateString): DateString {
+/** A week's first day from a query param, at most PLAN_AHEAD weeks after the current one; the current week otherwise. */
+export function parseWeek(value: string | null | undefined, current: DateString, start: WeekStart): DateString {
   return value &&
     /^\d{4}-\d{2}-\d{2}$/.test(value) &&
     !Number.isNaN(Date.parse(value)) &&
-    weekOf(value) === value &&
+    weekOf(value, start) === value &&
     value <= addDays(current, 7 * PLAN_AHEAD)
     ? value
     : current;
@@ -199,12 +209,14 @@ export function submitDashboard(
     const envelope = existing ? existing.envelope : body.get('envelope') === 'extra' ? 'extra' : 'week';
     const parsed = parseEntry(body);
     if ('errors' in parsed) return { status: 'invalid', form: { kind: 'purchase', id, ...parsed, envelope, week: body.get('week') } };
+    const start = settings.weekStart();
+    const current = weekOf(context.today, start);
     if (!existing) {
-      const week = parseWeek(body.get('week'), weekOf(context.today));
+      const week = parseWeek(body.get('week'), current, start);
       settings.addPurchase({ ...parsed.entry, week, envelope, done: false });
     } else {
       const moved = action === 'move' ? (existing.envelope === 'week' ? 'extra' : 'week') : existing.envelope;
-      const week = body.has('week') ? parseWeek(body.get('week'), weekOf(context.today)) : existing.week;
+      const week = body.has('week') ? parseWeek(body.get('week'), current, start) : existing.week;
       settings.updatePurchase(existing.id, { ...parsed.entry, envelope: moved, week });
     }
     return { status: 'saved' };
@@ -251,7 +263,7 @@ function parseEntry(
 // ---- Page
 
 export function renderDashboard(d: DashboardData, href: Href): Html {
-  const current = weekOf(d.today);
+  const { current } = d;
   const thisMonth = monthOfWeek(current);
   /** This page with the given params; an entry opens with `edit`. */
   const here = (params: Record<string, string | null> = {}) =>
@@ -374,7 +386,7 @@ export interface Total {
 
 /** What is left of a week that has begun or is over, or what a week ahead leaves free after its plan. */
 export function weekTotal(w: WeekSummary, current: DateString, symbol: string): Total {
-  const note = `из ${money(WEEK_LIMIT, symbol)} на неделю`;
+  const note = `из ${money(w.limit, symbol)} на неделю`;
   const rest = [
     { label: 'План', value: w.planned, tone: 'violet' as const },
     { label: 'Свободно', value: w.free, tone: 'gray' as const },
@@ -523,7 +535,7 @@ function purchaseItem(page: Page, status: PurchaseStatus): Html {
       color,
       fields: [
         ...entryFields(form ?? { values: { title: p.title, amount: amountText(p.amount) }, errors: {} }, d.symbol),
-        weekField(page, form?.week ? parseWeek(form.week, current) : p.week),
+        weekField(page, form?.week ? parseWeek(form.week, current, d.weekStart) : p.week),
       ],
       extraActions: purchaseActions(status).map((a) => ({ label: a.label, action: href(`/purchases/${p.id}/${a.action}`) })),
       deleteAction: href(`/purchases/${p.id}/delete`),
@@ -592,7 +604,7 @@ function wishItem({ d, href, here }: Page, wish: Wish, advice: Advice): Html {
   return entryRow({
     id: key,
     title: wish.title,
-    details: adviceText(advice, d.today, d.symbol),
+    details: adviceText(advice, d.current, d.symbol),
     icon: 'sparkles',
     color: toneColor('yellow'),
     amount: wish.amount,
@@ -726,13 +738,18 @@ function sentence(text: string): string {
 }
 
 export function weekSentence(w: WeekSummary, current: DateString, s: string): string {
+  const changed = w.limit === WEEK_LIMIT ? '' : ` ${sentence(`Бюджет этой недели изменён в настройках: ${money(w.limit, s)} вместо ${money(WEEK_LIMIT, s)}`)}`;
+  return `${weekFigures(w, current, s)}${changed}`;
+}
+
+function weekFigures(w: WeekSummary, current: DateString, s: string): string {
   if (w.week > current) {
-    if (w.planned === 0) return sentence(`Неделя впереди, в плане пока ничего: свободны все ${money(WEEK_LIMIT, s)}`);
+    if (w.planned === 0) return sentence(`Неделя впереди, в плане пока ничего: свободны все ${money(w.limit, s)}`);
     return w.free >= 0
-      ? sentence(`Неделя впереди: в плане ${money(w.planned, s)}, свободно ${money(w.free, s)} из ${money(WEEK_LIMIT, s)}`)
-      : sentence(`Неделя впереди: в плане ${money(w.planned, s)}, это на ${money(-w.free, s)} больше ${money(WEEK_LIMIT, s)}`);
+      ? sentence(`Неделя впереди: в плане ${money(w.planned, s)}, свободно ${money(w.free, s)} из ${money(w.limit, s)}`)
+      : sentence(`Неделя впереди: в плане ${money(w.planned, s)}, это на ${money(-w.free, s)} больше ${money(w.limit, s)}`);
   }
-  const spent = `потрачено ${money(w.spent, s)} из ${money(WEEK_LIMIT, s)}`;
+  const spent = `потрачено ${money(w.spent, s)} из ${money(w.limit, s)}`;
   if (w.week < current) return sentence(`За эту неделю ${spent}, ${w.free < 0 ? 'перерасход' : 'осталось'} ${money(Math.abs(w.free), s)}`);
   const plan = w.planned > 0 ? `, ещё ${money(w.planned, s)} ждут покупок из плана` : '';
   return w.free >= 0
@@ -741,7 +758,7 @@ export function weekSentence(w: WeekSummary, current: DateString, s: string): st
 }
 
 export function monthSentence(m: ExtrasSummary, weeks: WeekSummary[], current: DateString, s: string): string {
-  const limit = money(WEEK_LIMIT * weeks.length, s);
+  const limit = money(sum(weeks.map((w) => w.limit)), s);
   const extras = sentence(`В ${monthName(m.month, 'prepositional')} на дополнительные осталось ${money(m.free, s)} из ${money(MONTH_LIMIT, s)}`);
   if ((weeks[0]?.week ?? current) > current) {
     return `${extras} ${sentence(`По неделям запланировано ${money(sum(weeks.map((w) => w.planned)), s)} из ${limit}`)}`;
@@ -753,12 +770,13 @@ function sum(values: number[]): number {
   return values.reduce((total, v) => total + v, 0);
 }
 
-export function adviceText(advice: Advice, today: DateString, s: string): string {
+/** When to buy a wish; `current` is the first day of the current week. */
+export function adviceText(advice: Advice, current: DateString, s: string): string {
   switch (advice.when) {
     case 'now':
       return `Можно на этой неделе, останется ${money(advice.freeAfter, s)}`;
     case 'later': {
-      const when = advice.week === addDays(weekOf(today), 7) ? 'На следующей неделе' : `На неделе ${weekLabel(advice.week)}`;
+      const when = advice.week === addDays(current, 7) ? 'На следующей неделе' : `На неделе ${weekLabel(advice.week)}`;
       return advice.extrasNow ? `${when} или сейчас из дополнительных` : when;
     }
     case 'extras':

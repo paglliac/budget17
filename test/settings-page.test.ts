@@ -3,8 +3,7 @@ import { describe, it } from 'node:test';
 import { Settings } from '../src/settings.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { createHref } from '../src/web/pages/chrome.ts';
-import type { SavedMarking } from '../src/web/pages/marking.ts';
-import { loadSettingsPage, renderSettings, submitSettings } from '../src/web/pages/settings.ts';
+import { loadSettingsPage, renderSettings, submitBudget, submitSettings, type SavedSettings } from '../src/web/pages/settings.ts';
 import { account, RUB, tag, transaction, user } from './fixtures.ts';
 
 const today = '2026-10-06';
@@ -24,7 +23,7 @@ const data: EntityCollections = {
   ],
 };
 
-function saved(settings: Settings): SavedMarking {
+function saved(settings: Settings): SavedSettings {
   return {
     categorizations: settings.categorizations(),
     purchasePayments: new Map(),
@@ -32,6 +31,8 @@ function saved(settings: Settings): SavedMarking {
     purchases: [],
     marks: new Map(),
     categories: settings.categorySetup(),
+    weekStart: settings.weekStart(),
+    weekLimits: settings.weekLimits(),
   };
 }
 
@@ -48,7 +49,7 @@ describe('settings page', () => {
     const page = render(settings);
 
     assert.ok(page.includes('3 категории из ZenMoney и 1 своя, 1 скрыта.'));
-    const rows = [...page.matchAll(/<b>([^<]*)<\/b><small>([^<]*)<\/small>/g)].map((m) => `${m[1]}: ${m[2]}`);
+    const rows = [...page.slice(page.indexOf('aria-label="Категории"')).matchAll(/<b>([^<]*)<\/b><small>([^<]*)<\/small>/g)].map((m) => `${m[1]}: ${m[2]}`);
     assert.deepEqual(rows, [
       'Eating out: из ZenMoney · 2 траты за три месяца',
       'Продукты: в ZenMoney «Groceries» · 1 трата за три месяца',
@@ -70,6 +71,77 @@ describe('settings page', () => {
 
     const own = render(settings, { edit: kids.id });
     assert.ok(own.includes(`formaction="/categories/${kids.id}/delete"`));
+  });
+});
+
+describe('settings page budget', () => {
+  it('picks the day a week begins on in one click and lists the weeks with an amount of their own', () => {
+    using settings = new Settings(':memory:');
+    settings.setWeekStart(2);
+    settings.setWeekLimit('2026-09-30', 40_000);
+    settings.setWeekLimit('2026-10-14', 30_000);
+    const page = render(settings);
+
+    assert.ok(page.includes('Неделя начинается в среду: в этот день обновляются 45 000 ₽ на обычные траты.'));
+    const days = /aria-label="Неделя начинается".*?<\/div>/s.exec(page)?.[0] ?? '';
+    assert.ok(days.includes('aria-current="true"><svg') && /aria-current="true">.*?<span>Ср<\/span>/s.test(days), 'Wednesday is the current choice');
+    assert.ok(days.includes('action="/budget/week-start/0"') && !days.includes('action="/budget/week-start/2"'));
+    const rows = [...page.slice(page.indexOf('aria-label="Бюджет недель"')).matchAll(/<b>([^<]*)<\/b><small>([^<]*)<\/small>/g)].map((m) => `${m[1]}: ${m[2]}`);
+    assert.deepEqual(rows.slice(0, 3), [
+      'Неделя 30 сентября – 6 октября: идёт · вместо 45 000 ₽',
+      'Неделя 14–20 октября: впереди · вместо 45 000 ₽',
+      'Изменить бюджет недели: неделя и сумма',
+    ]);
+  });
+
+  it('opens a week to change its amount or give the usual back, and the form for another week', () => {
+    using settings = new Settings(':memory:');
+    settings.setWeekLimit('2026-10-12', 30_000);
+
+    const own = render(settings, { edit: 'week-2026-10-12' });
+    assert.ok(own.includes('action="/budget/weeks/2026-10-12"') && own.includes('value="30000"'));
+    assert.ok(own.includes('formaction="/budget/weeks/2026-10-12/delete">Вернуть 45 000 ₽'));
+
+    const another = render(settings, { edit: 'new-week' });
+    assert.ok(another.includes('action="/budget/weeks"'));
+    assert.ok(another.includes('<option value="2026-10-05" selected>Эта неделя</option>'), 'this week unless another is picked');
+
+    const invalid = render(settings, { weekForm: { week: '2026-10-19', new: true, amount: 'много', error: 'Сумма в рублях, например 13 000' } });
+    assert.ok(invalid.includes('<option value="2026-10-19" selected>') && invalid.includes('value="много"') && invalid.includes('Сумма в рублях, например 13 000'));
+  });
+});
+
+describe('submitBudget', () => {
+  const form = (fields: Record<string, string> = {}) => new URLSearchParams(fields);
+
+  it('sets the first day of a week and the amounts of weeks, and gives the usual back', () => {
+    using settings = new Settings(':memory:');
+
+    assert.deepEqual(submitBudget(settings, '/budget/weeks', form({ week: '2026-10-12', amount: '30 000' }), today), { status: 'saved' });
+    assert.deepEqual(submitBudget(settings, '/budget/weeks/2026-10-12', form({ amount: '25000' }), today), { status: 'saved' });
+    assert.deepEqual([...settings.weekLimits()], [['2026-10-12', 25_000]]);
+    assert.deepEqual(submitBudget(settings, '/budget/weeks/2026-10-12', form({ amount: '45 000' }), today), { status: 'saved' });
+    assert.deepEqual([...settings.weekLimits()], [], 'the usual amount is no amount of its own');
+
+    submitBudget(settings, '/budget/weeks', form({ week: '2026-10-19', amount: '20000' }), today);
+    assert.deepEqual(submitBudget(settings, '/budget/weeks/2026-10-19/delete', form(), today), { status: 'saved' });
+    assert.deepEqual([...settings.weekLimits()], []);
+
+    assert.deepEqual(submitBudget(settings, '/budget/week-start/4', form(), today), { status: 'saved' });
+    assert.equal(settings.weekStart(), 4);
+  });
+
+  it('returns the form with an error, and refuses a week without an amount of its own or a day that is not one', () => {
+    using settings = new Settings(':memory:');
+
+    assert.deepEqual(submitBudget(settings, '/budget/weeks', form({ week: '2026-10-13', amount: '30000' }), today), {
+      status: 'invalid',
+      form: { week: '2026-10-13', new: true, amount: '30000', error: 'Выберите неделю' },
+    });
+    assert.equal(submitBudget(settings, '/budget/weeks', form({ week: '2026-10-12', amount: '0' }), today).status, 'invalid');
+    assert.deepEqual(submitBudget(settings, '/budget/weeks/2026-10-12', form({ amount: '30000' }), today), { status: 'missing' });
+    assert.deepEqual(submitBudget(settings, '/budget/week-start/7', form(), today), { status: 'missing' });
+    assert.deepEqual([...settings.weekLimits()], []);
   });
 });
 

@@ -22,7 +22,7 @@ const data: EntityCollections = {
     transaction({ date: '2026-09-30', outcome: 999, payee: 'Сентябрь' }),
   ],
 };
-const sorting: SavedMarking = { categorizations: new Map(), purchasePayments: new Map(), regular: [], purchases: [], marks: new Map(), categories: NO_SETUP };
+const sorting: SavedMarking = { categorizations: new Map(), purchasePayments: new Map(), regular: [], purchases: [], marks: new Map(), categories: NO_SETUP, weekStart: 0 };
 const render = (options: Parameters<typeof loadOperations>[2]) => String(renderOperations(loadOperations(data, sorting, options), createHref()));
 
 describe('operations page', () => {

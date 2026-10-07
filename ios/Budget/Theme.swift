@@ -44,6 +44,13 @@ enum Dates {
         return (String(day), months[month - 1], String(pieces[0]))
     }
 
+    /// The letter of a date's day of the week, as the week strip heads its days: П for Monday.
+    static func weekdayLetter(_ text: String) -> String {
+        guard let date = date(text) else { return "" }
+        // The calendar counts Sunday as 1, Monday as 2.
+        return weekdays[(calendar.component(.weekday, from: date) + 5) % 7]
+    }
+
     /// The date `days` after a date.
     static func adding(_ days: Int, to text: String) -> String {
         guard let date = date(text), let moved = calendar.date(byAdding: .day, value: days, to: date) else { return text }

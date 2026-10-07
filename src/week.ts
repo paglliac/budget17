@@ -1,5 +1,6 @@
-// The budget by weeks: a limit for ordinary spending each week, a limit for extras each month, purchases planned
-// into weeks, and when a wish fits. Spending from ZenMoney counts towards its week unless it is marked as extras
+// The budget by weeks: a limit for ordinary spending each week, which the user can change for a week, a limit for
+// extras each month, purchases planned into weeks, and when a wish fits. A week begins on the day the user picked,
+// Monday unless they picked another. Spending from ZenMoney counts towards its week unless it is marked as extras
 // or as outside the budget, or it paid a regular expense or an extra purchase. Spending linked to a purchase takes
 // its amount out of the plan. Pure functions; what the user plans and marks is kept by src/settings.ts.
 
@@ -8,7 +9,7 @@ import type { Operation } from './ledger.ts';
 import { paidBy, paymentDate, type RegularExpense } from './regular.ts';
 import type { DateString } from './zenmoney/types.ts';
 
-/** Ordinary spending allowed in a week. */
+/** Ordinary spending allowed in a week, unless the user set another amount for it. */
 export const WEEK_LIMIT = 45_000;
 /** Extras allowed in a month. */
 export const MONTH_LIMIT = 100_000;
@@ -28,7 +29,7 @@ export interface Purchase {
   title: string;
   /** In the main currency, always positive. */
   amount: number;
-  /** Monday of the week it is planned for. */
+  /** First day of the week it is planned for. */
   week: DateString;
   envelope: 'week' | 'extra';
   /** Finished: it keeps what the expenses linked to it paid, and the rest of its amount goes back. */
@@ -46,6 +47,9 @@ export interface Wish {
 
 export type WishInput = Omit<Wish, 'id'>;
 
+/** The day of the week a week begins on, 0 for Monday to 6 for Sunday, as weekday() counts. */
+export type WeekStart = number;
+
 /** Everything the figures are made of. */
 export interface Budget {
   /** Expenses from ZenMoney. */
@@ -54,21 +58,35 @@ export interface Budget {
   /** Envelopes of spending moved out of its week, by operation id. */
   marks: ReadonlyMap<string, Envelope>;
   regular: RegularExpense[];
+  weekStart: WeekStart;
+  /** What the user allowed for a week instead of WEEK_LIMIT, by the week's first day. */
+  weekLimits: ReadonlyMap<DateString, number>;
 }
 
-/** Monday of the date's week. */
-export function weekOf(date: DateString): DateString {
-  return addDays(date, -weekday(date));
+/** The first day of the date's week. */
+export function weekOf(date: DateString, start: WeekStart): DateString {
+  return addDays(date, -((weekday(date) - start + 7) % 7));
 }
 
-/** A week belongs to the month that holds its Thursday, that is most of its days, so it counts in one month only. */
+/**
+ * A week belongs to the month that holds its fourth day, that is most of its days, so it counts in one month only:
+ * the Thursday of a week from Monday.
+ */
 export function monthOfWeek(week: DateString): MonthString {
   return monthOf(addDays(week, 3));
 }
 
-/** Mondays of the weeks that belong to a month. */
-export function weeksOfMonth(month: MonthString): DateString[] {
-  let week = weekOf(`${month}-01`);
+/**
+ * The week beginning on `start` that shares most days with a week that began on another day: where a purchase or a
+ * week's limit goes when the user picks another first day. A week that already begins on `start` stays.
+ */
+export function alignWeek(week: DateString, start: WeekStart): DateString {
+  return weekOf(addDays(week, 3), start);
+}
+
+/** First days of the weeks that belong to a month. */
+export function weeksOfMonth(month: MonthString, start: WeekStart): DateString[] {
+  let week = weekOf(`${month}-01`, start);
   if (monthOfWeek(week) !== month) week = addDays(week, 7);
   const weeks: DateString[] = [];
   for (; monthOfWeek(week) === month; week = addDays(week, 7)) weeks.push(week);
@@ -109,6 +127,8 @@ export function purchaseStatus(purchase: Purchase, expenses: readonly Operation[
 
 export interface WeekSummary {
   week: DateString;
+  /** Ordinary spending allowed in the week. */
+  limit: number;
   /** Spending of the week that counts towards its limit. */
   spent: number;
   /** What the plan still holds for purchases from the week's money. */
@@ -139,7 +159,13 @@ export function summarizeWeek(budget: Budget, week: DateString): WeekSummary {
       return [{ expense, date, paid: paidBy(expense, date, budget.expenses) }];
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
-  return { week, spent, planned, free: WEEK_LIMIT - spent - planned, spending, purchases, regular };
+  const limit = weekLimit(budget, week);
+  return { week, limit, spent, planned, free: limit - spent - planned, spending, purchases, regular };
+}
+
+/** What a week allows: the amount the user set for it, or WEEK_LIMIT. */
+export function weekLimit(budget: Pick<Budget, 'weekLimits'>, week: DateString): number {
+  return budget.weekLimits.get(week) ?? WEEK_LIMIT;
 }
 
 export interface ExtrasSummary {
@@ -154,7 +180,7 @@ export interface ExtrasSummary {
 }
 
 export function summarizeExtras(budget: Budget, month: MonthString): ExtrasSummary {
-  const spending = budget.expenses.filter((o) => envelopeOf(budget, o) === 'extra' && monthOfWeek(weekOf(o.date)) === month);
+  const spending = budget.expenses.filter((o) => envelopeOf(budget, o) === 'extra' && monthOfWeek(weekOf(o.date, budget.weekStart)) === month);
   const purchases = budget.purchases.filter((p) => p.envelope === 'extra' && monthOfWeek(p.week) === month).map((p) => purchaseStatus(p, budget.expenses));
   const spent = sum(spending.map((o) => o.amount));
   const planned = sum(purchases.map((p) => p.left));
@@ -173,7 +199,7 @@ export type Advice =
 
 /** The first of the next weeks with room for the wish, or this month's extras when no week has room. */
 export function adviseWish(budget: Budget, wish: Pick<Wish, 'amount'>, today: DateString): Advice {
-  const current = weekOf(today);
+  const current = weekOf(today, budget.weekStart);
   const extras = summarizeExtras(budget, monthOfWeek(current));
   for (let i = 0; i < WISH_HORIZON; i++) {
     const week = addDays(current, 7 * i);

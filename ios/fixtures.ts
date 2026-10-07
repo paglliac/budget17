@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Settings } from '../src/settings.ts';
 import {
+  budgetSettingsScreen,
   categoriesScreen,
   incomeScreen,
   monthScreen,
@@ -36,6 +37,7 @@ settings.addWish({ title: 'Укладка для волос', amount: 4_500 });
 settings.addIncome({ title: 'Зарплата', model: 'salary', params: { salary: 200_000, advanceDay: 20, payDay: 5 } });
 settings.addIncome({ title: 'Сдача квартиры', model: 'fixed', params: { amount: 30_000, day: 1 } });
 settings.addOwnCategory('Дети');
+settings.setWeekLimit('2026-10-12', 30_000);
 
 const saved = (): SavedBudget => ({
   categorizations: settings.categorizations(),
@@ -44,6 +46,8 @@ const saved = (): SavedBudget => ({
   purchases: settings.purchases(),
   marks: settings.spendingMarks(),
   categories: settings.categorySetup(),
+  weekStart: settings.weekStart(),
+  weekLimits: settings.weekLimits(),
   wishes: settings.wishes(),
 });
 const budget = { today, source: 'demo' as const, canSync: false };
@@ -66,6 +70,7 @@ const screens: Record<string, unknown> = {
   regular: regularScreen(data, saved(), { today }),
   income: incomeScreen(data, settings.incomes(), { today }),
   categories: categoriesScreen(data, saved(), { today }),
+  'budget-settings': budgetSettingsScreen(data, saved(), { today }),
   widget: widgetScreen(data, saved(), { today }),
 };
 for (const [name, screen] of Object.entries(screens)) writeFileSync(join(folder, `${name}.json`), JSON.stringify(screen, null, 2));

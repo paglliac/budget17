@@ -70,6 +70,32 @@ describe('Settings', () => {
     assert.deepEqual(settings.purchases().map((p) => p.title), ['Ласты']);
   });
 
+  it('begins weeks on Monday until another day is picked, and moves purchases and week amounts to the weeks that hold most of their days', () => {
+    using settings = new Settings(':memory:');
+    assert.equal(settings.weekStart(), 0);
+    const haircut = settings.addPurchase({ title: 'Стрижка', amount: 2_200, week: '2026-10-12', envelope: 'week', done: false });
+    settings.setWeekLimit('2026-10-12', 30_000);
+    settings.setWeekLimit('2026-10-19', 50_000);
+
+    settings.setWeekStart(4);
+    assert.equal(settings.weekStart(), 4);
+    assert.equal(settings.purchases().find((p) => p.id === haircut.id)?.week, '2026-10-09', 'Friday 9 – Thursday 15 October');
+    assert.deepEqual([...settings.weekLimits()], [['2026-10-09', 30_000], ['2026-10-16', 50_000]]);
+
+    settings.setWeekStart(0);
+    assert.equal(settings.purchases()[0]?.week, '2026-10-12', 'back where it was');
+    assert.deepEqual([...settings.weekLimits()], [['2026-10-12', 30_000], ['2026-10-19', 50_000]]);
+  });
+
+  it('sets what a week allows and gives the usual back', () => {
+    using settings = new Settings(':memory:');
+    settings.setWeekLimit('2026-10-12', 30_000);
+    settings.setWeekLimit('2026-10-12', 25_000);
+    assert.deepEqual([...settings.weekLimits()], [['2026-10-12', 25_000]]);
+    settings.setWeekLimit('2026-10-12', null);
+    assert.deepEqual([...settings.weekLimits()], []);
+  });
+
   it('turns a wish into a purchase of a week', () => {
     using settings = new Settings(':memory:');
 
@@ -203,6 +229,38 @@ describe('Settings', () => {
       }
       using settings = new Settings(path);
       assert.equal(settings.regularExpenses()[0]?.end, '2027-05-31', 'opening it again changes nothing');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('adds the first day of a week and the amounts of weeks to a file made before them, keeping its purchases', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
+    try {
+      const path = join(dir, 'settings.db');
+      {
+        using db = new DatabaseSync(path);
+        db.exec(`CREATE TABLE purchase (
+          id INTEGER PRIMARY KEY,
+          title TEXT NOT NULL,
+          amount REAL NOT NULL CHECK (amount > 0),
+          week TEXT NOT NULL,
+          envelope TEXT NOT NULL CHECK (envelope IN ('week', 'extra')),
+          done INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1))
+        ) STRICT`);
+        db.exec(`INSERT INTO purchase (title, amount, week, envelope) VALUES ('Стрижка', 2200, '2026-10-12', 'week')`);
+      }
+      {
+        using settings = new Settings(path);
+        assert.equal(settings.weekStart(), 0);
+        assert.deepEqual([...settings.weekLimits()], []);
+        settings.setWeekStart(2);
+        settings.setWeekLimit('2026-10-07', 30_000);
+      }
+      using settings = new Settings(path);
+      assert.equal(settings.weekStart(), 2);
+      assert.deepEqual([...settings.weekLimits()], [['2026-10-07', 30_000]]);
+      assert.equal(settings.purchases()[0]?.week, '2026-10-14', 'Wednesday 14 – Tuesday 20 October');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
