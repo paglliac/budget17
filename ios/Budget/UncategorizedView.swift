@@ -10,6 +10,7 @@ struct UncategorizedView: View {
     @State private var sheet: BudgetSheet?
     @State private var error: String?
     @State private var accepted = 0
+    @Environment(\.variant) private var variant
 
     var body: some View {
         Screen(path: "uncategorized", query: ["month": month]) { (s: UncategorizedScreen) in
@@ -44,7 +45,7 @@ struct UncategorizedView: View {
                     if s.pending.isEmpty { EmptyCard(text: s.empty) }
                     ForEach(s.pending, id: \.date) { day in
                         DayHeading(title: day.title, subtitle: day.subtitle)
-                        ForEach(day.items) { item in
+                        let cards = ForEach(day.items) { item in
                             // A tap on the card opens it; «Принять» is a button of its own inside the card.
                             Card(row: item.row, symbol: s.symbol) {
                                 if let suggestion = item.suggestion {
@@ -54,15 +55,17 @@ struct UncategorizedView: View {
                             .onTapGesture { sheet = .spending(item.spending) }
                             .accessibilityAddTraits(.isButton)
                         }
+                        if variant.tight { RowGroup { cards } } else { cards }
                     }
                 case .sorted:
                     if s.sorted.isEmpty { EmptyCard(text: "Пока ничего не разобрано.") }
                     ForEach(s.sorted, id: \.date) { day in
                         DayHeading(title: day.title, subtitle: day.subtitle)
-                        ForEach(day.items) { expense in
-                            Button { sheet = .spending(expense.spending) } label: { Card(row: expense.row, symbol: s.symbol) }
+                        let cards = ForEach(day.items) { expense in
+                            Button { sheet = .spending(expense.spending) } label: { Card(row: expense.row, symbol: s.symbol, detailsShown: false) }
                                 .buttonStyle(.plain)
                         }
+                        if variant.tight { RowGroup { cards } } else { cards }
                     }
                 }
             }

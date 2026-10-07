@@ -35,6 +35,7 @@ struct BudgetView: View {
 /// «Неделя» and «Месяц» as the header's title, the picked one large.
 struct ModeTabs: View {
     @Binding var mode: BudgetView.Mode
+    @Environment(\.variant) private var variant
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
@@ -46,7 +47,7 @@ struct ModeTabs: View {
     private func tab(_ title: String, _ value: BudgetView.Mode) -> some View {
         Button { withAnimation(.snappy) { mode = value } } label: {
             Text(title)
-                .font(mode == value ? .title2.weight(.bold) : .title3.weight(.medium))
+                .font(mode == value ? (variant.tight ? Font.title3 : .title2).weight(.bold) : (variant.tight ? Font.body : .title3).weight(.medium))
                 .foregroundStyle(mode == value ? Color.primary : Ink.muted)
         }
         .buttonStyle(.plain)
@@ -60,18 +61,26 @@ struct WeekStrip: View {
     let today: String
     /// Days that have spending, marked with a dot.
     let busy: Set<String>
+    /// Variant C: what each day spent from the week's money, in place of the dot.
+    var spent: [String: Double] = [:]
     @Binding var selected: String?
+    @Environment(\.variant) private var variant
 
     var body: some View {
         let days = (0..<7).map { Dates.adding($0, to: monday) }
         let thursday = Dates.parts(days[3])
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(thursday?.year ?? "").font(.caption).foregroundStyle(Ink.muted)
-                Text(thursday?.month ?? "").font(.title3.weight(.bold))
+            if variant.tight {
+                // The year goes without saying; the month only orients.
+                Text(thursday?.month ?? "").font(.subheadline.weight(.bold)).frame(width: 36, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(thursday?.year ?? "").font(.caption).foregroundStyle(Ink.muted)
+                    Text(thursday?.month ?? "").font(.title3.weight(.bold))
+                }
+                .frame(width: 52, alignment: .leading)
+                Rectangle().fill(Ink.hairline).frame(width: 1, height: 40).padding(.trailing, 4)
             }
-            .frame(width: 52, alignment: .leading)
-            Rectangle().fill(Ink.hairline).frame(width: 1, height: 40).padding(.trailing, 4)
             ForEach(Array(days.enumerated()), id: \.offset) { index, day in
                 dayButton(day, letter: Dates.weekdays[index])
             }
@@ -86,14 +95,23 @@ struct WeekStrip: View {
             guard !ahead else { return }
             withAnimation(.snappy) { selected = selected == day ? nil : day }
         } label: {
-            VStack(spacing: 5) {
+            VStack(spacing: variant.tight ? 3 : 5) {
                 Text(letter).font(.caption2.weight(.medium)).foregroundStyle(Ink.muted)
                 Text(Dates.parts(day)?.day ?? "")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(picked ? Ink.onStrong : ahead ? Ink.muted : Color.primary)
-                    .frame(width: 32, height: 32)
+                    .frame(width: variant.tight ? 30 : 32, height: variant.tight ? 30 : 32)
                     .background(picked ? Ink.strong : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                Circle().fill(busy.contains(day) ? Palette.week : .clear).frame(width: 4, height: 4)
+                if variant.essential {
+                    Text(spent[day].map { $0 >= 0.5 ? Money.number($0) : "" } ?? "")
+                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                        .foregroundStyle(Ink.muted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(height: 12)
+                } else if !variant.tight {
+                    Circle().fill(busy.contains(day) ? Palette.week : .clear).frame(width: 4, height: 4)
+                }
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
@@ -111,6 +129,7 @@ struct WeekView: View {
     @Binding var sheet: BudgetSheet?
     @Binding var add: AddRequest?
     @Environment(Session.self) private var session
+    @Environment(\.variant) private var variant
     @State private var part = Part.spending
     /// A day picked in the strip, whose spending alone shows.
     @State private var day: String?
@@ -130,12 +149,16 @@ struct WeekView: View {
                     )
                 }
             } summary: {
-                WeekStrip(monday: s.week, today: s.today, busy: Set(s.days.map(\.date)), selected: $day)
-                VStack(alignment: .leading, spacing: 10) {
+                WeekStrip(monday: s.week, today: s.today, busy: Set(s.days.map(\.date)), spent: weekSpent(s), selected: $day)
+                VStack(alignment: .leading, spacing: variant.tight ? 8 : 10) {
                     // In the current week the figure is what can still be spent, which goes without saying.
                     if s.phase != "current" { SummaryLabel(s.total.label) }
-                    BigAmount(amount: s.total.amount, symbol: s.symbol)
-                    SummaryBar(parts: s.total.parts ?? [])
+                    if variant.essential {
+                        SideSummary(total: s.total, symbol: s.symbol)
+                    } else {
+                        BigAmount(amount: s.total.amount, symbol: s.symbol)
+                        SummaryBar(parts: s.total.parts ?? [], total: s.total.amount)
+                    }
                 }
             } band: {
                 BandSwitch(items: parts(s), selection: Binding(get: { shown }, set: { part = $0 }))
@@ -159,8 +182,10 @@ struct WeekView: View {
     private func parts(_ s: WeekScreen) -> [BandItem<Part>] {
         if s.phase == "ahead" { return [BandItem(value: .plan, label: "План \(s.plan.count)")] }
         let count = s.days.reduce(0) { $0 + $1.items.count }
+        // Variant C: a count of nothing says nothing.
+        let wishes = s.wishes.map { variant.essential && $0.isEmpty ? "Хочу" : "Хочу \($0.count)" }
         return [BandItem(value: .spending, label: "Траты \(count)"), BandItem(value: .plan, label: "План \(s.plan.count)")]
-            + (s.wishes.map { [BandItem(value: .wishes, label: "Хочу \($0.count)")] } ?? [])
+            + (wishes.map { [BandItem(value: .wishes, label: $0)] } ?? [])
     }
 
     /// A week ahead has only its plan, and only the current week has wishes.
@@ -174,25 +199,74 @@ struct WeekView: View {
     private func spending(_ s: WeekScreen) -> some View {
         let days = s.days.filter { day == nil || $0.date == day }
         if days.isEmpty { EmptyCard(text: "Трат пока нет.") }
-        ForEach(days, id: \.date) { group in
-            DayHeading(title: group.title, subtitle: group.subtitle)
-            ForEach(group.items) { expense in
-                Button { sheet = .spending(expense.spending) } label: { Card(row: expense.row, symbol: s.symbol) }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier(expense.id)
+        if variant.tight {
+            // Variant C: what counts outside the budget asks for nothing here, so it folds under the days.
+            let outside = days.flatMap(\.items).filter { variant.essential && Self.outside($0.row) }
+            ForEach(days, id: \.date) { group in
+                let items = group.items.filter { !(variant.essential && Self.outside($0.row)) }
+                if !items.isEmpty {
+                    DayHeading(title: group.title, subtitle: group.subtitle)
+                    RowGroup { ForEach(items) { expense in expenseCard(expense, s) } }
+                }
+            }
+            if !outside.isEmpty {
+                FoldRow(title: "Вне бюджета", count: outside.count, amount: outside.reduce(0) { $0 + ($1.row.amount ?? 0) }, symbol: s.symbol) {
+                    ForEach(outside) { expense in expenseCard(expense, s) }
+                }
+            }
+        } else {
+            ForEach(days, id: \.date) { group in
+                DayHeading(title: group.title, subtitle: group.subtitle)
+                ForEach(group.items) { expense in expenseCard(expense, s) }
             }
         }
     }
 
+    private func expenseCard(_ expense: Expense, _ s: WeekScreen) -> some View {
+        // Variant C: the icon tells the category; only a missing one is spelled out, since it asks to be picked.
+        let missing = expense.row.details == "без категории"
+        return Button { sheet = .spending(expense.spending) } label: {
+            Card(row: expense.row, symbol: s.symbol, detailsShown: missing, attention: missing)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(expense.id)
+    }
+
+    static func outside(_ row: Row) -> Bool { row.mark == "outside" || row.mark == "ignored" }
+
+    /// What each day spent from the week's money, for the strip of variant C.
+    private func weekSpent(_ s: WeekScreen) -> [String: Double] {
+        Dictionary(uniqueKeysWithValues: s.days.map { day in
+            (day.date, day.items.filter { $0.row.mark == "week" }.reduce(0) { $0 + ($1.row.amount ?? 0) })
+        })
+    }
+
     @ViewBuilder
     private func plan(_ s: WeekScreen) -> some View {
-        ForEach(s.plan) { item in PlanCard(item: item, symbol: s.symbol, choices: s.weekChoices, sheet: $sheet, error: $error) }
-        AddCard(label: "Добавить в план") { sheet = .purchase(draft(s, envelope: "week")) }
+        if variant.essential {
+            // What is bought or paid asks for nothing more; it folds under what still waits.
+            let done = s.plan.filter(PlanCard.done)
+            let open = s.plan.filter { !PlanCard.done($0) }
+            if !open.isEmpty {
+                RowGroup { ForEach(open) { item in PlanCard(item: item, symbol: s.symbol, choices: s.weekChoices, sheet: $sheet, error: $error) } }
+            }
+            if !done.isEmpty {
+                FoldRow(title: "Готово", count: done.count, amount: done.reduce(0) { $0 + ($1.row.amount ?? 0) }, symbol: s.symbol) {
+                    ForEach(done) { item in PlanCard(item: item, symbol: s.symbol, choices: s.weekChoices, sheet: $sheet, error: $error) }
+                }
+            }
+        } else if variant.tight {
+            RowGroup { ForEach(s.plan) { item in PlanCard(item: item, symbol: s.symbol, choices: s.weekChoices, sheet: $sheet, error: $error) } }
+            AddCard(label: "Добавить в план") { sheet = .purchase(draft(s, envelope: "week")) }
+        } else {
+            ForEach(s.plan) { item in PlanCard(item: item, symbol: s.symbol, choices: s.weekChoices, sheet: $sheet, error: $error) }
+            AddCard(label: "Добавить в план") { sheet = .purchase(draft(s, envelope: "week")) }
+        }
     }
 
     @ViewBuilder
     private func wishes(_ s: WeekScreen) -> some View {
-        ForEach(s.wishes ?? []) { item in
+        let cards = ForEach(s.wishes ?? []) { item in
             Card(row: item.row, symbol: s.symbol) {
                 if item.plannable {
                     CardAction(label: "Запланировать") { run { try await session.send("wishes/\(item.wish.id)/plan") } }
@@ -201,7 +275,9 @@ struct WeekView: View {
             .onTapGesture { sheet = .wish(item) }
             .accessibilityAddTraits(.isButton)
         }
-        AddCard(label: "Добавить желание") { sheet = .wish(nil) }
+        if variant.tight, !(s.wishes ?? []).isEmpty { RowGroup { cards } } else { cards }
+        // Variant C: the round «+» adds a wish already.
+        if !variant.essential || (s.wishes ?? []).isEmpty { AddCard(label: "Добавить желание") { sheet = .wish(nil) } }
     }
 
     /// A purchase for this week, or for the current one when this one is over.
@@ -227,6 +303,9 @@ struct WeekView: View {
 
 /// A card of a plan: a purchase opens its form and finishes from its menu; a regular payment opens the regular expense.
 struct PlanCard: View {
+    /// Bought, finished or paid: nothing left to do about it this week.
+    static func done(_ item: PlanItem) -> Bool { item.row.muted || item.row.icon == "check" }
+
     let item: PlanItem
     let symbol: String
     let choices: [OptionGroup]
@@ -242,7 +321,8 @@ struct PlanCard: View {
                 sheet = .regular(regular)
             }
         } label: {
-            Card(row: item.row, symbol: symbol)
+            // Variant C: «ждёт покупки» is what every purchase in the plan does; only news is spelled out.
+            Card(row: item.row, symbol: symbol, detailsShown: !["ждёт покупки", "в плане"].contains(item.row.details))
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -267,6 +347,7 @@ struct MonthView: View {
     let openWeek: (String) -> Void
     @State private var part = Part.weeks
     @State private var error: String?
+    @Environment(\.variant) private var variant
 
     var body: some View {
         Screen(path: "month", query: ["month": month]) { (s: MonthScreen) in
@@ -282,10 +363,14 @@ struct MonthView: View {
                 }
             } summary: {
                 MonthStrip(screen: s, openWeek: openWeek)
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: variant.tight ? 8 : 10) {
                     SummaryLabel(s.total.label)
-                    BigAmount(amount: s.total.amount, symbol: s.symbol)
-                    SummaryBar(parts: s.total.parts ?? [])
+                    if variant.essential {
+                        SideSummary(total: s.total, symbol: s.symbol)
+                    } else {
+                        BigAmount(amount: s.total.amount, symbol: s.symbol)
+                        SummaryBar(parts: s.total.parts ?? [], total: s.total.amount)
+                    }
                 }
             } band: {
                 BandSwitch(
@@ -298,20 +383,23 @@ struct MonthView: View {
             } content: {
                 switch part {
                 case .weeks:
-                    ForEach(s.weeks) { line in
+                    let weeks = ForEach(s.weeks) { line in
                         Button { openWeek(line.week) } label: { Card(row: line.row, symbol: s.symbol) }
                             .buttonStyle(.plain)
                     }
+                    if variant.tight { RowGroup { weeks } } else { weeks }
                 case .extras:
-                    ForEach(s.purchases) { item in PlanCard(item: item, symbol: s.symbol, choices: s.weekChoices, sheet: $sheet, error: $error) }
+                    let purchases = ForEach(s.purchases) { item in PlanCard(item: item, symbol: s.symbol, choices: s.weekChoices, sheet: $sheet, error: $error) }
+                    if variant.tight { if !s.purchases.isEmpty { RowGroup { purchases } } } else { purchases }
                     ForEach(s.spending, id: \.date) { group in
                         DayHeading(title: group.title, subtitle: group.subtitle)
-                        ForEach(group.items) { expense in
-                            Button { sheet = .spending(expense.spending) } label: { Card(row: expense.row, symbol: s.symbol) }
+                        let cards = ForEach(group.items) { expense in
+                            Button { sheet = .spending(expense.spending) } label: { Card(row: expense.row, symbol: s.symbol, detailsShown: expense.row.details == "без категории", attention: expense.row.details == "без категории") }
                                 .buttonStyle(.plain)
                         }
+                        if variant.tight { RowGroup { cards } } else { cards }
                     }
-                    AddCard(label: "Добавить в дополнительные") { sheet = .purchase(draft(s, envelope: "extra")) }
+                    if !variant.essential { AddCard(label: "Добавить в дополнительные") { sheet = .purchase(draft(s, envelope: "extra")) } }
                 }
             }
             .onChange(of: add) { _, request in
@@ -335,16 +423,21 @@ struct MonthView: View {
 struct MonthStrip: View {
     let screen: MonthScreen
     let openWeek: (String) -> Void
+    @Environment(\.variant) private var variant
 
     var body: some View {
         let parts = Dates.parts("\(screen.month)-01")
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(parts?.year ?? "").font(.caption).foregroundStyle(Ink.muted)
-                Text(parts?.month ?? "").font(.title3.weight(.bold))
+            if variant.tight {
+                Text(parts?.month ?? "").font(.subheadline.weight(.bold)).frame(width: 36, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(parts?.year ?? "").font(.caption).foregroundStyle(Ink.muted)
+                    Text(parts?.month ?? "").font(.title3.weight(.bold))
+                }
+                .frame(width: 52, alignment: .leading)
+                Rectangle().fill(Ink.hairline).frame(width: 1, height: 40).padding(.trailing, 4)
             }
-            .frame(width: 52, alignment: .leading)
-            Rectangle().fill(Ink.hairline).frame(width: 1, height: 40).padding(.trailing, 4)
             ForEach(screen.weeks) { line in
                 Button { openWeek(line.week) } label: {
                     VStack(spacing: 5) {
@@ -353,7 +446,7 @@ struct MonthStrip: View {
                             .font(.footnote.weight(.semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
-                            .frame(height: 32)
+                            .frame(height: variant.tight ? 28 : 32)
                         Circle().fill(Palette.color(line.row.color)).frame(width: 4, height: 4)
                     }
                     .frame(maxWidth: .infinity)

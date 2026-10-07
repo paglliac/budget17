@@ -6,6 +6,7 @@ struct RegularPanel: View {
     let frame: MoreFrame
     @State private var editing: RegularItem?
     @State private var adding = false
+    @Environment(\.variant) private var variant
 
     var body: some View {
         Screen(path: "regular") { (s: RegularScreen) in
@@ -16,17 +17,34 @@ struct RegularPanel: View {
                     SummaryLabel(s.total.label)
                     BigAmount(amount: s.total.amount, symbol: s.symbol)
                     Text(s.total.note).font(.footnote).foregroundStyle(Ink.muted)
-                    if let parts = s.total.parts, !parts.isEmpty { SummaryBar(parts: parts) }
+                    if let parts = s.total.parts, !parts.isEmpty { SummaryBar(parts: parts, total: s.total.amount) }
                 }
             } band: {
                 frame.band
             } content: {
-                ForEach(s.behind) { item in card(item, s.symbol) }
-                if !s.behind.isEmpty && !s.ahead.isEmpty { TodayLine(text: s.today) }
-                ForEach(s.ahead) { item in card(item, s.symbol) }
-                if !s.later.isEmpty {
-                    SheetLabel(text: "Начнутся позже")
-                    ForEach(s.later) { item in card(item, s.symbol) }
+                if variant.tight {
+                    // Variant C: what has gone by this month asks for nothing; it folds over what is ahead.
+                    if variant.essential, !s.behind.isEmpty {
+                        FoldRow(title: "Прошли", count: s.behind.count, amount: s.behind.reduce(0) { $0 + ($1.row.amount ?? 0) }, symbol: s.symbol) {
+                            ForEach(s.behind) { item in card(item, s.symbol) }
+                        }
+                    } else if !s.behind.isEmpty {
+                        RowGroup { ForEach(s.behind) { item in card(item, s.symbol) } }
+                    }
+                    if !s.behind.isEmpty && !s.ahead.isEmpty { TodayLine(text: s.today) }
+                    if !s.ahead.isEmpty { RowGroup { ForEach(s.ahead) { item in card(item, s.symbol) } } }
+                    if !s.later.isEmpty {
+                        SheetLabel(text: "Начнутся позже")
+                        RowGroup { ForEach(s.later) { item in card(item, s.symbol) } }
+                    }
+                } else {
+                    ForEach(s.behind) { item in card(item, s.symbol) }
+                    if !s.behind.isEmpty && !s.ahead.isEmpty { TodayLine(text: s.today) }
+                    ForEach(s.ahead) { item in card(item, s.symbol) }
+                    if !s.later.isEmpty {
+                        SheetLabel(text: "Начнутся позже")
+                        ForEach(s.later) { item in card(item, s.symbol) }
+                    }
                 }
                 AddCard(label: "Добавить регулярную трату") { adding = true }
             }

@@ -15,6 +15,8 @@ final class ScreensTests: XCTestCase {
         folder = environment["SCREENSHOTS"].map { URL(fileURLWithPath: $0) }
         app = XCUIApplication()
         app.launchArguments = ["-server", environment["SERVER"] ?? "http://localhost:4318"]
+        // Prototype: the look to walk, A, B or C.
+        if let variant = environment["VARIANT"] { app.launchArguments += ["-variant", variant] }
         app.launch()
     }
 
@@ -45,9 +47,16 @@ final class ScreensTests: XCTestCase {
         pill("Хочу").tap()
         shot("week-wishes")
 
-        app.descendants(matching: .any)["Развернуть список"].firstMatch.tap()
-        shot("week-expanded")
-        app.descendants(matching: .any)["Показать сводку"].firstMatch.tap()
+        // Prototype: variants B and C drag the sheet by the band, with no grabber to tap.
+        let grabber = app.descendants(matching: .any)["Развернуть список"].firstMatch
+        if grabber.exists {
+            grabber.tap()
+            shot("week-expanded")
+            app.descendants(matching: .any)["Показать сводку"].firstMatch.tap()
+        }
+        pill("Траты").tap()
+        app.swipeUp()
+        shot("week-bottom")
 
         app.buttons["Месяц"].tap()
         sleep(2)

@@ -11,6 +11,7 @@ struct OperationsView: View {
     @State private var showCategories = false
     @State private var sheet: BudgetSheet?
     @FocusState private var searchFocused: Bool
+    @Environment(\.variant) private var variant
 
     var body: some View {
         Screen(path: "operations", query: ["month": month, "kind": kind, "category": category, "q": query]) { (s: OperationsScreen) in
@@ -89,11 +90,12 @@ struct OperationsView: View {
                 if s.days.isEmpty { EmptyCard(text: s.empty) }
                 ForEach(s.days) { day in
                     DayHeading(title: day.title, subtitle: day.subtitle, total: abs(day.net) >= 0.5 ? Money.text(day.net, s.symbol, sign: true) : nil)
-                    ForEach(day.items) { operation in
+                    let cards = ForEach(day.items) { operation in
                         OperationCard(operation: operation, symbol: s.symbol) {
                             if let id = operation.spending { sheet = .spending(id) }
                         }
                     }
+                    if variant.tight { RowGroup { cards } } else { cards }
                 }
             }
             .sheet(isPresented: $showCategories) {
@@ -112,6 +114,7 @@ struct OperationCard: View {
     let operation: OperationRow
     let symbol: String
     let open: () -> Void
+    @Environment(\.variant) private var variant
 
     var body: some View {
         let row = operation.kind == "expense" ? operation.row.with(amount: -(operation.row.amount ?? 0)) : operation.row
@@ -123,7 +126,8 @@ struct OperationCard: View {
                 signed: operation.kind != "transfer",
                 amountColor: operation.kind == "income" ? Palette.color("green") : .primary
             ) {
-                if !notes.isEmpty {
+                // Variant C: what else the bank said is on the expense's sheet.
+                if !notes.isEmpty && !variant.essential {
                     Text(notes.joined(separator: " · ")).font(.caption).foregroundStyle(Ink.muted).lineLimit(2)
                 }
             }

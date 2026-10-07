@@ -22,6 +22,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var tab = Tab.budget
     @State private var add: AddRequest?
+    @State private var variant = Variant.launch
 
     var body: some View {
         if session.server == nil {
@@ -39,6 +40,10 @@ struct RootView: View {
                     add = request
                 }
             }
+            .overlay(alignment: .bottom) {
+                VariantSwitch(variant: $variant).padding(.bottom, 96)
+            }
+            .environment(\.variant, variant)
             // The tab bar stays at the bottom under the keyboard, as when searching operations.
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .task(id: session.version) { await session.refreshPending() }
@@ -64,6 +69,7 @@ struct TabBar: View {
     @Binding var tab: Tab
     let pending: Int
     let add: (AddRequest) -> Void
+    @Environment(\.variant) private var variant
 
     var body: some View {
         HStack(alignment: .center, spacing: 0) {
@@ -77,7 +83,7 @@ struct TabBar: View {
                 Image(systemName: "plus")
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 54, height: 54)
+                    .frame(width: variant.tight ? 48 : 54, height: variant.tight ? 48 : 54)
                     .background(Ink.band, in: Circle())
                     .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
             }
@@ -86,8 +92,8 @@ struct TabBar: View {
             item(.sort, "tag", "Разобрать", badge: pending)
             item(.more, "ellipsis", "Ещё")
         }
-        .padding(.top, 8)
-        .padding(.bottom, 2)
+        .padding(.top, variant.tight ? 4 : 8)
+        .padding(.bottom, variant.tight ? 0 : 2)
         .background(Ink.surface.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) { Rectangle().fill(Ink.hairline).frame(height: 0.5) }
     }
