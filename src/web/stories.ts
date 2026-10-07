@@ -476,7 +476,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
 
   doc(entryRow, {
     group: 'Настройка',
-    description: 'Запись, которую настраивают: что, когда и сколько. Строка открывает её для правки, кнопки рядом делают частое действие сразу; кнопка-значок видна при наведении.',
+    description: 'Запись, которую настраивают: что, когда и сколько. Строка открывает её для правки, кнопки рядом делают частое действие сразу; кнопка-значок видна при наведении. Точка перед суммой говорит, где сумма считается: жёлтая — в неделе, фиолетовая — в дополнительных, пустое кольцо — вне бюджета.',
   }, [
     {
       name: 'Регулярная трата',
@@ -512,10 +512,11 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       width: 520,
       props: {
         id: 'spending-1',
-        title: 'Пятёрочка',
-        details: '5 октября, Основной · в неделе',
+        title: 'Продукты',
+        details: '5 октября, Основной · Пятёрочка',
         icon: 'cart',
         color: '#4FAE7F',
+        mark: { label: 'В неделе', tone: 'yellow' },
         amount: 473,
         symbol: '₽',
         href: '#',
@@ -530,6 +531,20 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       },
     },
     {
+      name: 'С отметкой, где считается',
+      width: 360,
+      props: {
+        title: 'Коммуналка Московский 18к5',
+        details: '5 октября, Основной · prostoplatSBP',
+        icon: 'repeat',
+        color: 'var(--orange)',
+        mark: { label: 'Вне бюджета' },
+        amount: 8_309,
+        symbol: '₽',
+        href: '#',
+      },
+    },
+    {
       name: 'Без суммы',
       width: 520,
       props: { title: 'Продукты', details: 'в ZenMoney «Groceries» · 200 трат за 3 месяца', icon: 'cart', color: '#4FAE7F', href: '#' },
@@ -539,7 +554,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       width: 520,
       props: {
         title: 'Александр А.',
-        details: '5 октября, Запас · в неделе',
+        details: '5 октября, Запас · без категории',
         icon: 'tag',
         color: 'var(--gray)',
         amount: 40_000,

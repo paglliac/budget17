@@ -58,7 +58,8 @@ describe('uncategorized page', () => {
     assert.ok(page.includes('&lt;b&gt;Лавка&lt;/b&gt;') && !page.includes('<b>Лавка</b>'));
     assert.ok(page.includes('href="/uncategorized?edit=spending-shop"'));
     assert.ok(!page.includes('Пятёрочка') && !page.includes('Алишер'), 'tagged ones and other months are not here');
-    assert.ok(page.includes('Разобрано') && page.includes('1 октября, Основной · Продукты · в неделе'));
+    assert.ok(page.includes('Разобрано') && page.includes('<b>Марина Б.</b><small>1 октября, Основной · Продукты</small>'));
+    assert.ok(/id="spending-sorted".*?title="В неделе"/s.test(page));
   });
 
   it('opens an expense in place to mark it, with the suggestion marked and the most popular categories first', () => {
@@ -92,7 +93,7 @@ describe('uncategorized page', () => {
     const page = render({ today }, saved({ purchasePayments: new Map([['kiosk', 5]]) }));
 
     assert.ok(page.includes('В октябре 2 траты из 5 без категории'));
-    assert.ok(page.includes('3 октября, Основной · покупка «Ласты» · в неделе'));
+    assert.ok(page.includes('<b>Ласты</b><small>3 октября, Основной · Киоск 12</small>'), 'titled by the purchase, with the payee under it');
   });
 
   it('shows another month and says when nothing is left', () => {

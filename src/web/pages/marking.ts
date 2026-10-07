@@ -15,7 +15,7 @@ import { envelopeOf, purchaseStatus, weekOf, type Envelope, type Purchase } from
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { dayMonth, money, timeOn, weekLabel } from '../format.ts';
 import type { Html } from '../html.ts';
-import { categoryColor } from '../tones.ts';
+import { categoryColor, type Tone } from '../tones.ts';
 import { choiceGroup, factList } from '../widgets/basics.ts';
 import type { Href } from './chrome.ts';
 
@@ -124,14 +124,31 @@ const LIST_WEEKS_BEFORE = 4;
 /** …to this many after it. */
 const LIST_WEEKS_AFTER = 13;
 
-const ENVELOPE_NAME: Record<Envelope, string> = { week: 'в неделе', extra: 'дополнительные', outside: 'вне бюджета', ignored: 'не учитывается' };
 const ENVELOPE_CHOICE: Record<Envelope, string> = { week: 'Неделя', extra: 'Дополнительные', outside: 'Вне бюджета', ignored: 'Не учитывать' };
+/** Where an expense counts, as a dot before its amount: yellow as what the week spent, violet as the extras. */
+const ENVELOPE_MARK: Record<Envelope, { label: string; tone?: Tone }> = {
+  week: { label: 'В неделе', tone: 'yellow' },
+  extra: { label: 'Дополнительные', tone: 'violet' },
+  outside: { label: 'Вне бюджета' },
+  ignored: { label: 'Не учитывается' },
+};
 
-/** What an expense is marked as, for its row: what it paid, its category, and where it counts. */
-export function markingDetails(m: Pick<Marking, 'marks' | 'purchases'>, o: Operation): string {
+/** What an expense's row is titled: what it paid, which tells more than who it went to, when it is linked. */
+export function markingTitle(o: Operation): string {
+  return o.regular?.title ?? o.purchase?.title ?? o.payee;
+}
+
+/** What an expense is marked as, for its row under markingTitle: who it went to when it is linked, and its category. */
+export function markingDetails(o: Operation): string {
   const category = o.category && o.category.id !== REGULAR_CATEGORY.id && o.category.id !== PURCHASE_CATEGORY.id ? o.category.title : null;
-  const what = o.regular ? [`регулярная «${o.regular.title}»`] : o.purchase ? [`покупка «${o.purchase.title}»`, category] : [category ?? 'без категории'];
-  return [...what, ENVELOPE_NAME[envelopeOf(m, o)]].filter(Boolean).join(' · ');
+  if (o.regular) return o.payee;
+  if (o.purchase) return [o.payee, category?.toLowerCase() === o.purchase.title.toLowerCase() ? null : category].filter(Boolean).join(' · ');
+  return category ?? 'без категории';
+}
+
+/** Where an expense counts, for the mark on its row. */
+export function envelopeMark(m: Pick<Marking, 'marks' | 'purchases'>, o: Operation): { label: string; tone?: Tone } {
+  return ENVELOPE_MARK[envelopeOf(m, o)];
 }
 
 /** What an open expense shows under its row. */

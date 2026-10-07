@@ -58,6 +58,36 @@ describe('dashboard', () => {
     assert.ok(!page.includes('Дарья Ч.'), 'last week’s spending is not this week’s');
     assert.ok(page.includes('action="/sync"'));
     assert.ok(page.includes('href="/?view=month"'));
+    assert.ok(!page.includes('Траты из ZenMoney') && !page.includes('Траты идут в неделю'), 'no notes under the spending');
+  });
+
+  it('marks where each expense counts with a dot before its amount instead of words', () => {
+    const page = render({}, saved([['transfer', 'outside']]));
+    const row = (id: string) => new RegExp(`id="spending-${id}".*?</li>`, 's').exec(page)?.[0] ?? '';
+
+    assert.ok(row('groceries').includes('class="entry-mark" style="--tone:var(--yellow)" role="img" title="В неделе"'));
+    assert.ok(row('transfer').includes('class="entry-mark ring" role="img" title="Вне бюджета"'));
+    assert.ok(!page.includes('· в неделе') && !page.includes('· вне бюджета</small>'));
+
+    const extras = render({ view: 'month' }, saved([['last-week', 'extra']]));
+    assert.ok(/id="spending-last-week".*?title="Дополнительные"/s.test(extras));
+    assert.ok(!extras.includes('Сюда попадают'));
+  });
+
+  it('keeps the category of an expense that paid a purchase, unless the purchase is named the same', () => {
+    const groceries = tag({ id: 'groceries', title: 'Продукты' });
+    const collections = { ...data(), tag: [groceries], transaction: data().transaction!.map((t) => (t.id === 'groceries' ? { ...t, tag: [groceries.id] } : t)) };
+    const page = (title: string) => {
+      const budget = { ...saved(), purchases: [{ id: 4, title, amount: 3_000, week: '2026-10-05', envelope: 'week' as const, done: false }], purchasePayments: new Map([['groceries', 4]]) };
+      return String(renderDashboard(loadDashboard(collections, budget, options), createHref())).replaceAll('\u00a0', ' ');
+    };
+
+    assert.ok(page('Продукты').includes('<b>Продукты</b><small>5 октября, Основной · &lt;b&gt;Пятёрочка&lt;/b&gt;</small>'));
+    assert.ok(page('Ужин').includes('<b>Ужин</b><small>5 октября, Основной · &lt;b&gt;Пятёрочка&lt;/b&gt; · Продукты</small>'));
+  });
+
+  it('says the data is a demo under the side', () => {
+    assert.ok(render({ source: 'demo' }).includes('Демо-данные.'));
   });
 
   it('leaves out spending not counted at all, from the list and the figures', () => {
@@ -93,7 +123,8 @@ describe('dashboard', () => {
     const page = render({ edit: 'spending-transfer' }, { ...saved(), categorizations: new Map([['transfer', { regular: 7 }]]) });
 
     assert.ok(page.includes('Можно потратить ещё 36 527 ₽.'));
-    assert.ok(page.includes('5 октября, Основной · регулярная «Школа, ЛДК» · вне бюджета'));
+    assert.ok(page.includes('<b>Школа, ЛДК</b><small>5 октября, Основной · Александр А.</small>'), 'titled by what it paid, with the payee under it');
+    assert.ok(/id="spending-transfer".*?title="Вне бюджета"/s.test(page));
     assert.ok(page.includes('action="/spending/transfer/extra"'));
     assert.ok(!page.includes('action="/spending/transfer/week"') && !page.includes('action="/spending/transfer/outside"'));
     assert.ok(page.includes('action="/spending/transfer/unlink"'));
@@ -133,7 +164,8 @@ describe('dashboard', () => {
     const partly = render({}, linked([['groceries', 1]]));
     assert.equal(purchaseOf(partly, 'Ботинки Савве'), 'оплачено 473 ₽ из 8 000 ₽ · обычные');
     assert.ok(partly.includes('ещё 7 527 ₽ ждут покупок из плана'));
-    assert.ok(partly.includes('5 октября, Основной · покупка «Ботинки Савве» · в неделе'));
+    assert.ok(partly.includes('<b>Ботинки Савве</b><small>5 октября, Основной · &lt;b&gt;Пятёрочка&lt;/b&gt;</small>'));
+    assert.ok(/id="spending-groceries".*?title="В неделе"/s.test(partly));
 
     const paid = render({}, linked([['transfer', 1]]));
     assert.equal(purchaseOf(paid, 'Ботинки Савве'), 'куплено 5 октября, на 32 000 ₽ больше плана · обычные');

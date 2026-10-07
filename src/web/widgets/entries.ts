@@ -5,6 +5,7 @@
 import { money } from '../format.ts';
 import { html, type Content, type Html } from '../html.ts';
 import { icon, type IconName } from '../icons.ts';
+import { toneColor, type Tone } from '../tones.ts';
 import { button } from './basics.ts';
 
 /** Entries one under another: rows and form rows in the given order. */
@@ -18,6 +19,7 @@ export function entryList(options: { label: string; items: Html[] }): Html {
  * pencil, before the amount, and shows only while the pointer is over the row; touch screens have no pointer, so
  * there it is left out, and the entry's form should offer the same action.
  * With `panel` the entry is open: the panel shows under the row, and the row's link closes it.
+ * `mark` is a dot before the amount telling where it goes, such as into the week; it is named on hover.
  */
 export function entryRow(options: {
   /** Keeps the entry in place on the screen when the page comes back, and names it in links. */
@@ -36,6 +38,8 @@ export function entryRow(options: {
   muted?: boolean;
   /** What the open entry shows under its row, such as choices to make. */
   panel?: Content;
+  /** Without a tone the dot is an empty ring, for an amount that goes nowhere in particular. */
+  mark?: { label: string; tone?: Tone };
 }): Html {
   const open = options.panel !== undefined;
   const actions = options.actions ?? [];
@@ -60,6 +64,11 @@ export function entryRow(options: {
               14,
             )}</button></form>`,
         )}
+        ${options.mark
+          ? html`<span class="entry-mark${options.mark.tone ? '' : ' ring'}"${
+              options.mark.tone ? html` style="--tone:${toneColor(options.mark.tone)}"` : null
+            } role="img" title="${options.mark.label}" aria-label="${options.mark.label}"></span>`
+          : null}
         ${options.amount === undefined ? null : html`<b class="entry-amount">${money(options.amount, options.symbol ?? '')}</b>`}
         ${options.href ? html`<span class="entry-edit">${icon(open ? 'x' : 'pencil', 14)}</span>` : null}
       </div>

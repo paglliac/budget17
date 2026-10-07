@@ -38,7 +38,7 @@ import { button, emptyState, field, footnote, pageIntro, section, segmentedLinks
 import { entryForm, entryList, entryRow } from '../widgets/entries.ts';
 import { appShell, tabs, topBar } from '../widgets/shell.ts';
 import { appRail, userName, type Href } from './chrome.ts';
-import { allExpenses, loadMarking, markingActions, markingDetails, markingPanel, type Marking, type SavedMarking } from './marking.ts';
+import { allExpenses, envelopeMark, loadMarking, markingActions, markingDetails, markingPanel, markingTitle, type Marking, type SavedMarking } from './marking.ts';
 
 /** How many weeks ahead a week can be opened and planned. */
 const PLAN_AHEAD = 52;
@@ -261,12 +261,7 @@ export function renderDashboard(d: DashboardData, href: Href): Html {
       ],
     }),
     main,
-    side: [
-      ...side,
-      footnote({
-        text: d.source === 'demo' ? 'Демо-данные. Чтобы увидеть свои, добавьте токен в .env и запустите make sync.' : 'Траты из ZenMoney.',
-      }),
-    ],
+    side: [...side, ...(d.source === 'demo' ? [footnote({ text: 'Демо-данные. Чтобы увидеть свои, добавьте токен в .env и запустите make sync.' })] : [])],
   });
   return pageDocument({ title: 'Бюджет', body });
 }
@@ -326,10 +321,7 @@ function spentSide(page: Page, w: WeekSummary): Html[] {
     topBar({ crumbs: [{ label: 'Траты недели' }] }),
     ...(w.spending.length === 0
       ? [emptyState({ text: 'Трат пока нет.' })]
-      : [
-          entryList({ label: 'Траты недели', items: w.spending.map((o) => spendingItem(page, o)) }),
-          footnote({ text: 'Траты идут в неделю. Откройте трату, чтобы привязать её к покупке или платежу, выбрать категорию или отнести к дополнительным.' }),
-        ]),
+      : [entryList({ label: 'Траты недели', items: w.spending.map((o) => spendingItem(page, o)) })]),
   ];
 }
 
@@ -401,7 +393,6 @@ function monthView(page: Page): { main: Html[]; side: Html[] } {
           { label: 'Свободно', value: m.free, color: toneColor('gray') },
         ],
       }),
-      footnote({ text: 'Сюда попадают покупки, отмеченные как дополнительные, и траты, перенесённые из недели.' }),
     ],
   };
 }
@@ -556,10 +547,11 @@ function spendingItem({ d, href, here }: Page, o: Operation): Html {
   const open = d.edit === key;
   return entryRow({
     id: key,
-    title: o.payee,
-    details: `${dayMonth(o.date)}, ${o.account} · ${markingDetails(d.marking, o)}`,
+    title: markingTitle(o),
+    details: `${dayMonth(o.date)}, ${o.account} · ${markingDetails(o)}`,
     icon: o.category ? categoryIcon(o.category.title) : 'tag',
     color: categoryColor(o.category?.id ?? null, o.category?.color ?? null),
+    mark: envelopeMark(d.marking, o),
     amount: o.amount,
     symbol: d.symbol,
     href: open ? here() : here({ edit: key }),
