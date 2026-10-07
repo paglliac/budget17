@@ -4,6 +4,8 @@
 // Built from widgets only. Entries open by ?edit=purchase-1, wish-1 or spending-<ZenMoney id>; an open expense is
 // marked as on every page (see marking.ts). Forms post to /purchases and /wishes (see submitDashboard) and to
 // /spending (see submitMarking), and the server sends the browser back to the page they came from.
+// PROTOTYPE: how the week's spending reads, switched by ?variant=A|B|C and the floating bar: A by days on the side,
+// B as a list under the plan, C by days under the plan.
 
 import { summarizeBalances } from '../../balances.ts';
 import { addDays, shiftMonth, type MonthString } from '../../dates.ts';
@@ -30,13 +32,14 @@ import {
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { capitalize, dayMonth, money, monthName, weekLabel } from '../format.ts';
-import type { Html } from '../html.ts';
+import { Html } from '../html.ts';
 import { categoryIcon, entryIcon } from '../icons.ts';
 import { categoryColor, toneColor } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
 import { button, emptyState, field, footnote, pageIntro, section, segmentedLinks, selectField, shareBar } from '../widgets/basics.ts';
 import { entryForm, entryList, entryRow } from '../widgets/entries.ts';
-import { appShell, tabs, topBar } from '../widgets/shell.ts';
+import { dayGroup, operationRow } from '../widgets/operations.ts';
+import { appShell, stack, tabs, topBar } from '../widgets/shell.ts';
 import { appRail, userName, type Href } from './chrome.ts';
 import { allExpenses, envelopeMark, loadMarking, markingActions, markingDetails, markingPanel, markingTitle, type Marking, type SavedMarking } from './marking.ts';
 
@@ -85,6 +88,7 @@ export interface DashboardData {
   source: 'zenmoney' | 'demo';
   /** Whether the page can offer to sync with ZenMoney. */
   canSync: boolean;
+  variant: Variant;
 }
 
 /**
@@ -111,6 +115,7 @@ export function loadDashboard(
     form?: DashboardForm;
     source: DashboardData['source'];
     canSync: boolean;
+    variant?: string | null;
   },
 ): DashboardData {
   const { today } = options;
@@ -133,6 +138,7 @@ export function loadDashboard(
     userName: userName(data),
     source: options.source,
     canSync: options.canSync,
+    variant: VARIANTS.find((v) => v.key === options.variant?.toUpperCase()) ?? VARIANTS[0]!,
   };
 }
 
@@ -263,7 +269,8 @@ export function renderDashboard(d: DashboardData, href: Href): Html {
     main,
     side: [...side, ...(d.source === 'demo' ? [footnote({ text: 'Демо-данные. Чтобы увидеть свои, добавьте токен в .env и запустите make sync.' })] : [])],
   });
-  return pageDocument({ title: 'Бюджет', body });
+  const document = pageDocument({ title: 'Бюджет', body });
+  return new Html(document.toString().replace('</body>', `${switcher(d.variant, href)}\n</body>`));
 }
 
 interface Page {
@@ -293,6 +300,18 @@ function weekView(page: Page): { main: Html[]; side: Html[] } {
           ],
         }),
       }),
+      // PROTOTYPE: B and C list the spending under the plan, where a row has room for one line.
+      d.variant.key !== 'A' && w.week <= current
+        ? section({
+            title: 'Траты недели',
+            body:
+              w.spending.length === 0
+                ? emptyState({ text: 'Трат пока нет.' })
+                : d.variant.key === 'B'
+                  ? entryList({ label: 'Траты недели', items: w.spending.map((o) => spendingItem(page, o)) })
+                  : spendingByDay(page, w.spending, (o) => `${o.account} · ${markingDetails(o)}`),
+          })
+        : null,
       isCurrent
         ? section({
             title: 'Хочу купить',
@@ -318,11 +337,49 @@ function spentSide(page: Page, w: WeekSummary): Html[] {
         { label: 'Свободно', value: w.free, color: toneColor('gray') },
       ],
     }),
-    topBar({ crumbs: [{ label: 'Траты недели' }] }),
-    ...(w.spending.length === 0
-      ? [emptyState({ text: 'Трат пока нет.' })]
-      : [entryList({ label: 'Траты недели', items: w.spending.map((o) => spendingItem(page, o)) })]),
+    // PROTOTYPE: only A keeps the spending on the side, by days.
+    ...(d.variant.key !== 'A'
+      ? []
+      : [
+          topBar({ crumbs: [{ label: 'Траты недели' }] }),
+          w.spending.length === 0 ? emptyState({ text: 'Трат пока нет.' }) : spendingByDay(page, w.spending, markingDetails),
+        ]),
   ];
+}
+
+/** PROTOTYPE: spending under a heading for each day, newest first, rows as on /operations with the envelope's dot. */
+function spendingByDay(page: Page, spending: Operation[], details: (o: Operation) => string): Html {
+  const { d, href, here } = page;
+  const days = spending.map((o) => o.date).filter((date, i, all) => all.indexOf(date) === i);
+  return stack({
+    gap: 18,
+    items: days.map((date) =>
+      dayGroup({
+        date,
+        today: d.today,
+        rows: spending
+          .filter((o) => o.date === date)
+          .map((o) => {
+            const key = `spending-${o.id}`;
+            const open = d.edit === key;
+            return operationRow({
+              id: key,
+              title: markingTitle(o),
+              details: details(o),
+              icon: o.category ? categoryIcon(o.category.title) : 'tag',
+              color: categoryColor(o.category?.id ?? null, o.category?.color ?? null),
+              kind: 'expense',
+              amount: o.amount,
+              symbol: d.symbol,
+              mark: envelopeMark(d.marking, o),
+              href: open ? here() : here({ edit: key }),
+              panel: open ? markingPanel(d.marking, o, href) : undefined,
+              actions: open ? markingActions(d.marking, o, href) : undefined,
+            });
+          }),
+      }),
+    ),
+  });
 }
 
 /** What a week ahead leaves free after its plan. */
@@ -662,4 +719,40 @@ function adviceText(advice: Advice, d: DashboardData): string {
     case 'never':
       return 'Не влезает ни в неделю, ни в дополнительные';
   }
+}
+
+// ---- PROTOTYPE: the variants and their switcher
+
+interface Variant {
+  key: 'A' | 'B' | 'C';
+  name: string;
+}
+
+const VARIANTS: Variant[] = [
+  { key: 'A', name: 'Сбоку по дням' },
+  { key: 'B', name: 'Под планом списком' },
+  { key: 'C', name: 'Под планом по дням' },
+];
+
+function switcher(current: Variant, href: Href): string {
+  const index = VARIANTS.indexOf(current);
+  const hrefs = VARIANTS.map((v) => href('/', { variant: v.key }));
+  const prev = hrefs[(index - 1 + VARIANTS.length) % VARIANTS.length]!;
+  const next = hrefs[(index + 1) % VARIANTS.length]!;
+  return `
+<div id="proto-switcher" role="toolbar" aria-label="Варианты прототипа">
+  <a href="${prev}" aria-label="Предыдущий вариант">‹</a>
+  <span><b>${current.key}</b> ${current.name} <i>${index + 1}/${VARIANTS.length}</i></span>
+  <a href="${next}" aria-label="Следующий вариант">›</a>
+</div>
+<style>
+  #proto-switcher { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 2147483647; display: flex; align-items: center; gap: 4px;
+    padding: 5px; border-radius: 999px; background: #1F4BFF; color: #fff; font: 500 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    box-shadow: 0 10px 30px -8px rgb(31 75 255 / .6), 0 0 0 3px rgb(255 255 255 / .9); }
+  #proto-switcher a { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 999px; background: rgb(255 255 255 / .16); color: #fff; font-size: 18px; }
+  #proto-switcher a:hover { background: rgb(255 255 255 / .28); }
+  #proto-switcher span { padding: 0 10px; white-space: nowrap; }
+  #proto-switcher b { display: inline-block; padding: 3px 6px; margin-right: 4px; border-radius: 6px; background: #fff; color: #1F4BFF; }
+  #proto-switcher i { font-style: normal; opacity: .7; }
+</style>`;
 }

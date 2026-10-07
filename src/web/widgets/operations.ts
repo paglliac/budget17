@@ -6,6 +6,7 @@ import type { DateString } from '../../zenmoney/types.ts';
 import { dayMonth, dayTitle, money, WEEKDAYS_FULL } from '../format.ts';
 import { html, type Content, type Html } from '../html.ts';
 import { icon, type IconName } from '../icons.ts';
+import { toneColor, type Tone } from '../tones.ts';
 import { badge } from './basics.ts';
 
 /**
@@ -36,6 +37,8 @@ export function operationRow(options: {
   panel?: Content;
   /** Buttons next to the open row, each posting a form to its URL. */
   actions?: Array<{ label: string; action: string }>;
+  /** PROTOTYPE: a dot before the amount telling where it goes; without a tone an empty ring. */
+  mark?: { label: string; tone?: Tone };
 }): Html {
   const { kind, amount, symbol } = options;
   const open = options.panel !== undefined;
@@ -48,6 +51,11 @@ export function operationRow(options: {
         ${options.comment ? html`<small class="operation-comment">${icon('message', 12)}${options.comment}</small>` : null}
       </span>
       ${options.hold ? badge({ text: 'в обработке', tone: 'yellow' }) : null}
+      ${options.mark
+        ? html`<span class="entry-mark${options.mark.tone ? '' : ' ring'}"${
+            options.mark.tone ? html` style="--tone:${toneColor(options.mark.tone)}"` : null
+          } role="img" title="${options.mark.label}" aria-label="${options.mark.label}"></span>`
+        : null}
       <span class="operation-amount ${kind}">
         <b>${value}</b>
         ${options.original ? html`<small>${money(options.original.amount, options.original.symbol, { cents: true })}</small>` : null}

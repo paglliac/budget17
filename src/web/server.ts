@@ -112,8 +112,11 @@ function dashboardPage(
     form,
     source: demo ? 'demo' : 'zenmoney',
     canSync: Boolean(token) && !demo,
+    variant: params.get('variant'),
   });
-  return renderDashboard(dashboard, href).toString();
+  // PROTOTYPE: links keep the variant shown.
+  const variant = params.get('variant');
+  return renderDashboard(dashboard, variant ? (path, more) => href(path, { variant, ...more }) : href).toString();
 }
 
 try {
