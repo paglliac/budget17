@@ -61,7 +61,7 @@ struct UncategorizedView: View {
                         DayHeading(title: day.title, subtitle: day.subtitle)
                         ForEach(day.items) { expense in
                             Button { sheet = .spending(expense.spending) } label: { Card(row: expense.row, symbol: s.symbol) }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.card)
                         }
                     }
                 }

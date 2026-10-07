@@ -38,7 +38,7 @@ struct CategoriesPanel: View {
 
     private func card(_ item: CategoryItem) -> some View {
         Button { editing = item } label: { Card(row: item.row, symbol: "") }
-            .buttonStyle(.plain)
+            .buttonStyle(.card)
     }
 }
 

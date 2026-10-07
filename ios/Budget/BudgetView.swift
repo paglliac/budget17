@@ -169,7 +169,7 @@ struct WeekView: View {
             DayHeading(title: group.title, subtitle: group.subtitle)
             ForEach(group.items) { expense in
                 Button { sheet = .spending(expense.spending) } label: { Card(row: expense.row, symbol: s.symbol) }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.card)
                     .accessibilityIdentifier(expense.id)
             }
         }
@@ -235,7 +235,7 @@ struct PlanCard: View {
         } label: {
             Card(row: item.row, symbol: symbol)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.card)
         .contextMenu {
             if let purchase = item.purchase, item.finishable {
                 Button("Завершить: остаток вернётся", systemImage: "checkmark") {
@@ -291,7 +291,7 @@ struct MonthView: View {
                 case .weeks:
                     ForEach(s.weeks) { line in
                         Button { openWeek(line.week) } label: { Card(row: line.row, symbol: s.symbol) }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.card)
                     }
                 case .extras:
                     ForEach(s.purchases) { item in PlanCard(item: item, symbol: s.symbol, choices: s.weekChoices, sheet: $sheet, error: $error) }
@@ -299,7 +299,7 @@ struct MonthView: View {
                         DayHeading(title: group.title, subtitle: group.subtitle)
                         ForEach(group.items) { expense in
                             Button { sheet = .spending(expense.spending) } label: { Card(row: expense.row, symbol: s.symbol) }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.card)
                         }
                     }
                     AddCard(label: "Добавить в дополнительные") { sheet = .purchase(draft(s, envelope: "extra")) }

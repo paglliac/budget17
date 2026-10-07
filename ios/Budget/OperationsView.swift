@@ -128,7 +128,7 @@ struct OperationCard: View {
                 }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.card)
         .disabled(operation.spending == nil)
     }
 }

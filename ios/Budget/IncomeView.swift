@@ -21,7 +21,7 @@ struct IncomePanel: View {
             } content: {
                 ForEach(s.incomes) { item in
                     Button { editing = item } label: { Card(row: item.row, symbol: s.symbol) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.card)
                 }
                 AddCard(label: "Добавить доход") { adding = true }
                 if !s.upcoming.isEmpty { SheetLabel(text: "Ближайшие поступления") }

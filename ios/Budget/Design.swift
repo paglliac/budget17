@@ -14,6 +14,8 @@ enum Ink {
     static let pill = Color(rgb: 0x2C2C34)
     static let muted = Color(rgb: 0x8E8E98)
     static let hairline = Color(light: 0xE4E4E9, dark: 0x2C2C30)
+    /// The empty track of a bar.
+    static let track = Color(light: 0xE6E6EB, dark: 0x2C2C30)
     /// What is picked or today, such as a day of the week: black on light, white on dark.
     static let strong = Color(light: 0x17171C, dark: 0xF4F4F6)
     static let onStrong = Color(light: 0xFFFFFF, dark: 0x17171C)
@@ -149,10 +151,12 @@ struct BigAmount: View {
     let symbol: String
     var size: CGFloat = 38
     var kopecks = false
+    @Environment(\.variant) private var variant
 
     var body: some View {
         let cents = Int((abs(amount) * 100).rounded())
         let whole = Double(cents / 100) * (amount < 0 ? -1 : 1)
+        let symbol = variant.symbol(symbol)
         let rest = kopecks ? String(format: ",%02d\u{00A0}%@", cents % 100, symbol) : "\u{00A0}\(symbol)"
         (Text(Money.number(kopecks ? whole : amount)).foregroundStyle(amount < 0 ? Palette.color("red") : Color.primary)
             + Text(rest).foregroundStyle(Ink.muted))
@@ -160,6 +164,9 @@ struct BigAmount: View {
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.6)
+            // B and C: the figure counts to its new value.
+            .contentTransition(variant.alive ? .numericText(value: amount) : .identity)
+            .animation(variant.alive ? .snappy : nil, value: amount)
     }
 }
 
@@ -168,21 +175,38 @@ struct BigAmount: View {
 struct SummaryBar: View {
     let parts: [Total.Part]
     let total: Double
+    @Environment(\.variant) private var variant
 
     var body: some View {
         let shown = parts.filter { $0.value > 0.5 }
         let sum = shown.reduce(0) { $0 + $1.value }
         VStack(alignment: .leading, spacing: 8) {
-            GeometryReader { geometry in
-                HStack(spacing: 3) {
-                    ForEach(shown, id: \.label) { part in
-                        Capsule()
-                            .fill(Palette.color(part.tone))
-                            .frame(width: max(4, (geometry.size.width - CGFloat(max(shown.count - 1, 0)) * 3) * part.value / max(sum, 1)))
+            if variant.alive {
+                // One bar: the coloured parts fill it from the left, a grey part is what is left of the track.
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        ForEach(shown, id: \.label) { part in
+                            Rectangle()
+                                .fill(part.tone == "gray" ? Ink.track : Palette.color(part.tone))
+                                .frame(width: geometry.size.width * part.value / max(sum, 1))
+                        }
+                    }
+                    .clipShape(Capsule())
+                    .background(Ink.track, in: Capsule())
+                }
+                .frame(height: 10)
+            } else {
+                GeometryReader { geometry in
+                    HStack(spacing: 3) {
+                        ForEach(shown, id: \.label) { part in
+                            Capsule()
+                                .fill(Palette.color(part.tone))
+                                .frame(width: max(4, (geometry.size.width - CGFloat(max(shown.count - 1, 0)) * 3) * part.value / max(sum, 1)))
+                        }
                     }
                 }
+                .frame(height: 6)
             }
-            .frame(height: 6)
             HStack(spacing: 12) {
                 ForEach(parts.filter { $0.value >= 0.5 && abs($0.value - total) >= 0.5 }, id: \.label) { part in
                     HStack(spacing: 5) {
@@ -230,15 +254,18 @@ struct BandItem<Value: Hashable>: Identifiable {
 struct BandSwitch<Value: Hashable>: View {
     let items: [BandItem<Value>]
     @Binding var selection: Value
+    @Namespace private var pills
+    @Environment(\.variant) private var variant
 
     var body: some View {
         HStack(spacing: 8) {
             ForEach(items) { item in
-                BandPill(label: item.label, selected: item.value == selection) {
+                BandPill(label: item.label, selected: item.value == selection, namespace: variant.alive ? pills : nil) {
                     withAnimation(.snappy) { selection = item.value }
                 }
             }
         }
+        .sensoryFeedback(.selection, trigger: selection) { _, _ in variant.alive }
     }
 }
 
@@ -246,6 +273,8 @@ struct BandPill: View {
     var label: String?
     var systemImage: String?
     let selected: Bool
+    /// B and C: the white of the picked pill slides to the next one.
+    var namespace: Namespace.ID?
     let action: () -> Void
 
     var body: some View {
@@ -258,7 +287,14 @@ struct BandPill: View {
             .padding(.horizontal, label == nil ? 9 : 12)
             .frame(height: 32)
             .foregroundStyle(selected ? Ink.band : .white.opacity(0.9))
-            .background(selected ? Color.white : Ink.pill, in: Capsule())
+            .background {
+                if let namespace {
+                    Capsule().fill(Ink.pill)
+                    if selected { Capsule().fill(Color.white).matchedGeometryEffect(id: "picked", in: namespace) }
+                } else {
+                    Capsule().fill(selected ? Color.white : Ink.pill)
+                }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -290,17 +326,18 @@ struct Card<Accessory: View>: View {
     var signed = false
     var amountColor: Color = .primary
     @ViewBuilder var accessory: () -> Accessory
+    @Environment(\.variant) private var variant
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            IconTile(icon: row.icon, color: Palette.color(row.color))
+            IconTile(icon: row.icon, color: Palette.color(row.color), letter: variant.letters && paysSomeone(row) ? row.title : nil)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(row.title).font(.body.weight(.medium)).lineLimit(2)
                     Spacer(minLength: 8)
                     if let amount = row.amount {
-                        Text(Money.text(amount, symbol, sign: signed))
-                            .font(.body.weight(.semibold))
+                        Text(Money.text(amount, variant.symbol(symbol), sign: signed))
+                            .font(.system(.body, design: variant.alive ? .rounded : .default).weight(.semibold))
                             .monospacedDigit()
                             .foregroundStyle(amountColor)
                             .fixedSize()
@@ -310,7 +347,8 @@ struct Card<Accessory: View>: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(row.details).font(.footnote).foregroundStyle(Ink.muted).lineLimit(2)
                         Spacer(minLength: 6)
-                        MarkDot(mark: row.mark)
+                        // B and C: the week is where an expense counts unless it says otherwise.
+                        if !(variant.alive && row.mark == "week") { MarkDot(mark: row.mark) }
                     }
                 }
                 accessory()
@@ -320,6 +358,7 @@ struct Card<Accessory: View>: View {
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Ink.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(variant.alive ? 0.05 : 0), radius: 10, y: 3)
         .opacity(row.muted ? 0.55 : 1)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
@@ -331,17 +370,35 @@ extension Card where Accessory == EmptyView {
     }
 }
 
-/// The icon of a card on a tile of its colour.
+/// The icon of a card on a tile of its colour. B and C fill the tile with the colour and draw the icon white; C puts
+/// the first letter of whom an expense went to on a circle instead.
 struct IconTile: View {
     let icon: String
     let color: Color
+    var letter: String?
+    @Environment(\.variant) private var variant
 
     var body: some View {
-        Image(systemName: Icons.symbol(icon))
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(color)
-            .frame(width: 40, height: 40)
-            .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        if let first = letter?.first(where: { $0.isLetter || $0.isNumber }) {
+            Text(String(first).uppercased())
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(color.gradient, in: Circle())
+        } else if variant.alive {
+            Image(systemName: Icons.symbol(icon))
+                .symbolVariant(.fill)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(color.gradient, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else {
+            Image(systemName: Icons.symbol(icon))
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 40, height: 40)
+                .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
     }
 }
 

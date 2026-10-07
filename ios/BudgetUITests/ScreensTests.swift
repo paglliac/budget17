@@ -15,6 +15,8 @@ final class ScreensTests: XCTestCase {
         folder = environment["SCREENSHOTS"].map { URL(fileURLWithPath: $0) }
         app = XCUIApplication()
         app.launchArguments = ["-server", environment["SERVER"] ?? "http://localhost:4318"]
+        // Prototype: the look to walk, A, B or C.
+        if let variant = environment["VARIANT"] { app.launchArguments += ["-variant", variant] }
         app.launch()
     }
 

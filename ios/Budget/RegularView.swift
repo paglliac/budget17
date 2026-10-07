@@ -37,7 +37,7 @@ struct RegularPanel: View {
 
     private func card(_ item: RegularItem, _ symbol: String) -> some View {
         Button { editing = item } label: { Card(row: item.row, symbol: symbol) }
-            .buttonStyle(.plain)
+            .buttonStyle(.card)
     }
 }
 

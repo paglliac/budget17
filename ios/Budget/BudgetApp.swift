@@ -22,6 +22,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var tab = Tab.budget
     @State private var add: AddRequest?
+    @State private var variant = Variant.launch
 
     var body: some View {
         if session.server == nil {
@@ -39,6 +40,8 @@ struct RootView: View {
                     add = request
                 }
             }
+            .overlay(alignment: .bottom) { VariantSwitch(variant: $variant).padding(.bottom, 96) }
+            .environment(\.variant, variant)
             // The tab bar stays at the bottom under the keyboard, as when searching operations.
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .task(id: session.version) { await session.refreshPending() }
