@@ -40,7 +40,7 @@
 - Симулятор iOS качай одной командой, `xcodebuild -downloadPlatform iOS`. Дубли образов оставляй как есть: `simctl runtime delete` стирает и общий файл рабочего образа.
 - В цели приложения всё по умолчанию на главном акторе (Swift 6). Замыкание, которое система зовёт с другого потока, объявляй `nonisolated` и `@Sendable`, как `Color(light:dark:)` в `ios/Shared/Format.swift`; иначе приложение падает в `_dispatch_assert_queue_fail`. Виджет собирается в режиме Swift 5.
 - Виджет берёт адрес сервера и токен из общей связки ключей `BSTT86K4F6.ru.apukhtin.budget` (entitlements обеих целей), App Group нет. Данные виджета — `/api/widget`.
-- Сервер на VDS ещё не развёрнут: пользователь решил сначала проверить всё дома. `deploy/deploy.sh` на настоящем сервере не запускался. Когда пользователь даст `root@адрес`, спроси подтверждение перед `--data`: оно увозит его базы с Mac.
+- Сервер на VDS — `https://budget.gang.su`, его разворачивает репо `~/orca/projects/infra` (ansible, общий для сервисов на машине SecondBrain): `make deploy S=budget`, `make app S=budget`. Код сервер тянет с GitHub (`main`), так что `make app` имеет смысл после push. Перед `make data` спроси подтверждение: оно затирает базы на сервере.
 
 ## Проверка
 
