@@ -115,6 +115,22 @@ describe('paymentChoices', () => {
     );
   });
 
+  it('puts a bill of the expense’s amount first, then the plan of its week, then payments of other amounts', () => {
+    const internet = regular({ id: 6, title: 'Интернет', amount: 1_100, day: 1 });
+    const context = {
+      regular: [phone, internet, workshop],
+      purchases: [groceries, purchase(5, 'Подарок', 5_000, '2026-10-05'), purchase(6, 'Стрижка', 2_200, '2026-10-12'), purchase(7, 'Ласты', 8_000, '2026-10-05')],
+      expenses: [],
+    };
+
+    assert.deepEqual(
+      named(paymentChoices(expense('Khofenberg', 1_797, '2026-10-07'), context)),
+      ['Продукты 3000', 'Подарок 5000', 'Ласты 8000', 'Телефон 2026-10-02 1500', 'Стрижка 2200', 'Интернет 2026-10-01 1100', 'Мастерская аренда 2026-10-10 40000'],
+      'the phone bill is closer to 1 797 than the plan, but no bill is paid with another amount',
+    );
+    assert.deepEqual(named(paymentChoices(expense('Т-Мобайл', 1_450, '2026-10-07'), context)).slice(0, 2), ['Телефон 2026-10-02 1500', 'Продукты 3000']);
+  });
+
   it('leaves out what other expenses paid in full or what is bought, and counts what they paid in part', () => {
     const paidPhone = expense('Т-Мобайл', 1_500, '2026-10-01', { category: REGULAR_CATEGORY, regular: { id: phone.id, title: phone.title } });
     const someGroceries = expense('Лента', 1_000, '2026-10-06', { category: PURCHASE_CATEGORY, purchase: { id: 1, title: 'Продукты' } });

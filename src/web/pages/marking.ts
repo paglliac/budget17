@@ -117,7 +117,7 @@ export function submitMarking(settings: Settings, data: EntityCollections, path:
 
 // ---- Page parts
 
-/** How many likely payments show as buttons; the rest are in the list under them. */
+/** How many likely payments show as buttons at least; the whole plan of the expense's week always does. */
 const PAYMENT_BUTTONS = 4;
 /** Purchases offered in the list: planned from this many weeks before the expense's week… */
 const LIST_WEEKS_BEFORE = 4;
@@ -214,8 +214,8 @@ export interface PaymentOptions {
 }
 
 /**
- * The likeliest payments as buttons, the one the expense paid and the suggested one always among them, and the
- * other regular expenses and purchases in a list.
+ * The likeliest payments as buttons, the one the expense paid, the suggested one and the plan of the expense's week
+ * always among them, and the other regular expenses and purchases in a list.
  */
 export function paymentOptions(m: Marking, o: Operation, suggestion: Suggestion | null): PaymentOptions {
   const week = weekOf(o.date);
@@ -226,7 +226,10 @@ export function paymentOptions(m: Marking, o: Operation, suggestion: Suggestion 
   const currentKey = current ? paymentKey(current) : null;
   const suggestedKey = suggestion && 'regular' in suggestion ? `regular-${suggestion.regular.id}` : null;
   const pinned = choices.filter((c) => paymentKey(c) === currentKey || paymentKey(c) === suggestedKey);
-  const shown = [...pinned, ...choices.filter((c) => !pinned.includes(c))].slice(0, Math.max(PAYMENT_BUTTONS, pinned.length));
+  const rest = choices.filter((c) => !pinned.includes(c));
+  // paymentChoices puts the week's plan right after the bills of the expense's amount, so it ends at the last of it.
+  const planned = rest.findLastIndex((c) => 'purchase' in c && c.purchase.week === week) + 1;
+  const shown = [...pinned, ...rest].slice(0, Math.max(PAYMENT_BUTTONS, pinned.length + planned));
   const isShown = (key: string) => shown.some((c) => paymentKey(c) === key);
 
   const regular = m.regular

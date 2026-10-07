@@ -88,9 +88,11 @@ export type PaymentChoice = { regular: RegularExpense; date: DateString; left: n
 /**
  * What an expense may have paid, likeliest first: payments of regular expenses due within PAYMENT_WINDOW days of it,
  * and purchases planned within PURCHASE_WINDOW days of its week or among the extras of its month. Payments and
- * purchases that other expenses paid in full, and purchases marked bought, are left out. The closer what is left of
- * one to the expense's amount, the likelier it is; then the closer its date. `expenses` are the expenses around it
- * with what they paid, the expense itself among them or not.
+ * purchases that other expenses paid in full, and purchases marked bought, are left out. A bill is paid with its
+ * amount, so payments whose amount left is the expense's within AMOUNT_SPREAD come first, then the purchases planned
+ * in the expense's week, then the rest. Within each, the closer what is left of one to the expense's amount, the
+ * likelier it is; then the closer its date. `expenses` are the expenses around it with what they paid, the expense
+ * itself among them or not.
  */
 export function paymentChoices(
   expense: Operation,
@@ -98,21 +100,23 @@ export function paymentChoices(
 ): PaymentChoice[] {
   const others = context.expenses.filter((o) => o.id !== expense.id);
   const week = weekOf(expense.date);
-  const choices: Array<{ choice: PaymentChoice; days: number }> = [];
+  /** 0 for a bill of the expense's amount, 1 for a purchase planned in its week, 2 for the rest. */
+  const choices: Array<{ choice: PaymentChoice; rank: number; days: number }> = [];
   for (const e of context.regular) {
     const date = nearestPayment(e, expense.date);
     if (date === null || Math.abs(daysBetween(expense.date, date)) > PAYMENT_WINDOW) continue;
     const left = e.amount - paidBy(e, date, others).reduce((total, o) => total + o.amount, 0);
-    if (left > 0.005) choices.push({ choice: { regular: e, date, left }, days: Math.abs(daysBetween(expense.date, date)) });
+    const rank = Math.abs(left - expense.amount) <= left * AMOUNT_SPREAD ? 0 : 2;
+    if (left > 0.005) choices.push({ choice: { regular: e, date, left }, rank, days: Math.abs(daysBetween(expense.date, date)) });
   }
   for (const p of context.purchases) {
     const days = Math.abs(daysBetween(week, p.week));
     const near = days <= PURCHASE_WINDOW || (p.envelope === 'extra' && monthOfWeek(p.week) === monthOfWeek(week));
     const status = purchaseStatus(p, others);
-    if (near && !status.bought) choices.push({ choice: { purchase: p, left: status.left }, days });
+    if (near && !status.bought) choices.push({ choice: { purchase: p, left: status.left }, rank: p.week === week ? 1 : 2, days });
   }
   const distance = (left: number) => Math.abs(left - expense.amount) / Math.max(left, expense.amount);
-  return choices.sort((a, b) => distance(a.choice.left) - distance(b.choice.left) || a.days - b.days).map((c) => c.choice);
+  return choices.sort((a, b) => a.rank - b.rank || distance(a.choice.left) - distance(b.choice.left) || a.days - b.days).map((c) => c.choice);
 }
 
 /** The payee without case, digits and punctuation, so that Lenta 089 and Lenta 139 are one shop; null when there is none. */

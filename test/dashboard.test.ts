@@ -184,6 +184,15 @@ describe('dashboard', () => {
     assert.ok(page.includes('<dt>Когда</dt><dd>5 октября</dd>') && page.includes('<dt>Сумма</dt><dd>473,00 ₽</dd>'), 'no time when ZenMoney has none for that day');
   });
 
+  it('offers the whole plan of the expense’s week to pay, however long it is', () => {
+    const plan = ['Ласты', 'Продукты', 'Подарок Серёге', 'Проезд'].map((title, i) => ({ id: 10 + i, title, amount: 1_000 * (i + 1), week: '2026-10-05', envelope: 'week' as const, done: false }));
+    const page = render({ edit: 'spending-groceries' }, { ...saved(), purchases: [...saved().purchases, ...plan] });
+    const payments = [...(/aria-label="Оплата">(.*?)<\/div>/s.exec(page)?.[1] ?? '').matchAll(/<span>([^<]*)/g)].map((m) => m[1]!.trim());
+
+    assert.deepEqual(payments, ['Ласты', 'Продукты', 'Подарок Серёге', 'Проезд', 'Ботинки Савве', 'Куртка']);
+    assert.ok(page.includes('<option value="regular-7">'), 'the school, due in two days for another amount, is in the list');
+  });
+
   it('takes what linked expenses paid out of the plan, buys a purchase they cover, and counts them where it is', () => {
     const linked = (payments: Array<[string, number]>) => ({ ...saved(), purchasePayments: new Map(payments) });
     const purchaseOf = (page: string, title: string) => new RegExp(`<b>${title}</b><small>([^<]*)</small>`).exec(page)?.[1];
