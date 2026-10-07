@@ -46,7 +46,7 @@ struct UncategorizedView: View {
                         DayHeading(title: day.title, subtitle: day.subtitle)
                         ForEach(day.items) { item in
                             // A tap on the card opens it; «Принять» is a button of its own inside the card.
-                            Card(row: item.row, symbol: s.symbol) {
+                            Card(row: item.row, symbol: s.symbol, monogram: true) {
                                 if let suggestion = item.suggestion {
                                     CardAction(label: "Принять") { accept(item.spending, suggestion.choice) }
                                 }
@@ -60,8 +60,8 @@ struct UncategorizedView: View {
                     ForEach(s.sorted, id: \.date) { day in
                         DayHeading(title: day.title, subtitle: day.subtitle)
                         ForEach(day.items) { expense in
-                            Button { sheet = .spending(expense.spending) } label: { Card(row: expense.row, symbol: s.symbol) }
-                                .buttonStyle(.plain)
+                            Button { sheet = .spending(expense.spending) } label: { Card(row: expense.row, symbol: s.symbol, monogram: true) }
+                                .buttonStyle(.card)
                         }
                     }
                 }

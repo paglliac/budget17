@@ -15,6 +15,7 @@ import {
   uncategorizedScreen,
   weekScreen,
   widgetScreen,
+  withRubleSign,
 } from '../src/web/api.ts';
 import type { SavedBudget } from '../src/web/pages/dashboard.ts';
 import { account, regular, RUB, tag, transaction, user } from './fixtures.ts';
@@ -227,6 +228,16 @@ describe('api', () => {
     assert.match(screen.upcoming[0].items[0].formula, /^200 000 × \d+\/\d+ рабочих дней$/);
     assert.deepEqual(screen.models.map((m: { id: string }) => m.id), ['fixed', 'salary']);
     assert.equal(screen.models[1].defaults.title, 'Зарплата');
+  });
+
+  it('writes the ruble as ₽ in the figures and the sentences, where ZenMoney names it руб.', () => {
+    const zenmoney = { ...data(), instrument: [{ ...RUB, symbol: 'руб.' }] };
+    const week = plain(weekScreen(withRubleSign(zenmoney), saved(), budget));
+
+    assert.equal(week.symbol, '₽');
+    assert.equal(week.total.note, 'из 45 000 ₽ на неделю');
+    assert.doesNotMatch(JSON.stringify(week), /руб\./);
+    assert.equal(plain(weekScreen(zenmoney, saved(), budget)).total.note, 'из 45 000 руб. на неделю', 'the pages keep руб.');
   });
 
   it('gives the widget what is left of the week and what waits for a category', () => {

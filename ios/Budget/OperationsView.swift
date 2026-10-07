@@ -121,14 +121,15 @@ struct OperationCard: View {
                 row: row,
                 symbol: symbol,
                 signed: operation.kind != "transfer",
-                amountColor: operation.kind == "income" ? Palette.color("green") : .primary
+                amountColor: operation.kind == "income" ? Palette.color("green") : .primary,
+                monogram: true
             ) {
                 if !notes.isEmpty {
                     Text(notes.joined(separator: " · ")).font(.caption).foregroundStyle(Ink.muted).lineLimit(2)
                 }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.card)
         .disabled(operation.spending == nil)
     }
 }

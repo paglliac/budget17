@@ -1,8 +1,9 @@
 import SwiftUI
 
 // The look of the app, after the reference the user picked: a light top that tells what the screen is about, a dark
-// band that switches what is under it, and a sheet of cards below, each with its icon on a tile. The room goes to the
-// cards: the top and the band keep only what tells something.
+// band that switches what is under it, and a sheet of cards below, each with its icon or whom it went to on a tile of
+// its colour. The room goes to the cards: the top and the band keep only what tells something. What is touched answers:
+// a card gives under the finger, the picked pill slides, the main figure counts to its new value.
 
 enum Ink {
     /// The sheet of cards.
@@ -14,6 +15,8 @@ enum Ink {
     static let pill = Color(rgb: 0x2C2C34)
     static let muted = Color(rgb: 0x8E8E98)
     static let hairline = Color(light: 0xE4E4E9, dark: 0x2C2C30)
+    /// The empty track of a bar.
+    static let track = Color(light: 0xE6E6EB, dark: 0x2C2C30)
     /// What is picked or today, such as a day of the week: black on light, white on dark.
     static let strong = Color(light: 0x17171C, dark: 0xF4F4F6)
     static let onStrong = Color(light: 0xFFFFFF, dark: 0x17171C)
@@ -160,6 +163,8 @@ struct BigAmount: View {
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.6)
+            .contentTransition(.numericText(value: amount))
+            .animation(.snappy, value: amount)
     }
 }
 
@@ -186,8 +191,9 @@ struct SummaryChip: View {
     }
 }
 
-/// A total's parts as one bar, with a legend of figures under it. The legend leaves out a part of nothing and the part
-/// that only repeats the figure over the bar, such as what is free under what can be spent.
+/// A total's parts as one bar, with a legend of figures under it: the coloured parts fill the bar from the left and a
+/// grey part, such as what is free, is the bar's empty track. The legend leaves out a part of nothing and the part that
+/// only repeats the figure over the bar, such as what is free under what can be spent.
 struct SummaryBar: View {
     let parts: [Total.Part]
     let total: Double
@@ -197,15 +203,17 @@ struct SummaryBar: View {
         let sum = shown.reduce(0) { $0 + $1.value }
         VStack(alignment: .leading, spacing: 8) {
             GeometryReader { geometry in
-                HStack(spacing: 3) {
+                HStack(spacing: 0) {
                     ForEach(shown, id: \.label) { part in
-                        Capsule()
-                            .fill(Palette.color(part.tone))
-                            .frame(width: max(4, (geometry.size.width - CGFloat(max(shown.count - 1, 0)) * 3) * part.value / max(sum, 1)))
+                        Rectangle()
+                            .fill(part.tone == "gray" ? Ink.track : Palette.color(part.tone))
+                            .frame(width: geometry.size.width * part.value / max(sum, 1))
                     }
                 }
+                .clipShape(Capsule())
+                .background(Ink.track, in: Capsule())
             }
-            .frame(height: 6)
+            .frame(height: 10)
             HStack(spacing: 12) {
                 ForEach(parts.filter { $0.value >= 0.5 && abs($0.value - total) >= 0.5 }, id: \.label) { part in
                     HStack(spacing: 5) {
@@ -250,18 +258,21 @@ struct BandItem<Value: Hashable>: Identifiable {
 }
 
 /// Pills on the dark band that switch what the sheet shows.
+/// Pills on the dark band that switch what the sheet shows; the white of the picked one slides to the next with a tick.
 struct BandSwitch<Value: Hashable>: View {
     let items: [BandItem<Value>]
     @Binding var selection: Value
+    @Namespace private var pills
 
     var body: some View {
         HStack(spacing: 8) {
             ForEach(items) { item in
-                BandPill(label: item.label, selected: item.value == selection) {
+                BandPill(label: item.label, selected: item.value == selection, namespace: pills) {
                     withAnimation(.snappy) { selection = item.value }
                 }
             }
         }
+        .sensoryFeedback(.selection, trigger: selection)
     }
 }
 
@@ -269,6 +280,8 @@ struct BandPill: View {
     var label: String?
     var systemImage: String?
     let selected: Bool
+    /// The pills of one switch, whose white slides between them.
+    var namespace: Namespace.ID?
     let action: () -> Void
 
     var body: some View {
@@ -281,7 +294,16 @@ struct BandPill: View {
             .padding(.horizontal, label == nil ? 9 : 12)
             .frame(height: 32)
             .foregroundStyle(selected ? Ink.band : .white.opacity(0.9))
-            .background(selected ? Color.white : Ink.pill, in: Capsule())
+            .background {
+                Capsule().fill(Ink.pill)
+                if selected {
+                    if let namespace {
+                        Capsule().fill(Color.white).matchedGeometryEffect(id: "picked", in: namespace)
+                    } else {
+                        Capsule().fill(Color.white)
+                    }
+                }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -307,23 +329,26 @@ struct DayHeading: View {
 }
 
 /// A card of the sheet: the icon on a tile at its left, the title with the amount over the details and where it counts.
+/// An expense or an operation shows the first letter of whom it went to instead of the icon, as banks do.
 struct Card<Accessory: View>: View {
     let row: Row
     let symbol: String
     var signed = false
     var amountColor: Color = .primary
+    /// The row is an expense or an operation, and its title is whom the money went to or came from.
+    var monogram = false
     @ViewBuilder var accessory: () -> Accessory
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            IconTile(icon: row.icon, color: Palette.color(row.color))
+            IconTile(icon: row.icon, color: Palette.color(row.color), letter: monogram ? row.title : nil)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(row.title).font(.body.weight(.medium)).lineLimit(2)
                     Spacer(minLength: 8)
                     if let amount = row.amount {
                         Text(Money.text(amount, symbol, sign: signed))
-                            .font(.body.weight(.semibold))
+                            .font(.system(.body, design: .rounded).weight(.semibold))
                             .monospacedDigit()
                             .foregroundStyle(amountColor)
                             .fixedSize()
@@ -333,7 +358,8 @@ struct Card<Accessory: View>: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(row.details).font(.footnote).foregroundStyle(Ink.muted).lineLimit(2)
                         Spacer(minLength: 6)
-                        MarkDot(mark: row.mark)
+                        // The week is where an expense counts unless the dot says otherwise.
+                        if row.mark != "week" { MarkDot(mark: row.mark) }
                     }
                 }
                 accessory()
@@ -343,29 +369,53 @@ struct Card<Accessory: View>: View {
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Ink.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 10, y: 3)
         .opacity(row.muted ? 0.55 : 1)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
 extension Card where Accessory == EmptyView {
-    init(row: Row, symbol: String, signed: Bool = false, amountColor: Color = .primary) {
-        self.init(row: row, symbol: symbol, signed: signed, amountColor: amountColor, accessory: { EmptyView() })
+    init(row: Row, symbol: String, signed: Bool = false, amountColor: Color = .primary, monogram: Bool = false) {
+        self.init(row: row, symbol: symbol, signed: signed, amountColor: amountColor, monogram: monogram, accessory: { EmptyView() })
     }
 }
 
-/// The icon of a card on a tile of its colour.
+/// A card's icon, white on a tile of its colour, or the first letter of a name on a circle of it.
 struct IconTile: View {
     let icon: String
     let color: Color
+    var letter: String?
 
     var body: some View {
-        Image(systemName: Icons.symbol(icon))
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(color)
-            .frame(width: 40, height: 40)
-            .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        if let first = letter?.first(where: { $0.isLetter || $0.isNumber }) {
+            Text(String(first).uppercased())
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(color.gradient, in: Circle())
+        } else {
+            Image(systemName: Icons.symbol(icon))
+                .symbolVariant(.fill)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(color.gradient, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
     }
+}
+
+/// A card as a button: it gives under the finger and springs back.
+struct CardButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
+extension ButtonStyle where Self == CardButtonStyle {
+    static var card: CardButtonStyle { CardButtonStyle() }
 }
 
 /// A small button inside a card, such as «Принять».

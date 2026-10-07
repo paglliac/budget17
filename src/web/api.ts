@@ -76,6 +76,14 @@ export interface Day<T> {
   items: T[];
 }
 
+/**
+ * The data as the app shows it: the ruble is ₽ in every figure and sentence of the app, though ZenMoney names it руб.
+ * as the web pages write it.
+ */
+export function withRubleSign(data: EntityCollections): EntityCollections {
+  return { ...data, instrument: data.instrument?.map((i) => (i.shortTitle === 'RUB' ? { ...i, symbol: '₽' } : i)) };
+}
+
 /** A colour as the app takes it: the tone's name for var(--violet), a category's own colour as it is. */
 export function colorOf(css: string): string {
   return /^var\(--([a-z]+)\)$/.exec(css)?.[1] ?? css;

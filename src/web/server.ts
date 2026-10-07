@@ -30,6 +30,7 @@ import {
   uncategorizedScreen,
   weekScreen,
   widgetScreen,
+  withRubleSign,
 } from './api.ts';
 import { isAccessToken, isAuthorized, sessionCookie } from './auth.ts';
 import { demoCollections } from './demo.ts';
@@ -227,19 +228,20 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
 /** A screen of the app as JSON (see api.ts); null when there is none at the path. */
 function apiScreen(path: string, params: URLSearchParams, { today, demo }: Context): unknown {
   const budget = { today, source: demo ? ('demo' as const) : ('zenmoney' as const), canSync: Boolean(token) && !demo };
+  const collections = () => withRubleSign(loadCollections(demo, today));
   const spending = /^\/api\/spending\/([\w-]+)$/.exec(path);
-  if (spending) return spendingScreen(loadCollections(demo, today), loadSettings(savedMarking), { today, id: spending[1]! });
+  if (spending) return spendingScreen(collections(), loadSettings(savedMarking), { today, id: spending[1]! });
   switch (path) {
     case '/api/session': {
-      const collections = loadCollections(demo, today);
-      return { user: userName(collections), symbol: mainCurrency(collections).symbol, ...budget, syncedAt: syncedAt?.toISOString() ?? null };
+      const data = collections();
+      return { user: userName(data), symbol: mainCurrency(data).symbol, ...budget, syncedAt: syncedAt?.toISOString() ?? null };
     }
     case '/api/week':
-      return weekScreen(loadCollections(demo, today), loadSettings(savedBudget), { ...budget, week: params.get('week') });
+      return weekScreen(collections(), loadSettings(savedBudget), { ...budget, week: params.get('week') });
     case '/api/month':
-      return monthScreen(loadCollections(demo, today), loadSettings(savedBudget), { ...budget, month: params.get('month') });
+      return monthScreen(collections(), loadSettings(savedBudget), { ...budget, month: params.get('month') });
     case '/api/operations':
-      return operationsScreen(loadCollections(demo, today), loadSettings(savedMarking), {
+      return operationsScreen(collections(), loadSettings(savedMarking), {
         today,
         month: params.get('month'),
         kind: params.get('kind'),
@@ -247,17 +249,17 @@ function apiScreen(path: string, params: URLSearchParams, { today, demo }: Conte
         query: params.get('q'),
       });
     case '/api/uncategorized':
-      return uncategorizedScreen(loadCollections(demo, today), loadSettings(savedMarking), { today, month: params.get('month') });
+      return uncategorizedScreen(collections(), loadSettings(savedMarking), { today, month: params.get('month') });
     case '/api/regular':
-      return regularScreen(loadCollections(demo, today), loadSettings(savedMarking), { today });
+      return regularScreen(collections(), loadSettings(savedMarking), { today });
     case '/api/income':
-      return incomeScreen(loadCollections(demo, today), loadSettings((s) => s.incomes()), { today });
+      return incomeScreen(collections(), loadSettings((s) => s.incomes()), { today });
     case '/api/categories':
-      return categoriesScreen(loadCollections(demo, today), loadSettings(savedMarking), { today });
+      return categoriesScreen(collections(), loadSettings(savedMarking), { today });
     case '/api/budget-settings':
-      return budgetSettingsScreen(loadCollections(demo, today), loadSettings(savedMarking));
+      return budgetSettingsScreen(collections(), loadSettings(savedMarking));
     case '/api/widget':
-      return widgetScreen(loadCollections(demo, today), loadSettings(savedBudget), { today });
+      return widgetScreen(collections(), loadSettings(savedBudget), { today });
     default:
       return null;
   }
