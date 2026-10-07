@@ -414,3 +414,26 @@ struct TodayLine: View {
         .padding(.vertical, 4)
     }
 }
+
+/// Over the sheet while the server cannot be reached: when the shown screen was saved. A tap opens the server, to try
+/// another one.
+struct OfflinePill: View {
+    let date: Date
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(Dates.moment(date), systemImage: "wifi.slash")
+                .font(.footnote.weight(.semibold))
+                .monospacedDigit()
+                .padding(.horizontal, 14)
+                .frame(height: 34)
+                .foregroundStyle(.white)
+                .background(Ink.band, in: Capsule())
+                .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("offline")
+        .accessibilityLabel("Нет связи с сервером, сохранено \(Dates.moment(date))")
+    }
+}

@@ -67,7 +67,9 @@ struct FlowLayout: Layout {
 }
 
 /// Loads a screen from the server, shows it, and loads it again on pull to refresh, after a change anywhere in the
-/// app, or when what it shows changes, such as another week.
+/// app, or when what it shows changes, such as another week. What the server sent last for the screen shows at once
+/// while it answers; when it cannot be reached, that copy stays, with the time it was saved on a pill that opens the
+/// server.
 struct Screen<Value: Decodable, Content: View>: View {
     let path: String
     var query: [String: String?] = [:]
@@ -75,7 +77,14 @@ struct Screen<Value: Decodable, Content: View>: View {
 
     @Environment(Session.self) private var session
     @State private var value: Value?
+    /// What the shown value answers, to tell another week from the same one loaded again.
+    @State private var shown: Request?
+    /// When the server sent the shown value.
+    @State private var sentAt: Date?
+    /// The server could not be reached the last time the screen asked it.
+    @State private var unreachable = false
     @State private var error: String?
+    @State private var showServer = false
 
     var body: some View {
         Group {
@@ -88,33 +97,54 @@ struct Screen<Value: Decodable, Content: View>: View {
                     Text(error)
                 } actions: {
                     Button("Повторить") { Task { await load() } }
+                    Button("Сервер") { showServer = true }
                 }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: Key(path: path, query: query, version: session.version)) { await load() }
+        .overlay(alignment: .bottom) {
+            if unreachable, value != nil, let sentAt {
+                OfflinePill(date: sentAt) { showServer = true }.padding(.bottom, 12)
+            }
+        }
+        .task(id: Key(request: Request(path: path, query: query), version: session.version)) { await load() }
         .refreshable {
             await session.sync()
             await load()
         }
+        .sheet(isPresented: $showServer) { ServerSheet() }
+    }
+
+    private struct Request: Equatable {
+        let path: String
+        let query: [String: String?]
     }
 
     private struct Key: Equatable {
-        let path: String
-        let query: [String: String?]
+        let request: Request
         let version: Int
     }
 
     private func load() async {
+        let request = Request(path: path, query: query)
+        if request != shown, let copy: (value: Value, date: Date) = session.saved(path, query) {
+            value = copy.value
+            shown = request
+            sentAt = copy.date
+        }
         do {
             value = try await session.get(path, query)
+            shown = request
+            sentAt = .now
+            unreachable = false
             error = nil
         } catch is CancellationError {
         } catch let failure as URLError where failure.code == .cancelled {
         } catch {
-            // Keep showing what was loaded before; only an empty screen shows the error.
+            // Keep showing what was loaded or saved before; only an empty screen shows the error.
             if value == nil { self.error = error.localizedDescription }
+            if case APIError.unreachable = error { unreachable = true }
         }
     }
 }

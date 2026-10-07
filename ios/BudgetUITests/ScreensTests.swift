@@ -127,6 +127,41 @@ final class ScreensTests: XCTestCase {
         XCTAssert(app.staticTexts["в неделе"].waitForExistence(timeout: 5))
     }
 
+    /// Loads the screens from the server, opens the app again with a server that is gone, and switches back to the
+    /// working one from the pill. It reads only, so it runs against real data.
+    func testOffline() throws {
+        let expense = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'spending-'")).firstMatch
+        XCTAssert(expense.waitForExistence(timeout: 15), "the week loads")
+        sleep(2)
+        app.terminate()
+        let server = app.launchArguments[1]
+        app.launchArguments = ["-server", "http://localhost:9"]
+        app.launch()
+
+        XCTAssert(expense.waitForExistence(timeout: 5), "the saved week shows")
+        let offline = app.buttons["offline"].firstMatch
+        XCTAssert(offline.waitForExistence(timeout: 20), "the pill says the server is gone")
+        shot("offline-week")
+        tab("Ещё")
+        shot("offline-more")
+        tab("Бюджет")
+
+        offline.tap()
+        XCTAssert(app.navigationBars["Сервер"].waitForExistence(timeout: 5))
+        shot("offline-server")
+        app.buttons["Сменить сервер"].tap()
+        let address = app.textFields.firstMatch
+        XCTAssert(address.waitForExistence(timeout: 5))
+        address.tap()
+        address.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (address.value as? String ?? "").count))
+        address.typeText(server)
+        shot("offline-switch")
+        app.buttons["Подключить"].tap()
+        XCTAssert(app.navigationBars["Сервер"].waitForNonExistence(timeout: 15), "the new server is kept")
+        XCTAssert(offline.waitForNonExistence(timeout: 15), "the screens load from it")
+        shot("offline-back")
+    }
+
     func testLogin() throws {
         app.terminate()
         app.launchArguments = ["-server", ""]

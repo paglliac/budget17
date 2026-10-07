@@ -62,6 +62,12 @@ enum Dates {
 
     static func date(_ text: String) -> Date? { formatter.date(from: text) }
     static func text(_ date: Date) -> String { formatter.string(from: date) }
+
+    /// A moment as the time alone today, with the day otherwise: 14:05, 6 окт., 14:05.
+    static func moment(_ date: Date) -> String {
+        let style = Date.FormatStyle(locale: Locale(identifier: "ru_RU")).hour().minute()
+        return date.formatted(Calendar.current.isDateInToday(date) ? style : style.day().month(.abbreviated))
+    }
 }
 
 // Modifiers that only iOS has; on a Mac, where the sources are only type-checked, they do nothing.

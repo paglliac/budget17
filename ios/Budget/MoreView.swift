@@ -47,7 +47,8 @@ struct MoreFrame {
     }
 }
 
-/// Where the server is, when it last synced, and the way out.
+/// Where the server is, when it last synced, another server instead of it, and the way out. Opens from any screen when
+/// the server cannot be reached.
 struct ServerSheet: View {
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
@@ -70,6 +71,11 @@ struct ServerSheet: View {
                         }
                     }
                     .disabled(session.isSyncing)
+                    NavigationLink("Сменить сервер") {
+                        ServerForm(action: "Подключить", address: session.server?.absoluteString ?? "", token: session.token) { dismiss() }
+                            .navigationTitle("Другой сервер")
+                            .inlineTitle()
+                    }
                 }
                 Section {
                     Button("Выйти", role: .destructive) { confirmSignOut = true }
@@ -81,9 +87,9 @@ struct ServerSheet: View {
             .confirmationDialog("Выйти из приложения?", isPresented: $confirmSignOut, titleVisibility: .visible) {
                 Button("Выйти", role: .destructive) { session.signOut() }
             } message: {
-                Text("Данные останутся на сервере. Чтобы войти снова, понадобится токен доступа.")
+                Text("Данные останутся на сервере, а сохранённые на телефоне удалятся. Чтобы войти снова, понадобится токен доступа.")
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 }
