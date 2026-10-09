@@ -29,7 +29,7 @@ import { monthCalendar } from './widgets/calendar.ts';
 import { categoryTile, paymentCard, statCard } from './widgets/cards.ts';
 import { entryDivider, entryForm, entryList, entryRow } from './widgets/entries.ts';
 import { categoryList, dayGroup, operationList, operationRow } from './widgets/operations.ts';
-import { assistantAnswer, assistantHero, figureCard, flowChart, insightList, listHeading, metricList, panelCard, toggleList, weekBars } from './widgets/review.ts';
+import { assistantAnswer, assistantHero, figureCard, flowChart, insightList, listHeading, metricList, panelCard, weekBars } from './widgets/review.ts';
 import { appShell, grid, rail, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
 
 export interface Story {
@@ -209,7 +209,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       name: 'Приветствие',
       props: { title: 'Добрый день', emoji: '👋', text: 'В октябре вы потратили 80 820 ₽. Это на 14% больше, чем к 5 сентября.' },
     },
-    { name: 'С бейджем', props: { title: 'Разбор сентября', text: 'Что произошло с деньгами и что стоит поправить.', badge: { text: 'ассистент нашёл 9 идей', tone: 'green' } } },
+    { name: 'С бейджем', props: { title: 'Разбор сентября', text: 'Что произошло с деньгами и что стоит поправить.', badge: { text: 'ассистент сделал 6 выводов', tone: 'green' } } },
   ]),
   doc(section, { group: 'Основа', description: 'Блок страницы с заголовком.' }, [
     { name: 'С содержимым', props: { title: 'Больше всего тратите на', body: emptyState({ text: 'Содержимое блока' }) } },
@@ -849,7 +849,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       width: 440,
       props: {
         title: 'Разобрал сентябрь',
-        text: 'Нашёл 6 важных моментов и 3 рекомендации.',
+        text: 'Нашёл 6 важных моментов.',
         action: { label: 'Задать вопрос', href: '#' },
         chips: [
           { label: 'Где перерасход и почему', icon: 'trendingUp', href: '#', active: true },
@@ -872,7 +872,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
     { name: 'Свой вопрос', width: 440, props: { question: 'Спросите про этот месяц', paragraphs: [], closeHref: '#', ask: { action: '#', name: 'q', placeholder: 'Например: сколько ушло на машину?' } } },
   ]),
   doc(listHeading, { group: 'Разбор', description: 'Заголовок списка с числом в нём и действием справа.' }, [
-    { name: 'С кнопкой', width: 440, props: { title: 'Рекомендации', count: 3, action: { label: 'Применить все', href: '#', primary: true } } },
+    { name: 'Только число', width: 440, props: { title: 'Главные выводы', count: 6 } },
     { name: 'Со ссылкой', width: 440, props: { title: 'Главные выводы', count: 5, action: { label: 'Посмотреть все', href: '#' } } },
   ]),
   doc(insightList, { group: 'Разбор', description: 'Выводы: иконка в круге, жирная строка, тихое пояснение и ссылка дальше.' }, [
@@ -884,19 +884,6 @@ export const WIDGET_DOCS: WidgetDoc[] = [
         items: [
           { icon: 'trendingUp', tone: 'red', title: 'Недели потратили на 263 432 ₽ больше плана', text: 'Больше всего — 12 – 18 сентября: 179 519 ₽.', href: '#' },
           { icon: 'check', tone: 'green', title: 'Дополнительные почти не тронуты', text: '2 490 ₽ из 100 000 ₽.' },
-        ],
-      },
-    },
-  ]),
-  doc(toggleList, { group: 'Разбор', description: 'Рекомендации, которые включаются и выключаются; переключатель — ссылка.' }, [
-    {
-      name: 'Одна включена',
-      width: 440,
-      props: {
-        label: 'Рекомендации',
-        items: [
-          { icon: 'bag', title: 'Переводы себе с некруглой суммой — в «Шоппинг»', text: '6 переводов на 12 633 ₽', on: true, href: '#' },
-          { icon: 'tag', title: 'Добавить категорию «Переводы людям»', text: 'для остальных 11 переводов', on: false, href: '#' },
         ],
       },
     },

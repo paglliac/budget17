@@ -1,6 +1,5 @@
 // PROTOTYPE (throwaway, month review): widgets of the review page drawn by the user's picture — big figures, a flow
-// of where the money went, the weeks as bars, lists of amounts, and the assistant's panel with findings and
-// suggestions that switch on and off.
+// of where the money went, the weeks as bars, lists of amounts, and the assistant's panel with findings and answers.
 
 import { num } from '../format.ts';
 import { html, type Content, type Html } from '../html.ts';
@@ -180,11 +179,4 @@ export function insightList(options: { label: string; items: Array<{ icon: IconN
     }`;
     return html`<li>${item.href ? html`<a class="insight" href="${item.href}">${inner}</a>` : html`<span class="insight">${inner}</span>`}</li>`;
   })}</ul>`;
-}
-
-/** Suggestions that switch on and off; each switch is a link that flips it. */
-export function toggleList(options: { label: string; items: Array<{ icon: IconName; title: string; text: string; on: boolean; href: string }> }): Html {
-  return html`<ul class="toggles" aria-label="${options.label}">${options.items.map(
-    (item) => html`<li><a class="toggle" href="${item.href}" role="switch" aria-checked="${item.on ? 'true' : 'false'}"><span class="toggle-icon">${icon(item.icon, 14)}</span><span class="toggle-text"><b>${item.title}</b><small>${item.text}</small></span><span class="toggle-switch"></span></a></li>`,
-  )}</ul>`;
 }

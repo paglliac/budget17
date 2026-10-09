@@ -1,9 +1,8 @@
 // PROTOTYPE (throwaway, ticket «Разбор месяца: что показать»): the month review drawn by the user's picture.
 // The main column says what happened with the month's money: income, spent and left, where it went, the weeks against
 // their limits, ordinary spending a week by category, what to check and the regular payments. The side is the
-// assistant, faked by rules for now: findings, answers to four questions and suggestions that switch on and off.
-// A switched-on suggestion only recounts the page as if it were applied (?apply=…); nothing is stored but the marks
-// made on expenses, which open in place as everywhere (marking.ts).
+// assistant, faked by rules for now: findings and answers to four questions. Nothing is stored but the marks made on
+// expenses, which open in place as everywhere (marking.ts).
 
 import { summarizeBalances } from '../../balances.ts';
 import { addDays, monthOf, shiftMonth, type MonthString } from '../../dates.ts';
@@ -18,7 +17,7 @@ import { categoryIcon, type IconName } from '../icons.ts';
 import { categoryColor, toneColor, type Tone } from '../tones.ts';
 import { pageIntro } from '../widgets/basics.ts';
 import { operationList, operationRow } from '../widgets/operations.ts';
-import { assistantAnswer, assistantHero, figureCard, flowChart, insightList, listHeading, metricList, panelCard, toggleList, weekBars } from '../widgets/review.ts';
+import { assistantAnswer, assistantHero, figureCard, flowChart, insightList, listHeading, metricList, panelCard, weekBars } from '../widgets/review.ts';
 import { appShell, grid, topBar } from '../widgets/shell.ts';
 import { appRail, monthTabs, parseMonth, userName, type Href } from './chrome.ts';
 import { budgetOf, type SavedBudget } from './dashboard.ts';
@@ -28,8 +27,6 @@ import { allExpenses, envelopeMark, loadMarking, markingActions, markingDetails,
 const SELF_PAYEE = 'Кирилл А.';
 /** A person as banks name them in SBP transfers: Татьяна А. */
 const PERSON = /^[А-ЯЁ][а-яё]+ [А-ЯЁ]\.$/;
-/** A transfer to a person this large is hardly ordinary spending of a week. */
-const LARGE_TRANSFER = 10_000;
 
 /** What an expense of the month turned out to be. */
 type Bucket = 'ordinary' | 'person' | 'self' | 'untitled' | 'extra' | 'regular' | 'outside';
@@ -58,16 +55,6 @@ function isDoubtful(bucket: Bucket): bucket is Doubtful {
   return (DOUBTFUL as readonly string[]).includes(bucket);
 }
 
-/** A suggestion of the assistant: what it changes, applied only to the page's figures while switched on. */
-type SuggestionKey = 'ozon' | 'loan' | 'people' | 'peopleCategory';
-
-interface Suggestion {
-  key: SuggestionKey;
-  icon: IconName;
-  title: string;
-  text: string;
-}
-
 interface CategoryWeekly {
   id: string;
   title: string;
@@ -93,13 +80,9 @@ export interface ReviewData {
   from: DateString;
   to: DateString;
   income: number;
-  /** Expenses of the month's weeks as if the switched-on suggestions were applied, largest first. */
+  /** Expenses of the month's weeks, largest first. */
   expenses: Array<{ o: Operation; bucket: Bucket; envelope: Envelope }>;
-  /** The same expenses as they are, by id, for marking. */
-  originals: ReadonlyMap<string, Operation>;
   categories: CategoryWeekly[];
-  suggestions: Suggestion[];
-  applied: ReadonlySet<SuggestionKey>;
   /** Regular payments due next month. */
   nextRegular: number;
   nextWeeks: number;
@@ -115,82 +98,17 @@ export interface ReviewData {
 export function loadReview(
   data: EntityCollections,
   saved: SavedBudget,
-  options: { today: DateString; month?: string | null; apply?: string | null; ask?: string | null; q?: string | null; group?: string | null; edit?: string | null },
+  options: { today: DateString; month?: string | null; ask?: string | null; q?: string | null; group?: string | null; edit?: string | null },
 ): ReviewData {
   const { today } = options;
   // The closed month first: a review is mostly of the month just gone.
   const month = options.month ? parseMonth(options.month, monthOf(today)) : shiftMonth(monthOf(today), -1);
   const weekStarts = weeksOfMonth(month, saved.weekStart);
   const earliest = weeksOfMonth(shiftMonth(month, -3), saved.weekStart)[0] ?? weekStarts[0]!;
-  const raw = budgetOf(data, saved, { today, from: earliest });
+  const budget = budgetOf(data, saved, { today, from: earliest });
   const from = weekStarts[0]!;
   const to = addDays(weekStarts.at(-1)!, 6);
   const inMonth = (o: Operation) => o.date >= from && o.date <= to;
-  const symbol = summarizeBalances(data).mainInstrument.symbol;
-  const sum = (list: Operation[]) => list.reduce((s, o) => s + o.amount, 0);
-
-  // What the assistant would change, found among the expenses as they are.
-  const shopping = raw.expenses.find((o) => o.category?.title === 'Шоппинг')?.category ?? { id: 'proto-shopping', title: 'Шоппинг', color: null };
-  const people = { id: 'proto-people', title: 'Переводы людям', color: null };
-  const rawBucket = (o: Operation) => bucketOf(raw, o);
-  const isOzon = (o: Operation) => rawBucket(o) === 'self' && o.amount < 20_000 && Math.round(o.amount) % 100 !== 0;
-  const loanOf = (o: Operation) => (rawBucket(o) === 'self' ? saved.regular.find((r) => Math.abs(r.amount - o.amount) < 1) : undefined);
-  const isLargePerson = (o: Operation) => rawBucket(o) === 'person' && o.amount >= LARGE_TRANSFER;
-  const ofMonth = raw.expenses.filter(inMonth);
-  const ozon = ofMonth.filter(isOzon);
-  const loans = ofMonth.filter((o) => loanOf(o));
-  const largePeople = ofMonth.filter(isLargePerson).sort((a, b) => b.amount - a.amount);
-  const restPeople = ofMonth.filter((o) => rawBucket(o) === 'person' && !isLargePerson(o));
-  const suggestions: Suggestion[] = [];
-  if (ozon.length)
-    suggestions.push({
-      key: 'ozon',
-      icon: 'bag',
-      title: 'Переводы себе с некруглой суммой — в «Шоппинг»',
-      text: `${count(ozon.length, 'перевод')} на ${money(sum(ozon), symbol)}: это покупки на Ozon и WB`,
-    });
-  if (loans.length)
-    suggestions.push({
-      key: 'loan',
-      icon: 'repeat',
-      title: 'Переводы на сумму кредита — привязать к нему',
-      text: loans.map((o) => `${money(o.amount, symbol)} → «${loanOf(o)!.title}»`).join(', '),
-    });
-  if (largePeople.length)
-    suggestions.push({
-      key: 'people',
-      icon: 'arrowUpRight',
-      title: `Не считать в неделях переводы людям от ${money(LARGE_TRANSFER, symbol)}`,
-      text: `${count(largePeople.length, 'перевод')} на ${money(sum(largePeople), symbol)}: ${largePeople
-        .slice(0, 2)
-        .map((o) => `${o.payee} ${money(o.amount, symbol)}`)
-        .join(', ')}`,
-    });
-  if (restPeople.length)
-    suggestions.push({
-      key: 'peopleCategory',
-      icon: 'tag',
-      title: 'Добавить категорию «Переводы людям»',
-      text: `для остальных ${count(restPeople.length, 'перевода', 'переводов', 'переводов')} на ${money(sum(restPeople), symbol)}, они останутся в неделях`,
-    });
-  const available = new Set(suggestions.map((s) => s.key));
-  const applied = new Set((options.apply ?? '').split(',').filter((k): k is SuggestionKey => available.has(k as SuggestionKey)));
-
-  // The budget as if the switched-on suggestions were applied.
-  const marks = new Map(raw.marks);
-  const expenses = raw.expenses.map((o) => {
-    if (applied.has('ozon') && isOzon(o)) return { ...o, category: shopping };
-    const loan = applied.has('loan') ? loanOf(o) : undefined;
-    if (loan) return { ...o, regular: { id: loan.id, title: loan.title } };
-    if (applied.has('people') && isLargePerson(o)) {
-      marks.set(o.id, 'outside');
-      return o;
-    }
-    if (applied.has('peopleCategory') && rawBucket(o) === 'person') return { ...o, category: people };
-    return o;
-  });
-  const budget: Budget = { ...raw, expenses, marks };
-
   const current = weekOf(today, saved.weekStart);
   const elapsed = Math.max(1, weekStarts.filter((w) => w <= current).length);
   const ordinaryPerWeek = (start: DateString, end: DateString, weeks: number) => {
@@ -232,10 +150,7 @@ export function loadReview(
       .filter(inMonth)
       .map((o) => ({ o, bucket: bucketOf(budget, o), envelope: envelopeOf(budget, o) }))
       .sort((a, b) => b.o.amount - a.o.amount),
-    originals: new Map(ofMonth.map((o) => [o.id, o])),
     categories,
-    suggestions,
-    applied,
     nextRegular: saved.regular.reduce((s, r) => s + (paymentDate(r, next) ? r.amount : 0), 0),
     nextWeeks: weeksOfMonth(next, saved.weekStart).length,
     ask: options.ask === 'ask' ? 'ask' : (QUESTIONS.find((q) => q.key === options.ask)?.key ?? null),
@@ -243,7 +158,7 @@ export function loadReview(
     group: DOUBTFUL.find((g) => g === options.group) ?? null,
     marking: loadMarking(data, saved, allExpenses(data, saved), today),
     edit: options.edit ?? null,
-    symbol,
+    symbol: summarizeBalances(data).mainInstrument.symbol,
     userName: userName(data),
   };
 }
@@ -256,11 +171,11 @@ interface Page {
   d: ReviewData;
   href: Href;
   /** This page with the given changes to its state. */
-  to: (changes?: { month?: string | null; apply?: string | null; ask?: string | null; group?: string | null; edit?: string | null }) => string;
+  to: (changes?: { month?: string | null; ask?: string | null; group?: string | null; edit?: string | null }) => string;
 }
 
 export function renderReview(d: ReviewData, href: Href): Html {
-  const state = { month: d.month, apply: [...d.applied].join(',') || null, ask: d.ask, group: d.group };
+  const state = { month: d.month, ask: d.ask, group: d.group };
   const to: Page['to'] = (changes = {}) => href('/review', { ...state, ...changes });
   const page: Page = { d, href, to };
   const body = appShell({
@@ -313,13 +228,13 @@ function main(page: Page): Html[] {
   const { d, to } = page;
   const t = totals(d);
   const over = t.inWeeks - t.limits;
-  const ideas = insights(page).length + d.suggestions.length;
+  const ideas = insights(page).length;
   return [
     topBar({ crumbs: [{ label: span(d), icon: 'calendar' }] }),
     pageIntro({
       title: `Разбор ${monthName(d.month, 'genitive')}`,
       text: 'Что произошло с деньгами и что стоит поправить.',
-      badge: ideas ? { text: `ассистент нашёл ${count(ideas, 'идею', 'идеи', 'идей')}`, tone: 'green' } : undefined,
+      badge: ideas ? { text: `ассистент сделал ${count(ideas, 'вывод')}`, tone: 'green' } : undefined,
     }),
     grid({
       columns: 3,
@@ -467,10 +382,9 @@ function versusUsual(c: CategoryWeekly): string | undefined {
   return ratio > 1 ? `+${percent(ratio - 1)}` : `−${percent(1 - ratio)}`;
 }
 
-/** An expense's row that opens in place to be marked; the panel marks it as it is, not as a suggestion would. */
-function spendRow(page: Page, shown: Operation): Html {
+/** An expense's row that opens in place to be marked. */
+function spendRow(page: Page, o: Operation): Html {
   const { d, href, to } = page;
-  const o = d.originals.get(shown.id) ?? shown;
   const key = `spending-${o.id}`;
   const open = d.edit === key;
   return operationRow({
@@ -584,39 +498,16 @@ function insights(page: Page): Insight[] {
 function side(page: Page): Html[] {
   const { d, to } = page;
   const found = insights(page);
-  const all = d.suggestions.map((s) => s.key);
-  const allOn = all.every((k) => d.applied.has(k));
-  const flip = (key: SuggestionKey) => {
-    const next = new Set(d.applied);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    return to({ apply: [...next].join(',') || null });
-  };
   const blocks: Array<Html | null> = [
     assistantHero({
       title: `Разобрал ${monthName(d.month)}`,
-      text: stop(
-        `Нашёл ${count(found.length, 'важный момент', 'важных момента', 'важных моментов')} и ${count(d.suggestions.length, 'рекомендацию', 'рекомендации', 'рекомендаций')}`,
-      ),
+      text: `Нашёл ${count(found.length, 'важный момент', 'важных момента', 'важных моментов')}.`,
       action: { label: 'Задать вопрос', href: to({ ask: 'ask' }) },
       chips: QUESTIONS.map((q) => ({ label: q.label, icon: q.icon, href: to({ ask: d.ask === q.key ? null : q.key }), active: d.ask === q.key })),
     }),
     d.ask ? answer(page, d.ask) : null,
     found.length ? listHeading({ title: 'Главные выводы', count: found.length }) : null,
     found.length ? insightList({ label: 'Главные выводы', items: found }) : null,
-    d.suggestions.length
-      ? listHeading({
-          title: 'Рекомендации',
-          count: d.suggestions.length,
-          action: allOn ? { label: 'Сбросить', href: to({ apply: null }) } : { label: 'Применить все', href: to({ apply: all.join(',') }), primary: true },
-        })
-      : null,
-    d.suggestions.length
-      ? toggleList({
-          label: 'Рекомендации',
-          items: d.suggestions.map((s) => ({ icon: s.icon, title: s.title, text: s.text, on: d.applied.has(s.key), href: flip(s.key) })),
-        })
-      : null,
   ];
   return blocks.filter((x): x is Html => x !== null);
 }

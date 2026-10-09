@@ -361,7 +361,6 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       const review = loadReview(loadCollections(demo, today), loadSettings(savedBudget), {
         today,
         month: params.get('month'),
-        apply: params.get('apply'),
         ask: params.get('ask'),
         q: params.get('q'),
         group: params.get('group'),
