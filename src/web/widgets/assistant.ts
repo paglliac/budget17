@@ -32,6 +32,29 @@ export function assistantAnswer(options: { question: string; paragraphs: string[
     </article>`;
 }
 
+/**
+ * Suggestions to act on, each with an icon in a circle, a bold line, a quieter explanation, who suggested it, and
+ * buttons that post forms; the first button is the main one. A done suggestion is quiet and has no buttons.
+ */
+export function suggestionList(options: {
+  label: string;
+  items: Array<{ icon: IconName; tone: Tone; title: string; text: string; source?: string; actions: Array<{ label: string; action: string }>; done?: boolean }>;
+}): Html {
+  return html`<ul class="suggestions" aria-label="${options.label}">${options.items.map(
+    (item) => html`<li class="suggestion${item.done ? ' done' : ''}">
+      <span class="insight-icon" style="--tone:${toneColor(item.done ? 'gray' : item.tone)}">${icon(item.done ? 'check' : item.icon, 16)}</span>
+      <span class="insight-text"><b>${item.title}</b><small>${item.text}</small>${
+        item.source ? html`<small class="suggestion-source">${icon('sparkles', 11)}${item.source}</small>` : null
+      }</span>
+      ${item.done || item.actions.length === 0
+        ? null
+        : html`<span class="suggestion-actions">${item.actions.map(
+            (a, i) => html`<form method="post" action="${a.action}"><button class="${i === 0 ? 'button' : 'entry-quiet'}" type="submit">${a.label}</button></form>`,
+          )}</span>`}
+    </li>`,
+  )}</ul>`;
+}
+
 /** What the assistant found, each with an icon in a circle, a bold line, a quieter explanation and a link to more. */
 export function insightList(options: { label: string; items: Array<{ icon: IconName; tone: Tone; title: string; text: string; href?: string }> }): Html {
   return html`<ul class="insights" aria-label="${options.label}">${options.items.map((item) => {

@@ -42,6 +42,7 @@ import { appShell, grid, stack, toolbar, topBar } from '../widgets/shell.ts';
 import { appRail, monthTabs, parseMonth, userName, type Href } from './chrome.ts';
 import { budgetOf, type SavedBudget } from './dashboard.ts';
 import { allExpenses, envelopeMark, loadMarking, markingActions, markingPanel, markingTitle, type Marking } from './marking.ts';
+import { loadProto, overlay, protoCatalog, type ProtoData } from './review-categories.ts';
 
 /** Questions to the assistant, as its chips offer them. */
 type Question = 'overspend' | 'check' | 'optimize' | 'plan';
@@ -53,7 +54,7 @@ const QUESTIONS: Array<{ key: Question; label: string; icon: IconName }> = [
   { key: 'plan', label: 'План на следующий месяц', icon: 'target' },
 ];
 
-const TO_CHECK_ROWS: Record<ToCheck, { title: string; icon: IconName; tone: Tone }> = {
+export const TO_CHECK_ROWS: Record<ToCheck, { title: string; icon: IconName; tone: Tone }> = {
   person: { title: 'Переводы людям', icon: 'arrowUpRight', tone: 'blue' },
   self: { title: 'Переводы себе', icon: 'card', tone: 'violet' },
   untitled: { title: 'Без категории', icon: 'tag', tone: 'gray' },
@@ -73,12 +74,26 @@ export interface ReviewData {
   edit: string | null;
   symbol: string;
   userName: string | null;
+  /** PROTOTYPE: categories on the review. */
+  proto: ProtoData;
 }
 
 export function loadReview(
   data: EntityCollections,
   saved: SavedBudget,
-  options: { today: DateString; month?: string | null; ask?: string | null; kind?: string | null; edit?: string | null },
+  options: {
+    today: DateString;
+    month?: string | null;
+    ask?: string | null;
+    kind?: string | null;
+    edit?: string | null;
+    // PROTOTYPE: the variant and what it has open.
+    variant?: string | null;
+    open?: string | null;
+    tile?: string | null;
+    cat?: string | null;
+    more?: string | null;
+  },
 ): ReviewData {
   const { today } = options;
   const month = options.month ? parseMonth(options.month, monthOf(today)) : shiftMonth(monthOf(today), -1);
@@ -86,6 +101,9 @@ export function loadReview(
   // Three months before tell what is usual.
   const earliest = weeksOfMonth(shiftMonth(month, -3), saved.weekStart)[0] ?? weeks[0]!;
   const budget = budgetOf(data, saved, { today, from: earliest });
+  // PROTOTYPE: categories as moved and renamed in memory on the review (see review-categories.ts).
+  const categories = protoCatalog(data, saved);
+  budget.expenses = overlay(budget.expenses, categories);
   const incomes = listOperations(data, { from: weeks[0]!, to: addDays(weeks.at(-1)!, 6) }, saved).filter((o) => o.kind === 'income');
   const review = reviewMonth(budget, incomes, { month, today, selfPayee: saved.selfPayee ?? null });
   const kind = TO_CHECK.find((k) => k === options.kind) ?? TO_CHECK.find((k) => review.toCheck.some((e) => e.kind === k)) ?? 'person';
@@ -100,18 +118,19 @@ export function loadReview(
     edit: options.edit ?? null,
     symbol: mainCurrency(data).symbol,
     userName: userName(data),
+    proto: loadProto(data, saved, review, categories, { today, variant: options.variant, open: options.open, tile: options.tile, cat: options.cat, more: options.more, edit: options.edit }),
   };
 }
 
-interface Page {
+export interface Page {
   d: ReviewData;
   href: Href;
   /** This page with an expense open or closed, keeping the rest of its state. */
-  here: (changes: { edit?: string | null; ask?: string | null }) => string;
+  here: (changes: { edit?: string | null; ask?: string | null; open?: string | null; tile?: string | null; more?: string | null }) => string;
 }
 
 /** The page of one kind of expenses to check, with one of them open. */
-function checkHref(d: ReviewData, href: Href, kind: ToCheck, edit?: string): string {
+export function checkHref(d: ReviewData, href: Href, kind: ToCheck, edit?: string): string {
   return `${href('/review/check', { month: d.review.month, kind, edit })}${edit ? `#${edit}` : ''}`;
 }
 
@@ -130,11 +149,11 @@ export function renderReview(d: ReviewData, href: Href): Html {
 
 // ---- Words
 
-function count(n: number, forms: readonly [string, string, string]): string {
+export function count(n: number, forms: readonly [string, string, string]): string {
   return `${n} ${plural(n, forms)}`;
 }
 
-const EXPENSES = ['трата', 'траты', 'трат'] as const;
+export const EXPENSES = ['трата', 'траты', 'трат'] as const;
 const TRANSFERS = ['перевод', 'перевода', 'переводов'] as const;
 
 function span(r: MonthReview): string {
@@ -146,16 +165,16 @@ function weekTitle(w: WeekSummary): string {
 }
 
 /** Ends a sentence with a full stop, unless it already ends with one, as an amount in «руб.» does. */
-function stop(text: string): string {
+export function stop(text: string): string {
   return text.endsWith('.') ? text : `${text}.`;
 }
 
-function sumOf(list: ReviewedExpense[]): number {
+export function sumOf(list: ReviewedExpense[]): number {
   return list.reduce((s, e) => s + e.operation.amount, 0);
 }
 
 /** How a category's week compares with its usual one: new, +39%, −49%, ×11, or nothing when about the same. */
-function versusUsual(c: CategoryWeekly): string | undefined {
+export function versusUsual(c: CategoryWeekly): string | undefined {
   if (c.usual === null) return 'новое';
   const ratio = c.perWeek / c.usual;
   if (Math.abs(ratio - 1) < 0.1) return undefined;
@@ -166,17 +185,23 @@ function versusUsual(c: CategoryWeekly): string | undefined {
 // ---- Main column
 
 function main(page: Page): Html[] {
+  const b = mainBlocks(page);
+  return [b.top, b.intro, b.figures, b.flow, grid({ columns: 2, min: 320, items: [b.weeks, b.categories, b.check, b.regular] })];
+}
+
+/** PROTOTYPE: the blocks of the main column by name, so that a variant can swap some of them. */
+export function mainBlocks(page: Page): { top: Html; intro: Html; figures: Html; flow: Html; weeks: Html; categories: Html; check: Html; regular: Html } {
   const { d, href, here } = page;
   const r = d.review;
   const over = r.inWeeks - r.limits;
-  return [
-    topBar({ crumbs: [{ label: span(r), icon: 'calendar' }] }),
-    pageIntro({
+  return {
+    top: topBar({ crumbs: [{ label: span(r), icon: 'calendar' }] }),
+    intro: pageIntro({
       title: `Разбор ${monthName(r.month, 'genitive')}`,
       text: 'Что произошло с деньгами и что стоит поправить.',
       badge: d.findings.length ? { text: `ассистент сделал ${count(d.findings.length, ['вывод', 'вывода', 'выводов'])}`, tone: 'green' } : undefined,
     }),
-    grid({
+    figures: grid({
       columns: 3,
       min: 200,
       items: [
@@ -197,7 +222,7 @@ function main(page: Page): Html[] {
         }),
       ],
     }),
-    panelCard({
+    flow: panelCard({
       title: 'Куда ушли деньги',
       amount: r.spent,
       symbol: d.symbol,
@@ -214,11 +239,7 @@ function main(page: Page): Html[] {
         ],
       }),
     }),
-    grid({
-      columns: 2,
-      min: 320,
-      items: [
-        panelCard({
+    weeks: panelCard({
           title: 'Недельные траты',
           amount: r.inWeeks,
           symbol: d.symbol,
@@ -237,7 +258,7 @@ function main(page: Page): Html[] {
             })),
           }),
         }),
-        panelCard({
+    categories: panelCard({
           title: 'Обычные траты в неделю',
           amount: ordinaryPerWeek(r),
           symbol: d.symbol,
@@ -256,14 +277,14 @@ function main(page: Page): Html[] {
               })
             : emptyState({ text: 'Трат с категорией в неделях нет.' }),
         }),
-        panelCard({
+    check: panelCard({
           title: 'Проверить',
           amount: sumOf(r.toCheck),
           symbol: d.symbol,
           note: count(r.toCheck.length, EXPENSES),
           body: toCheckRows(page, null),
         }),
-        panelCard({
+    regular: panelCard({
           title: 'Регулярные платежи',
           amount: r.regular,
           symbol: d.symbol,
@@ -271,13 +292,11 @@ function main(page: Page): Html[] {
           href: href('/regular'),
           body: r.regular > 0 ? amountList({ label: 'Регулярные платежи месяца', items: regularRows(r) }) : emptyState({ text: 'Платежей регулярных трат нет.' }),
         }),
-      ],
-    }),
-  ];
+  };
 }
 
 /** The kinds of expenses to check, each leading to its page; the one listed there is highlighted. */
-function toCheckRows(page: Page, current: ToCheck | null, options: { counts?: boolean } = {}): Html {
+export function toCheckRows(page: Page, current: ToCheck | null, options: { counts?: boolean } = {}): Html {
   const { d, href } = page;
   const kinds = TO_CHECK.filter((k) => d.review.toCheck.some((e) => e.kind === k));
   if (!kinds.length) return emptyState({ text: 'Всё, что считается в неделях, размечено.' });
@@ -333,7 +352,7 @@ function spendRow(page: Page, o: Operation): Html {
 
 // ---- The assistant
 
-function side(page: Page): Html[] {
+export function side(page: Page): Html[] {
   const { d, here } = page;
   const items = d.findings.map((f) => insight(page, f));
   return [

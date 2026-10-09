@@ -36,7 +36,8 @@ import { isAccessToken, isAuthorized, sessionCookie } from './auth.ts';
 import { demoCollections } from './demo.ts';
 import { escape } from './html.ts';
 import { createHref, userName } from './pages/chrome.ts';
-import { loadReview, renderReview, renderReviewCheck } from './pages/review.ts';
+import { loadReview, renderReviewCheck } from './pages/review.ts';
+import { parseVariant, renderCategoriesPage, renderReviewPrototype, submitPrototype } from './pages/review-categories.ts';
 import { budgetOf, loadDashboard, renderDashboard, submitDashboard, type DashboardForm, type SavedBudget } from './pages/dashboard.ts';
 import { loadIncome, renderIncome, submitIncome } from './pages/income.ts';
 import { renderLogin } from './pages/login.ts';
@@ -193,6 +194,13 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     if (result.status === 'missing') return { status: 'missing', message: 'Такой записи нет' };
     const back = new URL(backTo(request), 'http://localhost');
     return { status: 'invalid', errors: result.form.errors, page: () => dashboardPage(back.searchParams, context, result.form) };
+  }
+  if (path.startsWith('/prototype/categories/')) {
+    // PROTOTYPE: categories on the review, kept in memory (see pages/review-categories.ts).
+    const query = new URL(request.url ?? '/', 'http://localhost').searchParams;
+    return submitPrototype(path, query, body, loadCollections(demo, today), loadSettings(savedBudget))
+      ? { status: 'saved', next: backTo(request) }
+      : { status: 'missing', message: 'Такого действия нет' };
   }
   if (path.startsWith('/spending/')) {
     using settings = new Settings(SETTINGS_PATH);
@@ -360,15 +368,26 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       send(response, 200, 'text/html', dashboardPage(params, context));
       return;
     case '/review':
-    case '/review/check': {
+    case '/review/check':
+    case '/review/categories': {
+      // PROTOTYPE: ?variant= picks how categories show on the review, and every link keeps it.
+      const variant = parseVariant(params.get('variant'));
       const review = loadReview(loadCollections(demo, today), loadSettings(savedBudget), {
         today,
         month: params.get('month'),
         ask: params.get('ask'),
         kind: params.get('kind'),
         edit: params.get('edit'),
+        variant,
+        open: params.get('open'),
+        tile: params.get('tile'),
+        cat: params.get('cat'),
+        more: params.get('more'),
       });
-      send(response, 200, 'text/html', (url.pathname === '/review' ? renderReview(review, href) : renderReviewCheck(review, href)).toString());
+      const keep = createHref({ ...(params.has('demo') ? { demo: '1' } : {}), variant });
+      const page =
+        url.pathname === '/review' ? renderReviewPrototype(review, keep) : url.pathname === '/review/check' ? renderReviewCheck(review, keep) : renderCategoriesPage(review, keep);
+      send(response, 200, 'text/html', page.toString());
       return;
     }
     case '/operations': {

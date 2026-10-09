@@ -111,31 +111,49 @@ export function categoryList(options: {
 
 /**
  * Named amounts one under another, each led by a dot or an icon tile, with an optional share bar, a quiet note, and a
- * link to more; the item open there is highlighted.
+ * link to more; the item open there is highlighted. An item that unfolds (`expanded`) gets a chevron that turns when
+ * open, and the items under it are `sub`, indented; a `proposed` one is only suggested, drawn with a dashed dot.
  */
 export function amountList(options: {
   label: string;
   /** Shown after each amount when given. */
   symbol?: string;
-  items: Array<{ label: string; amount: number; color?: string; icon?: IconName; tone?: Tone; share?: number; note?: string; href?: string; active?: boolean }>;
+  items: Array<{
+    label: string;
+    amount: number;
+    color?: string;
+    icon?: IconName;
+    tone?: Tone;
+    share?: number;
+    note?: string;
+    href?: string;
+    active?: boolean;
+    expanded?: boolean;
+    sub?: boolean;
+    proposed?: boolean;
+  }>;
 }): Html {
   return html`<ul class="amounts" aria-label="${options.label}">${options.items.map((item) => {
     const lead = item.icon
       ? html`<span class="amount-icon" style="--tone:${toneColor(item.tone ?? 'gray')}">${icon(item.icon, 14)}</span>`
       : item.color
-        ? html`<i class="amount-dot" style="background:${item.color}"></i>`
+        ? html`<i class="amount-dot" style="${item.proposed ? `border-color:${item.color}` : `background:${item.color}`}"></i>`
         : null;
+    const go = item.expanded === undefined ? 'chevronRight' : 'chevronDown';
     const inner = html`${lead}<span class="amount-label">${item.label}</span>${
       item.share === undefined
         ? null
         : html`<span class="amount-bar"><i style="width:${(Math.min(1, Math.max(0, item.share)) * 100).toFixed(1)}%;background:${item.color ?? 'var(--violet)'}"></i></span>`
     }${item.note ? html`<small class="amount-note">${item.note}</small>` : null}<b class="amount-value">${num(item.amount)}${
       options.symbol ? html` <span>${options.symbol}</span>` : null
-    }</b>${item.href ? html`<span class="amount-go">${icon('chevronRight', 14)}</span>` : null}`;
+    }</b>${item.href ? html`<span class="amount-go${item.expanded ? ' turned' : ''}">${icon(go, 14)}</span>` : null}`;
+    const classes = `amount${item.sub ? ' sub' : ''}${item.proposed ? ' proposed' : ''}`;
     return html`<li>${
       item.href
-        ? html`<a class="amount" href="${item.href}"${item.active ? html` aria-current="true"` : null}>${inner}</a>`
-        : html`<span class="amount">${inner}</span>`
+        ? html`<a class="${classes}" href="${item.href}"${item.active ? html` aria-current="true"` : null}${
+            item.expanded === undefined ? null : html` aria-expanded="${String(item.expanded)}"`
+          }>${inner}</a>`
+        : html`<span class="${classes}">${inner}</span>`
     }</li>`;
   })}</ul>`;
 }

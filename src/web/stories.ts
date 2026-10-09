@@ -28,9 +28,9 @@ import {
   shareBar,
 } from './widgets/basics.ts';
 import { monthCalendar } from './widgets/calendar.ts';
-import { assistantAnswer, assistantHero, insightList } from './widgets/assistant.ts';
+import { assistantAnswer, assistantHero, insightList, suggestionList } from './widgets/assistant.ts';
 import { categoryTile, figureCard, panelCard, paymentCard, statCard } from './widgets/cards.ts';
-import { flowChart, weekBars } from './widgets/charts.ts';
+import { categoryMap, flowChart, weekBars } from './widgets/charts.ts';
 import { entryDivider, entryForm, entryList, entryRow } from './widgets/entries.ts';
 import { amountList, categoryList, dayGroup, operationRow } from './widgets/operations.ts';
 import { appShell, grid, rail, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
@@ -442,6 +442,21 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       },
     },
   ]),
+  doc(categoryMap, { group: 'Графики', description: 'Части целого плитками по сумме: группы своим цветом, внутри — их части; неразобранная группа заштрихована, открытая обведена.' }, [
+    {
+      name: 'Недели месяца',
+      props: {
+        label: 'Из чего недели',
+        symbol: '₽',
+        groups: [
+          { label: 'Продукты', amount: 130_681, color: '#4FAE7F', href: '#', items: [{ label: 'Лента', amount: 46_000 }, { label: 'Рынок', amount: 32_600 }, { label: 'У дома', amount: 20_000 }, { label: 'Доставка', amount: 12_000 }] },
+          { label: 'Переводы людям', amount: 123_158, color: 'var(--gray)', hatched: true, href: '#', active: true, items: [{ label: 'Татьяна А.', amount: 79_250, href: '#' }, { label: 'Николай А.', amount: 10_000, href: '#' }] },
+          { label: 'Кафе и рестораны', amount: 30_939, color: 'var(--blue)', href: '#', items: [] },
+          { label: 'Шоппинг', amount: 21_434, color: 'var(--orange)', items: [] },
+        ],
+      },
+    },
+  ]),
   doc(weekBars, { group: 'Графики', description: 'Траты недель столбиками, лимит недели — пунктир поперёк, выше него столбик темнее; будущая неделя пустая.' }, [
     {
       name: 'Месяц с перерасходом',
@@ -617,6 +632,19 @@ export const WIDGET_DOCS: WidgetDoc[] = [
         items: [
           { icon: 'trendingUp', tone: 'red', title: 'Недели потратили на 263 432 ₽ больше плана', text: 'Больше всего — 12 – 18 сентября: 179 519 ₽.', href: '#' },
           { icon: 'check', tone: 'green', title: 'Дополнительные почти не тронуты', text: '2 490 ₽ из 100 000 ₽.' },
+        ],
+      },
+    },
+  ]),
+  doc(suggestionList, { group: 'Ассистент', description: 'Подсказки, по которым можно действовать: иконка в круге, жирная строка, пояснение, кто подсказал, и кнопки; сделанная — тихая, без кнопок.' }, [
+    {
+      name: 'Подсказки по категориям',
+      width: 440,
+      props: {
+        label: 'Подсказки',
+        items: [
+          { icon: 'layers', tone: 'teal', title: 'Разбить «Продукты»', text: 'Лента 46 000, рынок 32 600, у дома 20 000.', source: 'Claude', actions: [{ label: 'Разбить', action: '#' }, { label: 'Не надо', action: '#' }] },
+          { icon: 'check', tone: 'gray', title: 'Скрыть «Корректировку»', text: 'Трат в ней не было ни разу.', actions: [], done: true },
         ],
       },
     },
