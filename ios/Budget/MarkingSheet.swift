@@ -1,12 +1,16 @@
 import SwiftUI
 
-/// An expense opened to mark it. On top what it is and what it is now; then one of two ways to say what it was for — a
-/// category, or the payment of a regular expense or a purchase it made — each a tap on a tile, shown at once; at the
-/// bottom where it counts. Choices post to /api/spending/:id/:choice.
+/// An expense opened to mark it. On top what it is: whom it went to, how much and when, what the bank said and what is
+/// suggested, then what it is now. Then one of two ways to say what it was for — a category, or the payment of a regular
+/// expense or a purchase it made — each a tap on a tile, shown at once; at the bottom where it counts, as large cards.
+/// Opened from the expenses that wait for a category, it steps through them: «1 из 4». Choices post to
+/// /api/spending/:id/:choice.
 struct MarkingSheet: View {
     enum Mode: Hashable { case category, payment }
 
-    let id: String
+    /// The expenses to step through, this one among them; empty for one expense alone.
+    let queue: [String]
+    @State private var id: String
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
     /// nil until picked: the payments when the expense paid one or one is suggested, the categories otherwise.
@@ -16,16 +20,25 @@ struct MarkingSheet: View {
     @State private var showOthers = false
     @State private var error: String?
     @State private var saved = 0
-    @Namespace private var switcher
+
+    init(id: String, queue: [String] = []) {
+        self.queue = queue
+        _id = State(initialValue: id)
+    }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            topBar
             Screen(path: "spending/\(id)") { (s: SpendingScreen) in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         header(s)
                         now(s)
-                        modeSwitch(s)
+                        LilacSegmented(
+                            items: [Segment(value: Mode.category, label: "Категория"), Segment(value: Mode.payment, label: "Платёж")],
+                            selection: Binding(get: { shownMode(s) }, set: { mode = $0 }),
+                            width: nil
+                        )
                         Group {
                             switch shownMode(s) {
                             case .category: categories(s)
@@ -35,21 +48,69 @@ struct MarkingSheet: View {
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                         envelopes(s)
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 20)
                     .padding(.bottom, 24)
                 }
-                .background(Ink.canvas)
+                .scrollIndicators(.hidden)
                 .accessibilityIdentifier("marking")
                 .onChange(of: s) { withAnimation(.snappy) { applying = nil } }
             }
-            .inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() } }
+            .id(id)
+            if let next = next {
+                LilacPrimaryButton(label: "Дальше") { step(to: next) }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
             }
-            .errorAlert($error)
-            .sensoryFeedback(.selection, trigger: applying)
-            .sensoryFeedback(.success, trigger: saved)
         }
+        .background(LilacBackground())
+        .presentationDetents([.large])
+        .errorAlert($error)
+        .sensoryFeedback(.selection, trigger: applying)
+        .sensoryFeedback(.success, trigger: saved)
+    }
+
+    // MARK: - Stepping
+
+    private var index: Int? { queue.firstIndex(of: id) }
+
+    private var next: String? {
+        guard let index, index + 1 < queue.count else { return nil }
+        return queue[index + 1]
+    }
+
+    private func step(to other: String) {
+        withAnimation(.snappy) {
+            id = other
+            mode = nil
+            applying = nil
+            showOthers = false
+        }
+    }
+
+    private var topBar: some View {
+        HStack(spacing: 4) {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark").font(.system(size: 18, weight: .medium)).frame(width: 40, height: 40).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Готово")
+            Spacer()
+            if let index, queue.count > 1 {
+                Button { step(to: queue[index - 1]) } label: { Image(systemName: "chevron.left").frame(width: 36, height: 36) }
+                    .buttonStyle(.plain)
+                    .disabled(index == 0)
+                    .opacity(index == 0 ? 0.3 : 1)
+                    .accessibilityLabel("Предыдущая")
+                Text("\(index + 1) из \(queue.count)").font(.subheadline).foregroundStyle(Lilac.muted).monospacedDigit()
+                Button { if let next { step(to: next) } } label: { Image(systemName: "chevron.right").frame(width: 36, height: 36) }
+                    .buttonStyle(.plain)
+                    .disabled(next == nil)
+                    .opacity(next == nil ? 0.3 : 1)
+                    .accessibilityLabel("Следующая")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
     }
 
     // MARK: - What is chosen
@@ -99,15 +160,28 @@ struct MarkingSheet: View {
 
     // MARK: - Parts
 
+    /// The expense in the middle: what it is for on a large disc, the exact amount, whom it went to, when and from where,
+    /// what else the bank said and what is suggested.
     private func header(_ s: SpendingScreen) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(s.title).font(.title3.weight(.semibold))
-            BigAmount(amount: s.amount, symbol: s.symbol, kopecks: true)
-            Text("\(s.when) · \(s.account)").font(.subheadline).foregroundStyle(Ink.muted)
-            ForEach(s.notes, id: \.self) { note in
-                Text(note).font(.footnote).foregroundStyle(Ink.muted)
+        let payment = currentPayment(s)
+        let category = currentCategory(s)
+        let color = Palette.color(payment != nil ? "violet" : (category?.color ?? "gray"))
+        return VStack(spacing: 6) {
+            ZStack {
+                Circle().fill(Lilac.surface).frame(width: 108, height: 108).shadow(color: .black.opacity(0.07), radius: 16, y: 6)
+                Circle().fill(color.opacity(0.15)).frame(width: 60, height: 60)
+                Image(systemName: Icons.symbol(payment?.icon ?? category?.icon ?? "tag")).font(.system(size: 24, weight: .semibold)).foregroundStyle(color)
+            }
+            .padding(.bottom, 10)
+            Text(Money.exact(s.amount, s.symbol)).font(.system(size: 38, weight: .bold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+            Text(s.title).font(.title3).multilineTextAlignment(.center)
+            Text("\(s.when) · \(s.account)").font(.subheadline).foregroundStyle(Lilac.muted)
+            ForEach(s.notes + (s.hint.map { [$0] } ?? []), id: \.self) { note in
+                Text(note).font(.subheadline).foregroundStyle(Lilac.muted).multilineTextAlignment(.center)
             }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
     }
 
     /// What the expense is now: the payment it made or its category, and where it counts; the cross takes back what the
@@ -117,71 +191,43 @@ struct MarkingSheet: View {
         let category = currentCategory(s)
         let undo = payment != nil ? "unlink" : "uncategorize"
         let canUndo = applying == nil && s.undo.contains { $0.choice == undo }
-        let icon = payment?.icon ?? category?.icon ?? "tag"
-        let color = payment != nil ? "violet" : (category?.color ?? "gray")
         let title = payment?.label ?? category?.label ?? "Не размечена"
         let subtitle = payment != nil ? "оплатила платёж" : category != nil ? (category?.detail == "из ZenMoney" ? "категория из ZenMoney" : "категория") : "выберите категорию или платёж"
         return HStack(spacing: 12) {
-            IconBadge(icon: icon, color: Palette.color(color), size: 44)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.body.weight(.semibold)).lineLimit(2)
-                Text(subtitle).font(.footnote).foregroundStyle(Ink.muted)
+                Text(subtitle).font(.footnote).foregroundStyle(Lilac.muted)
             }
             Spacer(minLength: 8)
             if let envelope = current(s.envelopes, clearedBy: "") {
-                HStack(spacing: 5) {
-                    MarkDot(mark: envelope)
-                    Text(Self.envelopeWords[envelope] ?? "").font(.caption).foregroundStyle(Ink.muted)
-                }
+                Text(Self.envelopeWords[envelope] ?? "")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(envelope == "week" ? Lilac.accent : Lilac.muted)
+                    .padding(.horizontal, 8)
+                    .frame(height: 22)
+                    .background((envelope == "week" ? Lilac.tint : Lilac.track), in: Capsule())
             }
             if canUndo {
                 Button { choose(undo) } label: {
-                    Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(Ink.muted.opacity(0.7))
+                    Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(Lilac.muted.opacity(0.7))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(s.undo.first { $0.choice == undo }?.label ?? "Отменить")
             }
         }
-        .padding(14)
-        .background(Ink.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(16)
+        .background(Lilac.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
         .id(title)
-        .transition(.asymmetric(insertion: .scale(scale: 0.9).combined(with: .opacity), removal: .opacity))
+        .transition(.asymmetric(insertion: .scale(scale: 0.95).combined(with: .opacity), removal: .opacity))
     }
 
     private static let envelopeWords = ["week": "в неделе", "extra": "в дополнительных", "outside": "вне бюджета", "ignored": "не учитывается"]
 
-    /// «Категория» and «Платёж» with a white capsule that slides to the picked one.
-    private func modeSwitch(_ s: SpendingScreen) -> some View {
-        let shown = shownMode(s)
-        return HStack(spacing: 4) {
-            ForEach([(Mode.category, "Категория", "square.grid.2x2"), (Mode.payment, "Платёж", "link")], id: \.1) { value, label, icon in
-                Button {
-                    withAnimation(.snappy) { mode = value }
-                } label: {
-                    Label(label, systemImage: icon)
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 38)
-                        .foregroundStyle(shown == value ? Color.primary : Ink.muted)
-                        .background {
-                            if shown == value {
-                                Capsule().fill(Ink.surface).shadow(color: .black.opacity(0.08), radius: 4, y: 1)
-                                    .matchedGeometryEffect(id: "mode", in: switcher)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(shown == value ? .isSelected : [])
-            }
-        }
-        .padding(4)
-        .background(Ink.hairline, in: Capsule())
-    }
-
     @ViewBuilder
     private func categories(_ s: SpendingScreen) -> some View {
         if s.categories.choices.isEmpty {
-            EmptyCard(text: s.categories.empty)
+            LilacEmpty(text: s.categories.empty)
         } else {
             let picked = current(s.categories.choices, clearedBy: "uncategorize")
             // In the server's order, the most popular first: a suggestion goes once a category is picked, and tiles
@@ -206,7 +252,7 @@ struct MarkingSheet: View {
                 }
             }
             if s.payments.choices.isEmpty && s.payments.others.isEmpty {
-                EmptyCard(text: s.payments.empty)
+                LilacEmpty(text: s.payments.empty)
             }
             if !s.payments.others.isEmpty {
                 Button {
@@ -217,15 +263,15 @@ struct MarkingSheet: View {
                         Spacer()
                         Image(systemName: "chevron.down").rotationEffect(.degrees(showOthers ? 180 : 0))
                     }
-                    .foregroundStyle(Ink.violet)
-                    .padding(.horizontal, 14)
+                    .foregroundStyle(Lilac.accent)
+                    .padding(.horizontal, 4)
                     .frame(height: 44)
                 }
                 .buttonStyle(.plain)
                 if showOthers {
                     ForEach(s.payments.others.filter { !$0.options.isEmpty }, id: \.label) { group in
                         VStack(alignment: .leading, spacing: 8) {
-                            SheetLabel(text: group.label)
+                            Text(group.label).font(.subheadline).foregroundStyle(Lilac.muted).padding(.top, 6)
                             ForEach(group.options, id: \.value) { option in
                                 PaymentCard(label: option.label, detail: nil, icon: option.icon ?? "repeat", selected: option.value == picked, suggested: false, compact: true) {
                                     if option.value != picked { choose(option.value) }
@@ -239,48 +285,49 @@ struct MarkingSheet: View {
         }
     }
 
-    /// Where the expense counts, as small pills; changed seldom, so at the bottom.
+    /// Where the expense counts, as large cards with what each means; the picked one is lilac.
     private func envelopes(_ s: SpendingScreen) -> some View {
         let picked = current(s.envelopes, clearedBy: "")
-        return VStack(alignment: .leading, spacing: 8) {
-            SheetLabel(text: "Где считается")
-            FlowLayout(spacing: 8) {
-                ForEach(s.envelopes) { choice in
-                    Button {
-                        if choice.choice != picked { choose(choice.choice) }
-                    } label: {
-                        HStack(spacing: 6) {
-                            // The pill says it in words, so the dot is not read out again; on the picked pill it is
-                            // white, as its colour would vanish on violet.
-                            Group {
-                                if choice.choice == picked && choice.choice != "ignored" {
-                                    if choice.choice == "outside" {
-                                        Circle().strokeBorder(.white, lineWidth: 1.2).frame(width: 7, height: 7)
-                                    } else {
-                                        Circle().fill(.white).frame(width: 7, height: 7)
-                                    }
-                                } else {
-                                    MarkDot(mark: choice.choice == "ignored" ? nil : choice.choice)
-                                }
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Где считается").font(.subheadline).foregroundStyle(Lilac.muted).padding(.top, 6)
+            ForEach(s.envelopes) { choice in
+                let selected = choice.choice == picked
+                Button {
+                    if !selected { choose(choice.choice) }
+                } label: {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            Circle().fill(selected ? Lilac.accent.opacity(0.16) : Lilac.track)
+                            if selected {
+                                Image(systemName: Self.envelopeIcons[choice.choice] ?? "circle").font(.system(size: 15, weight: .semibold)).foregroundStyle(Lilac.accent)
+                            } else {
+                                Circle().fill(Lilac.muted.opacity(0.6)).frame(width: 7, height: 7)
                             }
-                            .accessibilityHidden(true)
-                            if choice.choice == "ignored" { Image(systemName: "eye.slash").font(.caption).accessibilityHidden(true) }
-                            Text(choice.label)
                         }
-                        .font(.subheadline.weight(.medium))
-                        .padding(.horizontal, 12)
-                        .frame(height: 34)
-                        .foregroundStyle(choice.choice == picked ? Color.white : Color.primary)
-                        .background(choice.choice == picked ? AnyShapeStyle(Ink.violet) : AnyShapeStyle(Ink.surface), in: Capsule())
+                        .frame(width: 42, height: 42)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(choice.label).font(.body.weight(.semibold)).foregroundStyle(Color.primary)
+                            if let detail = choice.detail { Text(detail).font(.footnote).foregroundStyle(Lilac.muted) }
+                        }
+                        Spacer(minLength: 8)
+                        if selected { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Lilac.accent) }
                     }
-                    .buttonStyle(PressableStyle())
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(selected ? Lilac.tint : Lilac.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .shadow(color: .black.opacity(selected ? 0 : 0.05), radius: 8, y: 3)
                 }
+                .buttonStyle(PressableStyle())
+                .accessibilityLabel(choice.label)
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
     }
+
+    private static let envelopeIcons = ["week": "calendar", "extra": "bag", "outside": "arrow.uturn.right", "ignored": "eye.slash"]
 }
 
-/// A category as a tile: its icon on its colour and its name; the picked one has a violet frame and a check, the
+/// A category as a tile: its icon on a halo of its colour and its name; the picked one is lilac with a tick, the
 /// suggested one sparkles.
 struct CategoryTile: View {
     let choice: Choice
@@ -288,29 +335,37 @@ struct CategoryTile: View {
     let action: () -> Void
 
     var body: some View {
+        let color = Palette.color(choice.color ?? "gray")
         Button(action: action) {
             VStack(spacing: 8) {
-                IconBadge(icon: choice.icon ?? "tag", color: Palette.color(choice.color ?? "gray"), size: 42)
+                Image(systemName: Icons.symbol(choice.icon ?? "tag"))
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(color)
+                    .frame(width: 44, height: 44)
+                    .background(color.opacity(0.15), in: Circle())
                 Text(choice.label)
                     .font(.footnote.weight(.medium))
+                    .foregroundStyle(Color.primary)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .minimumScaleFactor(0.85)
                 if let detail = choice.detail {
-                    Text(detail).font(.caption2).foregroundStyle(Ink.muted)
+                    Text(detail).font(.caption2).foregroundStyle(Lilac.muted)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 108)
+            .frame(maxWidth: .infinity, minHeight: 84)
             .padding(.horizontal, 6)
-            .background(Ink.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.vertical, 12)
+            .background(selected ? Lilac.tint : Lilac.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(selected ? Ink.violet : .clear, lineWidth: 2)
+                RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(selected ? Lilac.accent : .clear, lineWidth: 1.5)
             }
+            .shadow(color: .black.opacity(selected ? 0 : 0.05), radius: 8, y: 3)
             .overlay(alignment: .topTrailing) {
                 if selected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.title3)
-                        .foregroundStyle(.white, Ink.violet)
+                        .foregroundStyle(.white, Lilac.accent)
                         .padding(6)
                         .transition(.scale(scale: 0.4).combined(with: .opacity))
                 } else if choice.isSuggested {
@@ -341,16 +396,20 @@ struct PaymentCard: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                IconBadge(icon: icon, color: Palette.color(selected ? "violet" : "gray"), size: compact ? 32 : 38)
+                Image(systemName: Icons.symbol(icon))
+                    .font(.system(size: compact ? 13 : 15, weight: .semibold))
+                    .foregroundStyle(selected ? Lilac.accent : Lilac.muted)
+                    .frame(width: compact ? 32 : 40, height: compact ? 32 : 40)
+                    .background((selected ? Lilac.accent : Lilac.muted).opacity(0.15), in: Circle())
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(label).font(compact ? .subheadline : .body.weight(.medium)).lineLimit(2)
-                    if let detail { Text(detail).font(.footnote).foregroundStyle(Ink.muted) }
+                    Text(label).font(compact ? .subheadline : .body.weight(.medium)).foregroundStyle(Color.primary).lineLimit(2)
+                    if let detail { Text(detail).font(.footnote).foregroundStyle(Lilac.muted) }
                 }
                 Spacer(minLength: 8)
                 if selected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.title3)
-                        .foregroundStyle(.white, Ink.violet)
+                        .foregroundStyle(.white, Lilac.accent)
                         .transition(.scale(scale: 0.4).combined(with: .opacity))
                 } else if suggested {
                     Label("похоже", systemImage: "sparkles")
@@ -359,11 +418,12 @@ struct PaymentCard: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, compact ? 10 : 12)
-            .background(Ink.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.vertical, compact ? 10 : 13)
+            .background(selected ? Lilac.tint : Lilac.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(selected ? Ink.violet : .clear, lineWidth: 2)
+                RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(selected ? Lilac.accent : .clear, lineWidth: 1.5)
             }
+            .shadow(color: .black.opacity(selected ? 0 : 0.05), radius: 8, y: 3)
         }
         .buttonStyle(PressableStyle())
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -374,7 +434,7 @@ struct PaymentCard: View {
 struct PressableStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(.snappy(duration: 0.2), value: configuration.isPressed)
     }
 }

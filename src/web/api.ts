@@ -5,10 +5,10 @@
 
 import type { Suggestion } from '../categorization.ts';
 import { addDays, monthOf, shiftMonth, type MonthString } from '../dates.ts';
-import { INCOME_MODEL_IDS, incomeModel, incomeValues, monthlyIncome, type IncomeModelId } from '../income.ts';
+import { INCOME_MODEL_IDS, incomeModel, incomeValues, monthlyIncome, type Income, type IncomeModelId } from '../income.ts';
 import { listOperations, type Operation } from '../ledger.ts';
-import { regularTotals, regularValues, type RegularExpense } from '../regular.ts';
-import { adviceTarget, envelopeOf, monthOfWeek, WEEK_LIMIT, type Envelope, type PurchaseStatus, type WeekSummary } from '../week.ts';
+import { paymentDate, regularTotals, regularValues, type RegularExpense } from '../regular.ts';
+import { adviceTarget, envelopeOf, MONTH_LIMIT, monthOfWeek, WEEK_LIMIT, type Envelope, type PurchaseStatus, type WeekSummary } from '../week.ts';
 import type { DateString, EntityCollections } from '../zenmoney/types.ts';
 import { capitalize, dayHeading, dayMonth, money, monthName, plural, timeOn, weekLabel, WEEKDAYS_FULL } from './format.ts';
 import { categoryIcon, ENTRY_ICONS, entryIcon, type IconName } from './icons.ts';
@@ -19,6 +19,7 @@ import {
   loadDashboard,
   monthWeekLine,
   PLAN_AHEAD,
+  PURCHASE_KINDS,
   purchaseActions,
   purchaseLine,
   regularPaymentLine,
@@ -46,7 +47,7 @@ import { loadOperations, operationCategory, operationLine } from './pages/operat
 import { loadRegular, regularLine, regularTotalNote, STATUS_TONE, timeline, type Placed } from './pages/regular.ts';
 import { categoryDetails, loadBudgetSetup, loadSettingsPage } from './pages/settings.ts';
 import { loadUncategorized, suggestedChoice, suggestionName } from './pages/uncategorized.ts';
-import { categoryColor, toneColor } from './tones.ts';
+import { categoryColor, toneColor, type Tone } from './tones.ts';
 
 /** A row of a list, as entryRow and operationRow draw it. */
 export interface Row {
@@ -124,15 +125,19 @@ function expenseDays(m: Pick<Marking, 'marks' | 'purchases'>, expenses: readonly
   return byDay(expenses, (o) => o.date, today).map((day) => ({ ...day, items: day.items.map((o) => expenseRow(m, o)) }));
 }
 
+/**
+ * A purchase of a plan, saying first whether it is required or flexible; until it is bought, what paid it follows, and
+ * that it waits to be bought goes without saying.
+ */
 function purchaseRow(status: PurchaseStatus, current: DateString, symbol: string) {
-  const { purchase: p, bought } = status;
+  const { purchase: p, bought, covered } = status;
   const key = `purchase-${p.id}`;
   const line = purchaseLine(status, current, symbol);
   return {
     ...row({
       id: key,
       title: p.title,
-      details: line.details,
+      details: bought ? line.details : [PURCHASE_KINDS[p.kind].label, covered > 0 ? line.details : null].filter(Boolean).join(' · '),
       icon: categoryIcon(p.title),
       color: bought ? toneColor('gray') : p.envelope === 'extra' ? toneColor('violet') : categoryColor(key, null),
       amount: line.amount,
@@ -169,6 +174,37 @@ export interface BudgetOptions {
   today: DateString;
   source: 'zenmoney' | 'demo';
   canSync: boolean;
+  /** When the server last synced with ZenMoney, as an ISO moment; null before it has, or when it cannot. */
+  syncedAt?: string | null;
+}
+
+/**
+ * The top of the week in the app: what is free, what the plan holds by kind, what was spent today (in a past week, in
+ * all of it), how many expenses wait for a category, and when the data came from ZenMoney.
+ */
+function weekHome(d: ReturnType<typeof loadDashboard>, data: EntityCollections, saved: SavedBudget, options: BudgetOptions) {
+  const { today } = options;
+  const w = d.week;
+  const phase = w.week > d.current ? 'ahead' : w.week < d.current ? 'past' : 'current';
+  const todaySpent = w.spending.filter((o) => o.date === today && envelopeOf(d.marking, o) === 'week').reduce((sum, o) => sum + o.amount, 0);
+  const pending = loadUncategorized(data, saved, { today }).pending.length;
+  return {
+    free: { label: phase === 'current' ? 'Свободно' : phase === 'past' ? 'Итог недели' : 'Будет свободно', amount: w.free },
+    reserved: {
+      label: 'Зарезервировано',
+      amount: w.planned,
+      required: { label: 'обязательное', amount: w.required },
+      flexible: { label: 'гибкое', amount: w.planned - w.required },
+    },
+    spent:
+      phase === 'current'
+        ? { label: 'Сегодня потрачено', amount: todaySpent }
+        : phase === 'past'
+          ? { label: 'Потрачено за неделю', amount: w.spent }
+          : null,
+    pending: { count: pending, label: pending === 0 ? 'Всё разобрано' : `${plural(pending, ['трата ждёт', 'траты ждут', 'трат ждут'])} разбора` },
+    syncedAt: options.syncedAt ?? null,
+  };
 }
 
 /** The week tab: what is left, the spending by days, the plan and, in the current week, the wishes. */
@@ -189,6 +225,7 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
     prev: addDays(w.week, -7),
     next: next <= addDays(current, 7 * PLAN_AHEAD) ? next : null,
     total: weekTotal(w, current, d.symbol),
+    home: weekHome(d, data, saved, options),
     /** What the week allows and the usual amount; another amount posts to /api/week-limits/:week, the usual one back to /api/week-limits/:week/delete. */
     limit: { amount: w.limit, usual: WEEK_LIMIT },
     days: expenseDays(d.marking, w.spending, today),
@@ -207,8 +244,32 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
   };
 }
 
-/** The month tab: its weeks, and its extras with what is left of them. */
-export function monthScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { month?: string | null }) {
+/**
+ * Where a month's income goes, as the app's month tab draws it: the month's regular payments, the budgets of its weeks,
+ * the extras, and what is left over for savings (short of money when it is below zero). The income is what the incomes
+ * bring a month, as /income counts it; null without incomes.
+ */
+function monthFlow(d: ReturnType<typeof loadDashboard>, saved: SavedBudget, incomes: Income[], thisMonth: MonthString) {
+  const income = monthlyIncome(incomes);
+  if (income <= 0) return null;
+  const month = d.extras.month;
+  const regular = saved.regular.filter((e) => paymentDate(e, month) !== null).reduce((sum, e) => sum + e.amount, 0);
+  const weeks = d.weeks.reduce((sum, w) => sum + w.limit, 0);
+  const savings = income - regular - weeks - MONTH_LIMIT;
+  const part = (label: string, amount: number) => ({ label, amount, share: amount / income });
+  return {
+    income: { label: 'Доход', amount: income, note: month === thisMonth ? 'в этом месяце' : `в ${monthName(month, 'prepositional')}` },
+    parts: [
+      part('Обязательные расходы', regular),
+      part('Недельные бюджеты', weeks),
+      part('Доп. бюджет', MONTH_LIMIT),
+      part(savings >= 0 ? 'В накопления' : 'Не хватает', savings),
+    ],
+  };
+}
+
+/** The month tab: where its income goes, its weeks, and its extras with what is left of them. */
+export function monthScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { month?: string | null; incomes?: Income[] }) {
   const { today } = options;
   const d = loadDashboard(data, saved, { ...options, view: 'month', month: options.month });
   const { current } = d;
@@ -230,6 +291,7 @@ export function monthScreen(data: EntityCollections, saved: SavedBudget, options
       return { ...row({ id: `week-${w.week}`, title: weekLabel(w.week), details: line.details, icon: 'calendar', color: toneColor(line.tone), amount: line.amount }), week: w.week };
     }),
     total,
+    flow: monthFlow(d, saved, options.incomes ?? [], thisMonth),
     purchases: m.purchases.map((p) => purchaseRow(p, current, d.symbol)),
     spending: expenseDays(d.marking, m.spending, today),
     newPurchaseWeek: m.month === thisMonth ? current : (d.weeks[0]?.week ?? current),
@@ -283,9 +345,35 @@ export function spendingScreen(data: EntityCollections, saved: SavedMarking, opt
       empty: PAYMENT_WORDS.empty,
     },
     categories: { choices: categories.choices.map((c) => ({ ...colored(c), icon: categoryIcon(c.label) })), empty: categories.empty },
-    envelopes: envelopeOptions(marking, o),
+    /** What the suggestion is, when there is one; its choice is marked as suggested. */
+    hint: suggestion ? `Похоже на ${suggestionName(suggestion)}` : null,
+    envelopes: envelopeOptions(marking, o).map((c) => ({ ...c, detail: ENVELOPE_HINTS[c.choice as Envelope] })),
     undo: undoChoices(marking, o),
   };
+}
+
+/** What each place an expense counts in means, under its name on the app's marking sheet. */
+const ENVELOPE_HINTS: Record<Envelope, string> = {
+  week: 'Учесть в текущей неделе',
+  extra: 'Из дополнительных месяца',
+  outside: 'Не учитывать в недельном бюджете',
+  ignored: 'Например, перевод или снятые наличные',
+};
+
+/**
+ * What an expense is in the app's list of operations, as a chip under its amount: waiting for a category, paying a
+ * regular expense, in the extras, outside the budget or not counted. An ordinary expense of the week has none, and
+ * neither have incomes and transfers.
+ */
+function operationChip(m: Pick<SavedMarking, 'marks' | 'purchases'>, o: Operation): { label: string; tone: Tone } | null {
+  if (o.kind !== 'expense') return null;
+  if (o.ignored) return { label: 'Не учитывается', tone: 'gray' };
+  if (o.category === null) return { label: 'Ждёт разбора', tone: 'red' };
+  if (o.regular) return { label: 'Регулярный', tone: 'violet' };
+  const envelope = envelopeOf(m, o);
+  if (envelope === 'extra') return { label: 'Дополнительные', tone: 'violet' };
+  if (envelope === 'outside') return { label: 'Вне бюджета', tone: 'gray' };
+  return null;
 }
 
 /** Operations of a month by day, filtered as on the page, and the month's spending by category. */
@@ -333,8 +421,11 @@ export function operationsScreen(
         hold: o.hold,
         original: o.original ? { amount: o.original.amount, symbol: o.original.instrument.symbol } : null,
         spending: o.kind === 'expense' ? o.id : null,
+        chip: operationChip(saved, o),
       })),
     })),
+    /** Expenses of the month that wait for a category, as «Ждут разбора» counts them. */
+    pending: loadUncategorized(data, saved, { today: options.today, month: d.month }).pending.length,
     empty: filtered
       ? 'Ничего не нашлось. Попробуйте другой запрос или уберите фильтры.'
       : `В ${monthName(d.month, 'prepositional')} операций нет. Новые появятся после синхронизации ZenMoney.`,

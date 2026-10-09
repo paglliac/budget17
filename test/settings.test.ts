@@ -58,12 +58,14 @@ describe('Settings', () => {
   it('keeps purchases by week, edits them, marks them bought and deletes them', () => {
     using settings = new Settings(':memory:');
 
-    const boots = settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-10-12', envelope: 'week', done: false });
-    settings.addPurchase({ title: 'Ласты', amount: 5_000, week: '2026-10-05', envelope: 'extra', done: false });
+    const boots = settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-10-12', envelope: 'week', kind: 'flexible', done: false });
+    settings.addPurchase({ title: 'Ласты', amount: 5_000, week: '2026-10-05', envelope: 'extra', kind: 'flexible', done: false });
     assert.deepEqual(settings.purchases().map((p) => [p.title, p.envelope]), [['Ласты', 'extra'], ['Ботинки', 'week']]);
 
     assert.equal(settings.updatePurchase(boots.id, { amount: 7_400, done: true }), true);
     assert.deepEqual(settings.purchases()[1], { ...boots, amount: 7_400, done: true });
+    settings.updatePurchase(boots.id, { kind: 'required' });
+    assert.equal(settings.purchases()[1]?.kind, 'required');
 
     assert.equal(settings.deletePurchase(boots.id), true);
     assert.equal(settings.updatePurchase(boots.id, { done: false }), false);
@@ -73,7 +75,7 @@ describe('Settings', () => {
   it('begins weeks on Monday until another day is picked, and moves purchases and week amounts to the weeks that hold most of their days', () => {
     using settings = new Settings(':memory:');
     assert.equal(settings.weekStart(), 0);
-    const haircut = settings.addPurchase({ title: 'Стрижка', amount: 2_200, week: '2026-10-12', envelope: 'week', done: false });
+    const haircut = settings.addPurchase({ title: 'Стрижка', amount: 2_200, week: '2026-10-12', envelope: 'week', kind: 'flexible', done: false });
     settings.setWeekLimit('2026-10-12', 30_000);
     settings.setWeekLimit('2026-10-19', 50_000);
 
@@ -104,7 +106,7 @@ describe('Settings', () => {
     assert.equal(settings.updateWish(styler.id, { title: 'Укладка для волос', amount: 4_500 }), true);
 
     const planned = settings.planWish(styler.id, { week: '2026-10-05', envelope: 'week' });
-    assert.deepEqual(planned && { ...planned, id: 0 }, { id: 0, title: 'Укладка для волос', amount: 4_500, week: '2026-10-05', envelope: 'week', done: false });
+    assert.deepEqual(planned && { ...planned, id: 0 }, { id: 0, title: 'Укладка для волос', amount: 4_500, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: false });
     assert.deepEqual(settings.wishes().map((w) => w.title), ['Пылесос']);
     assert.equal(settings.planWish(styler.id, { week: '2026-10-05', envelope: 'week' }), null);
   });
@@ -143,7 +145,7 @@ describe('Settings', () => {
   it('links expenses to purchases apart from their categories, and unlinks them when the purchase goes', () => {
     using settings = new Settings(':memory:');
     const rent = settings.addRegularExpense(regularInput({ title: 'Аренда', amount: 40_000, day: 10 }));
-    const shoes = settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-10-05', envelope: 'week', done: false });
+    const shoes = settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: false });
 
     settings.categorize('tx-1', { tag: 'shoes' });
     settings.linkPurchase('tx-1', shoes.id);
@@ -261,6 +263,9 @@ describe('Settings', () => {
       assert.equal(settings.weekStart(), 2);
       assert.deepEqual([...settings.weekLimits()], [['2026-10-07', 30_000]]);
       assert.equal(settings.purchases()[0]?.week, '2026-10-14', 'Wednesday 14 – Tuesday 20 October');
+      assert.equal(settings.purchases()[0]?.kind, 'flexible', 'a purchase from before kinds is flexible');
+      settings.updatePurchase(settings.purchases()[0]!.id, { kind: 'required' });
+      assert.equal(settings.purchases()[0]?.kind, 'required');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

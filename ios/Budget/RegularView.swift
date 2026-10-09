@@ -1,47 +1,42 @@
 import SwiftUI
 
 /// Regular expenses in the order of the month: what is behind, quieter, a line at today, what is ahead, and those that
-/// start later, each by the date of its payment; on top, what is left to pay this month.
+/// start later, each by the date of its payment; on top, what is left to pay this month with its bar.
 struct RegularPanel: View {
-    let frame: MoreFrame
     @State private var editing: RegularItem?
     @State private var adding = false
 
     var body: some View {
         Screen(path: "regular") { (s: RegularScreen) in
-            SplitScreen {
-                frame.header
-            } summary: {
-                VStack(alignment: .leading, spacing: 10) {
-                    SummaryLabel(s.total.label)
-                    BigAmount(amount: s.total.amount, symbol: s.symbol)
-                    Text(s.total.note).font(.footnote).foregroundStyle(Ink.muted)
-                    if let parts = s.total.parts, !parts.isEmpty { SummaryBar(parts: parts, total: s.total.amount) }
-                }
-            } band: {
-                frame.band
-            } content: {
-                ForEach(s.behind) { item in card(item, s.symbol) }
-                if !s.behind.isEmpty && !s.ahead.isEmpty { TodayLine(text: s.today) }
-                ForEach(s.ahead) { item in card(item, s.symbol) }
+            MorePage {
+                LilacSummary(label: s.total.label, amount: s.total.amount, symbol: s.symbol, note: s.total.note)
+                if let parts = s.total.parts, !parts.isEmpty { LilacShareBar(parts: parts).padding(.top, 14) }
+                rows(s.behind, s.symbol, first: true).padding(.top, 10)
+                if !s.behind.isEmpty && !s.ahead.isEmpty { LilacTodayLine(text: s.today) }
+                rows(s.ahead, s.symbol, first: s.behind.isEmpty)
                 if !s.later.isEmpty {
-                    SheetLabel(text: "Начнутся позже")
-                    ForEach(s.later) { item in card(item, s.symbol) }
+                    LilacHeading("Начнутся позже")
+                    rows(s.later, s.symbol, first: true)
                 }
-                AddCard(label: "Добавить регулярную трату") { adding = true }
+                LilacAddRow(label: "Добавить регулярную трату") { adding = true }
             }
             .sheet(item: $editing) { item in RegularSheet(item: item, icons: s.icons, symbol: s.symbol) }
             .sheet(isPresented: $adding) { RegularSheet(item: nil, icons: s.icons, symbol: s.symbol) }
         }
     }
 
-    private func card(_ item: RegularItem, _ symbol: String) -> some View {
-        Button { editing = item } label: { Card(row: item.row, symbol: symbol) }
+    private func rows(_ items: [RegularItem], _ symbol: String, first: Bool) -> some View {
+        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+            Button { editing = item } label: {
+                LilacRow(marker: .icon(item.row), title: item.row.title, details: item.row.details, amount: item.row.amount, symbol: symbol,
+                         muted: item.row.muted, first: first && index == 0)
+            }
             .buttonStyle(.card)
+        }
     }
 }
 
-/// A regular expense to add or change: name, amount and day, and the dates and icon folded under them.
+/// A regular expense to add or change: name and amount large, the day, the dates it starts and ends on, and its icon.
 struct RegularSheet: View {
     let item: RegularItem?
     let icons: [IconChoice]
@@ -56,80 +51,65 @@ struct RegularSheet: View {
     @State private var hasEnd = false
     @State private var end = Date()
     @State private var icon = ""
-    @State private var errors: [String: String] = [:]
-    @State private var error: String?
     @State private var confirmDelete = false
-    @State private var busy = false
+    @State private var sender = FormSender()
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("Например, аренда", text: $title)
-                    FieldError(text: errors["title"])
-                    TextField("Сумма, \(symbol)", text: $amount).decimalKeyboard()
-                    FieldError(text: errors["amount"])
-                    TextField("Число месяца", text: $day).numberKeyboard()
-                    FieldError(text: errors["day"])
-                } footer: {
-                    Text("Если числа нет в месяце, например 31-го, платёж приходится на последний день.")
-                }
-                Section {
-                    Toggle("Дата начала", isOn: $hasStart)
-                    if hasStart { DatePicker("С", selection: $start, displayedComponents: .date) }
-                    FieldError(text: errors["start"])
-                    Toggle("Дата окончания", isOn: $hasEnd)
-                    if hasEnd { DatePicker("По", selection: $end, displayedComponents: .date) }
-                    FieldError(text: errors["end"])
-                }
-                Section("Иконка") {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 52))], spacing: 12) {
-                        iconButton(name: "", symbolName: "textformat", label: "По названию")
-                        ForEach(icons, id: \.icon) { choice in
-                            iconButton(name: choice.icon, symbolName: Icons.symbol(choice.icon), label: choice.label)
-                        }
-                    }
-                    .padding(.vertical, 6)
-                }
-                if item != nil {
-                    Section { Button("Удалить", role: .destructive) { confirmDelete = true } }
+        LilacForm(
+            title: item == nil ? "Новая регулярная трата" : nil,
+            destructive: item == nil ? nil : (label: "Удалить", action: { confirmDelete = true }),
+            primary: item == nil ? "Добавить" : "Сохранить",
+            busy: sender.busy,
+            save: save
+        ) {
+            LilacBigFields(title: $title, amount: $amount, placeholder: "Например, аренда", symbol: symbol, errors: sender.errors)
+            LilacTextField(label: "Число месяца", text: $day, placeholder: "5", error: sender.errors["day"], keyboard: .number)
+            Text("Если числа нет в месяце, например 31-го, платёж приходится на последний день.")
+                .font(.footnote).foregroundStyle(Lilac.muted).padding(.top, 6)
+            LilacPanel {
+                LilacPanelLine(title: "Дата начала", first: true) { Toggle("", isOn: $hasStart).labelsHidden() }
+                if hasStart { LilacPanelLine(title: "С") { DatePicker("", selection: $start, displayedComponents: .date).labelsHidden() } }
+                LilacPanelLine(title: "Дата окончания") { Toggle("", isOn: $hasEnd).labelsHidden() }
+                if hasEnd { LilacPanelLine(title: "По") { DatePicker("", selection: $end, displayedComponents: .date).labelsHidden() } }
+            }
+            .padding(.top, 18)
+            FieldError(text: sender.errors["start"] ?? sender.errors["end"])
+            LilacFieldLabel(text: "Иконка")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 52))], spacing: 10) {
+                iconButton(name: "", symbolName: "textformat", label: "По названию")
+                ForEach(icons, id: \.icon) { choice in
+                    iconButton(name: choice.icon, symbolName: Icons.symbol(choice.icon), label: choice.label)
                 }
             }
-            .navigationTitle(item == nil ? "Новая регулярная трата" : "Регулярная трата")
-            .inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(item == nil ? "Добавить" : "Сохранить") { save() }.disabled(busy)
-                }
-            }
-            .confirmationDialog("Удалить регулярную трату?", isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button("Удалить", role: .destructive) { submit("regular/\(item!.expense.id)/delete", [:]) }
-            } message: {
-                Text("Траты, привязанные к ней, останутся без привязки.")
-            }
-            .errorAlert($error)
-            .onAppear(perform: fill)
         }
+        .confirmationDialog("Удалить регулярную трату?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Удалить", role: .destructive) { sender.send(session, "regular/\(item!.expense.id)/delete", [:]) { dismiss() } }
+        } message: {
+            Text("Траты, привязанные к ней, останутся без привязки.")
+        }
+        .errorAlert($sender.error)
+        .onAppear(perform: fill)
     }
 
     private func iconButton(name: String, symbolName: String, label: String) -> some View {
-        Button { icon = name } label: {
+        let picked = icon == name
+        return Button { icon = name } label: {
             Image(systemName: symbolName)
                 .font(.title3)
-                .frame(width: 44, height: 44)
-                .background(icon == name ? Color.accentColor.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(icon == name ? Color.accentColor : .clear, lineWidth: 1.5))
+                .foregroundStyle(picked ? Lilac.accent : Color.primary)
+                .frame(width: 50, height: 50)
+                .background(picked ? Lilac.tint : Lilac.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(picked ? Lilac.accent : .clear, lineWidth: 1.5))
         }
-        .buttonStyle(.borderless)
-        .tint(.primary)
+        .buttonStyle(.plain)
         .accessibilityLabel(label)
+        .accessibilityAddTraits(picked ? .isSelected : [])
     }
 
     private func fill() {
         guard let values = item?.values else { return }
         title = values["title"] ?? ""
-        amount = values["amount"] ?? ""
+        amount = Money.typing(values["amount"] ?? "")
         day = values["day"] ?? ""
         icon = values["icon"] ?? ""
         if let text = values["start"], let date = Dates.date(text) {
@@ -147,21 +127,6 @@ struct RegularSheet: View {
             "title": title, "amount": amount, "day": day, "icon": icon,
             "start": hasStart ? Dates.text(start) : "", "end": hasEnd ? Dates.text(end) : "",
         ]
-        submit(item.map { "regular/\($0.expense.id)" } ?? "regular", form)
-    }
-
-    private func submit(_ path: String, _ form: [String: String]) {
-        busy = true
-        Task {
-            defer { busy = false }
-            do {
-                try await session.send(path, form)
-                dismiss()
-            } catch APIError.invalid(let errors) {
-                self.errors = errors
-            } catch {
-                self.error = error.localizedDescription
-            }
-        }
+        sender.send(session, item.map { "regular/\($0.expense.id)" } ?? "regular", form) { dismiss() }
     }
 }

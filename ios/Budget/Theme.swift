@@ -36,6 +36,7 @@ enum Words {
 enum Dates {
     static let months = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
     static let weekdays = ["П", "В", "С", "Ч", "П", "С", "В"]
+    static let weekdaysShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
     /// The day of the month, its month in three letters and the year of a date, as the date beside a card shows them.
     static func parts(_ text: String) -> (day: String, month: String, year: String)? {
@@ -49,6 +50,12 @@ enum Dates {
         guard let date = date(text) else { return "" }
         // The calendar counts Sunday as 1, Monday as 2.
         return weekdays[(calendar.component(.weekday, from: date) + 5) % 7]
+    }
+
+    /// The short name of a date's day of the week, as the new week strip heads its days: Пн for Monday.
+    static func weekdayShort(_ text: String) -> String {
+        guard let date = date(text) else { return "" }
+        return weekdaysShort[(calendar.component(.weekday, from: date) + 5) % 7]
     }
 
     /// The date `days` after a date.
@@ -87,6 +94,14 @@ extension View {
         #endif
     }
 
+
+    func hiddenNavigationBar() -> some View {
+        #if os(iOS)
+        toolbar(.hidden, for: .navigationBar)
+        #else
+        self
+        #endif
+    }
 
     func decimalKeyboard() -> some View {
         #if os(iOS)

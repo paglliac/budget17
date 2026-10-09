@@ -9,17 +9,14 @@ struct SettingsSheet: View {
     @State private var error: String?
 
     var body: some View {
-        NavigationStack {
-            Form {
-                if let budget { BudgetSection(screen: budget, error: $error) }
-                ServerSections(switched: { dismiss() }, header: "Сервер")
-            }
-            .navigationTitle("Настройки")
-            .inlineTitle()
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() } } }
-            .errorAlert($error)
-            .task(id: session.version) { await load() }
+        LilacForm(title: "Настройки") {
+            if let budget { BudgetSection(screen: budget, error: $error) }
+            LilacFieldLabel(text: "Сервер")
+            ServerPanel { dismiss() }
         }
+        .errorAlert($error)
+        .task(id: session.version) { await load() }
+        .accessibilityIdentifier("settings")
     }
 
     private func load() async {
@@ -28,7 +25,7 @@ struct SettingsSheet: View {
     }
 }
 
-/// The day a week begins on, picked from a list and saved at once, and the usual amount of a week.
+/// The day a week begins on, picked in one tap and saved at once, and the usual amount of a week.
 struct BudgetSection: View {
     let screen: BudgetSettingsScreen
     @Binding var error: String?
@@ -37,13 +34,17 @@ struct BudgetSection: View {
     @State private var picked: Int?
 
     var body: some View {
-        Section("Бюджет") {
-            Picker("Неделя начинается", selection: Binding(get: { picked ?? screen.weekStart }, set: { pick($0) })) {
-                ForEach(screen.weekdays, id: \.value) { day in Text(day.label).tag(day.value) }
-            }
-            LabeledContent("На неделю", value: Money.text(screen.limit, screen.symbol))
-        }
+        LilacFieldLabel(text: "Неделя начинается")
+        LilacSegmented(
+            items: screen.weekdays.map { Segment(value: $0.value, label: Dates.weekdaysShort[$0.value]) },
+            selection: Binding(get: { picked ?? screen.weekStart }, set: { pick($0) }),
+            width: nil
+        )
         .onChange(of: screen.weekStart) { picked = nil }
+        LilacPanel {
+            LilacPanelLine(title: "На неделю", first: true) { Text(Money.text(screen.limit, screen.symbol)).foregroundStyle(Lilac.muted) }
+        }
+        .padding(.top, 12)
     }
 
     private func pick(_ day: Int) {

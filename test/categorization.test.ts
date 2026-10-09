@@ -94,6 +94,7 @@ describe('paymentChoices', () => {
     amount,
     week,
     envelope: 'week',
+    kind: 'flexible',
     done: false,
     ...overrides,
   });

@@ -1,34 +1,5 @@
 import SwiftUI
 
-/// An icon on a tinted circle, as rows of the web UI start.
-struct IconBadge: View {
-    let icon: String
-    let color: Color
-    var size: CGFloat = 34
-
-    var body: some View {
-        Image(systemName: Icons.symbol(icon))
-            .font(.system(size: size * 0.42, weight: .semibold))
-            .foregroundStyle(color)
-            .frame(width: size, height: size)
-            .background(color.opacity(0.16), in: Circle())
-    }
-}
-
-/// Where an expense or a purchase counts, before its amount: yellow in the week, violet in the extras, a ring outside.
-struct MarkDot: View {
-    let mark: String?
-
-    var body: some View {
-        switch mark {
-        case "week": Circle().fill(Palette.week).frame(width: 7, height: 7).accessibilityLabel("В неделе")
-        case "extra": Circle().fill(Palette.extra).frame(width: 7, height: 7).accessibilityLabel("Дополнительные")
-        case "outside", "ignored": Circle().strokeBorder(Color.secondary, lineWidth: 1.2).frame(width: 7, height: 7).accessibilityLabel("Вне бюджета")
-        default: EmptyView()
-        }
-    }
-}
-
 /// Lays chips out in lines, as many to a line as fit.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8

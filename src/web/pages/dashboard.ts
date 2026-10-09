@@ -25,6 +25,7 @@ import {
   type Advice,
   type Budget,
   type ExtrasSummary,
+  type PurchaseKind,
   type PurchaseStatus,
   type WeekStart,
   type WeekSummary,
@@ -78,6 +79,8 @@ export interface DashboardForm {
   errors: Partial<Record<FormField, string>>;
   /** Which list a new purchase was added to. */
   envelope: 'week' | 'extra';
+  /** A purchase's kind as sent. */
+  purchaseKind?: PurchaseKind;
   /** The week the purchase or the amount was sent for, as sent. */
   week: string | null;
 }
@@ -209,17 +212,19 @@ export function submitDashboard(
       return { status: 'saved' };
     }
     const envelope = existing ? existing.envelope : body.get('envelope') === 'extra' ? 'extra' : 'week';
+    // A form without the kind, such as an older app's, keeps the purchase's.
+    const kind: PurchaseKind = body.has('kind') ? (body.get('kind') === 'required' ? 'required' : 'flexible') : (existing?.kind ?? 'flexible');
     const parsed = parseEntry(body);
-    if ('errors' in parsed) return { status: 'invalid', form: { kind: 'purchase', id, ...parsed, envelope, week: body.get('week') } };
+    if ('errors' in parsed) return { status: 'invalid', form: { kind: 'purchase', id, ...parsed, envelope, purchaseKind: kind, week: body.get('week') } };
     const start = settings.weekStart();
     const current = weekOf(context.today, start);
     if (!existing) {
       const week = parseWeek(body.get('week'), current, start);
-      settings.addPurchase({ ...parsed.entry, week, envelope, done: false });
+      settings.addPurchase({ ...parsed.entry, week, envelope, kind, done: false });
     } else {
       const moved = action === 'move' ? (existing.envelope === 'week' ? 'extra' : 'week') : existing.envelope;
       const week = body.has('week') ? parseWeek(body.get('week'), current, start) : existing.week;
-      settings.updatePurchase(existing.id, { ...parsed.entry, envelope: moved, week });
+      settings.updatePurchase(existing.id, { ...parsed.entry, envelope: moved, kind, week });
     }
     return { status: 'saved' };
   }
@@ -598,6 +603,7 @@ function purchaseItem(page: Page, status: PurchaseStatus): Html {
       color,
       fields: [
         ...entryFields(form ?? { values: { title: p.title, amount: amountText(p.amount) }, errors: {} }, d.symbol),
+        kindField(form?.purchaseKind ?? p.kind),
         weekField(page, form?.week ? parseWeek(form.week, current, d.weekStart) : p.week),
       ],
       extraActions: purchaseActions(status).map((a) => ({ label: a.label, action: href(`/purchases/${p.id}/${a.action}`) })),
@@ -750,8 +756,28 @@ function newPurchaseForm({ d, href }: Page, week: DateString, envelope: 'week' |
     submitLabel: 'В план',
     icon: 'plus',
     color: toneColor('gray'),
-    fields: entryFields(form ?? { values: { title: '', amount: '' }, errors: {} }, d.symbol, envelope === 'extra' ? 'Например, куртка' : 'Например, ботинки'),
+    fields: [
+      ...entryFields(form ?? { values: { title: '', amount: '' }, errors: {} }, d.symbol, envelope === 'extra' ? 'Например, куртка' : 'Например, ботинки'),
+      kindField(form?.purchaseKind ?? 'flexible'),
+    ],
     hidden: { week, envelope },
+  });
+}
+
+/** The words for a purchase's kind: what it is and what that means for the plan. */
+export const PURCHASE_KINDS: Record<PurchaseKind, { label: string; hint: string }> = {
+  required: { label: 'Обязательная', hint: 'Лучше не трогать' },
+  flexible: { label: 'Гибкая', hint: 'Можно перенести' },
+};
+
+/** Whether a purchase had better stay in its week or can move. */
+function kindField(value: PurchaseKind): Html {
+  return selectField({
+    label: 'Тип',
+    name: 'kind',
+    value,
+    width: 270,
+    groups: [{ label: 'Тип покупки', options: (['flexible', 'required'] as const).map((k) => ({ value: k, label: `${PURCHASE_KINDS[k].label}: ${PURCHASE_KINDS[k].hint.toLowerCase()}` })) }],
   });
 }
 

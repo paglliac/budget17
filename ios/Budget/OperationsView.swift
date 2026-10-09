@@ -1,9 +1,24 @@
 import SwiftUI
 
-/// Operations of a month by day, filtered by kind, category and text, as on the web page; an expense opens to be marked.
+/// What the operations show: all of them, one kind, or the expenses that wait for a category.
+enum OperationsFilter: Hashable {
+    case all
+    case pending
+    /// expense, income or transfer.
+    case kind(String)
+
+    var kind: String? {
+        if case .kind(let kind) = self { return kind }
+        return nil
+    }
+}
+
+/// Operations of a month by day, filtered by kind, category and text, as on the web page; an expense opens to be
+/// marked. «Ждут разбора» shows the expenses that came without a category instead, with suggestions to accept, and
+/// what was sorted.
 struct OperationsView: View {
+    @Binding var filter: OperationsFilter
     @State private var month: String?
-    @State private var kind: String?
     @State private var category: String?
     @State private var query: String?
     @State private var searching = false
@@ -13,88 +28,38 @@ struct OperationsView: View {
     @FocusState private var searchFocused: Bool
 
     var body: some View {
-        Screen(path: "operations", query: ["month": month, "kind": kind, "category": category, "q": query]) { (s: OperationsScreen) in
-            let index = s.months.firstIndex { $0.value == s.month } ?? 0
-            SplitScreen {
-                TopHeader {
-                    Text("Операции").font(.title2.weight(.bold))
-                } trailing: {
-                    PeriodSteps(
-                        back: index + 1 < s.months.count ? { month = s.months[index + 1].value } : nil,
-                        forward: index > 0 ? { month = index == 1 ? nil : s.months[index - 1].value } : nil,
-                        toCurrent: nil
-                    )
-                }
-            } summary: {
-                VStack(alignment: .leading, spacing: 10) {
-                    SummaryLabel(text: "\(s.months[index].label), потрачено") {
-                        Button { showCategories = true } label: {
-                            Label("По категориям", systemImage: "chart.pie").font(.subheadline.weight(.medium))
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Ink.violet)
-                        .accessibilityIdentifier("categories")
-                    }
-                    BigAmount(amount: s.totals.expense, symbol: s.symbol)
-                    HStack(spacing: 12) {
-                        Text("получено \(Money.text(s.totals.income, s.symbol, sign: true))")
-                        Text("\(s.totals.count) \(Words.plural(s.totals.count, "операция", "операции", "операций"))")
-                    }
-                    .font(.footnote)
-                    .foregroundStyle(Ink.muted)
-                }
-                if s.categoryTitle != nil || s.query != nil {
-                    HStack(spacing: 8) {
-                        if let title = s.categoryTitle { FilterTag(label: title) { category = nil } }
-                        if let q = s.query {
-                            FilterTag(label: "«\(q)»") {
-                                query = nil
-                                search = ""
+        Screen(path: "operations", query: ["month": month, "kind": filter.kind, "category": category, "q": query]) { (s: OperationsScreen) in
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        LilacTitle(text: "Операции") {
+                            LilacIconButton(systemImage: "magnifyingglass", label: "Найти") {
+                                withAnimation(.snappy) { searching = true }
+                                searchFocused = true
                             }
                         }
+                        if searching { searchField }
+                        controls(s).padding(.top, 10)
+                        if filter != .pending {
+                            LilacFigures(items: [
+                                .init(label: "потрачено", amount: s.totals.expense),
+                                .init(label: "получено", amount: s.totals.income, sign: true, color: Palette.color("green")),
+                            ], symbol: s.symbol)
+                            .padding(.top, 16)
+                        }
+                        LilacFilterChips(items: chips(s), selection: $filter).padding(.top, 16)
+                        if filter == .pending {
+                            PendingList(month: month, sheet: $sheet)
+                        } else {
+                            list(s)
+                        }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 24)
                 }
-            } band: {
-                if searching {
-                    HStack(spacing: 8) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "magnifyingglass").foregroundStyle(.white.opacity(0.6))
-                            TextField("", text: $search, prompt: Text("Найти операцию").foregroundStyle(.white.opacity(0.5)))
-                                .foregroundStyle(.white)
-                                .focused($searchFocused)
-                                .submitLabel(.search)
-                                .onSubmit { query = search.isEmpty ? nil : search }
-                        }
-                        .padding(.horizontal, 12)
-                        .frame(height: 36)
-                        .background(Ink.pill, in: Capsule())
-                        BandPill(label: "Отмена", selected: false) {
-                            searching = false
-                            search = ""
-                            query = nil
-                        }
-                    }
-                } else {
-                    HStack(spacing: 8) {
-                        BandSwitch(items: s.kinds.map { BandItem(value: $0.value, label: "\($0.label) \($0.count)") }, selection: $kind)
-                        Spacer(minLength: 0)
-                        BandPill(systemImage: "magnifyingglass", selected: false) {
-                            searching = true
-                            searchFocused = true
-                        }
-                        .accessibilityLabel("Найти")
-                    }
-                }
-            } content: {
-                if s.days.isEmpty { EmptyCard(text: s.empty) }
-                ForEach(s.days) { day in
-                    DayHeading(title: day.title, subtitle: day.subtitle, total: abs(day.net) >= 0.5 ? Money.text(day.net, s.symbol, sign: true) : nil)
-                    ForEach(day.items) { operation in
-                        OperationCard(operation: operation, symbol: s.symbol) {
-                            if let id = operation.spending { sheet = .spending(id) }
-                        }
-                    }
-                }
+                .scrollIndicators(.hidden)
+                .scrollDismissesKeyboard(.interactively)
+                .overlay(alignment: .top) { TopFade(height: geometry.safeAreaInsets.top) }
             }
             .sheet(isPresented: $showCategories) {
                 CategorySpendingSheet(categories: s.categories, symbol: s.symbol, selected: s.category) { picked in
@@ -102,54 +67,191 @@ struct OperationsView: View {
                 }
             }
         }
+        .background(LilacBackground())
         .budgetSheets($sheet)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Lilac.muted)
+                TextField("Найти операцию", text: $search)
+                    .focused($searchFocused)
+                    .submitLabel(.search)
+                    .onSubmit { query = search.isEmpty ? nil : search }
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(Lilac.surface, in: Capsule())
+            .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
+            Button("Отмена") {
+                withAnimation(.snappy) { searching = false }
+                search = ""
+                query = nil
+            }
+            .foregroundStyle(Lilac.accent)
+        }
+        .padding(.top, 10)
+    }
+
+    /// The month to pick, the spending by category, and the filters set, each with a cross.
+    private func controls(_ s: OperationsScreen) -> some View {
+        let index = s.months.firstIndex { $0.value == s.month } ?? 0
+        return FlowLayout(spacing: 8) {
+            Menu {
+                ForEach(Array(s.months.enumerated()), id: \.element.value) { i, option in
+                    Button(option.label) { month = i == 0 ? nil : option.value }
+                }
+            } label: {
+                chipLabel(s.months[index].label, systemImage: "chevron.down")
+            }
+            .accessibilityIdentifier("month")
+            Button { showCategories = true } label: { chipLabel("По категориям", systemImage: "chart.pie") }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("categories")
+            if let title = s.categoryTitle {
+                Button { category = nil } label: { chipLabel(title, systemImage: "xmark", highlighted: true) }.buttonStyle(.plain)
+            }
+            if let q = s.query {
+                Button {
+                    query = nil
+                    search = ""
+                } label: { chipLabel("«\(q)»", systemImage: "xmark", highlighted: true) }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func chipLabel(_ text: String, systemImage: String, highlighted: Bool = false) -> some View {
+        HStack(spacing: 6) {
+            Text(text)
+            Image(systemName: systemImage).font(.caption.weight(.semibold))
+        }
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(highlighted ? Lilac.accent : Color.primary)
+        .padding(.horizontal, 14)
+        .frame(height: 36)
+        .background(highlighted ? Lilac.tint : Lilac.surface, in: Capsule())
+        .shadow(color: .black.opacity(highlighted ? 0 : 0.05), radius: 6, y: 2)
+    }
+
+    private func chips(_ s: OperationsScreen) -> [LilacFilterChips<OperationsFilter>.Item] {
+        let all = s.kinds.first { $0.value == nil }
+        let kinds = s.kinds.compactMap { kind in kind.value.map { LilacFilterChips<OperationsFilter>.Item(value: .kind($0), label: kind.label, count: kind.count) } }
+        return [LilacFilterChips<OperationsFilter>.Item(value: .all, label: all?.label ?? "Все", count: all?.count),
+                LilacFilterChips<OperationsFilter>.Item(value: .pending, label: "Ждут разбора", count: s.pending > 0 ? s.pending : nil, badge: true)]
+            + kinds
+    }
+
+    @ViewBuilder
+    private func list(_ s: OperationsScreen) -> some View {
+        if s.days.isEmpty { LilacEmpty(text: s.empty) }
+        ForEach(s.days) { day in
+            LilacDayHeading(title: day.title, subtitle: day.subtitle, total: abs(day.net) >= 0.5 ? Money.text(day.net, s.symbol, sign: true) : nil)
+            ForEach(Array(day.items.enumerated()), id: \.element.id) { index, operation in
+                OperationLine(operation: operation, symbol: s.symbol, first: index == 0) {
+                    if let id = operation.spending { sheet = .spending(id) }
+                }
+            }
+        }
     }
 }
 
-/// An operation: what it went for and from where, a minus for an expense and green for an income, and what else the
-/// bank said.
-struct OperationCard: View {
+/// An operation: whom it went to or came from with what it went for, a minus for an expense and green for an income,
+/// what else the bank said, and a chip when an expense is not an ordinary one of the week.
+struct OperationLine: View {
     let operation: OperationRow
     let symbol: String
+    var first = false
     let open: () -> Void
 
     var body: some View {
-        let row = operation.kind == "expense" ? operation.row.with(amount: -(operation.row.amount ?? 0)) : operation.row
+        let row = operation.row
         let notes = [operation.comment, operation.original.map { Money.text($0.amount, $0.symbol) }, operation.hold ? "банк ещё не провёл" : nil].compactMap { $0 }
         Button(action: open) {
-            Card(
-                row: row,
+            LilacRow(
+                marker: .dot(Palette.color(row.color)),
+                title: row.title,
+                details: row.details,
+                amount: operation.kind == "expense" ? -(row.amount ?? 0) : row.amount,
                 symbol: symbol,
+                chip: operation.chip.map { ($0.label, Palette.color($0.tone)) },
+                muted: row.muted,
+                first: first,
+                chevron: false,
                 signed: operation.kind != "transfer",
-                amountColor: operation.kind == "income" ? Palette.color("green") : .primary,
-                monogram: true
+                amountColor: operation.kind == "income" ? Palette.color("green") : .primary
             ) {
                 if !notes.isEmpty {
-                    Text(notes.joined(separator: " · ")).font(.caption).foregroundStyle(Ink.muted).lineLimit(2)
+                    Text(notes.joined(separator: " · ")).font(.caption).foregroundStyle(Lilac.muted).lineLimit(2)
                 }
             }
         }
         .buttonStyle(.card)
         .disabled(operation.spending == nil)
+        .accessibilityIdentifier(operation.spending.map { "spending-\($0)" } ?? operation.id)
     }
 }
 
-private struct FilterTag: View {
-    let label: String
-    let remove: () -> Void
+/// The expenses of a month that came without a category, with a suggestion to accept in one tap, and what was sorted.
+/// An expense opens to be marked, with the next ones after it.
+struct PendingList: View {
+    let month: String?
+    @Binding var sheet: BudgetSheet?
+    @Environment(Session.self) private var session
+    @State private var error: String?
+    @State private var accepted = 0
 
     var body: some View {
-        Button(action: remove) {
-            HStack(spacing: 4) {
-                Text(label)
-                Image(systemName: "xmark").font(.caption2.weight(.bold))
+        Screen(path: "uncategorized", query: ["month": month]) { (s: UncategorizedScreen) in
+            let queue = s.pending.flatMap { $0.items.map(\.spending) }
+            VStack(alignment: .leading, spacing: 0) {
+                LilacSummary(label: s.total.label, amount: s.total.amount, symbol: s.symbol, note: s.total.note, size: 30).padding(.top, 16)
+                if s.pending.isEmpty { LilacEmpty(text: s.empty) }
+                ForEach(s.pending, id: \.date) { day in
+                    LilacDayHeading(title: day.title, subtitle: day.subtitle)
+                    ForEach(Array(day.items.enumerated()), id: \.element.id) { index, item in
+                        // A tap on the row opens it; «Принять» is a button of its own inside the row.
+                        LilacRow(marker: .dot(Lilac.red), title: item.row.title, details: item.row.details, amount: item.row.amount, symbol: s.symbol,
+                                 first: index == 0) {
+                            if let suggestion = item.suggestion {
+                                LilacInlineAction(label: "Принять") { accept(item.spending, suggestion.choice) }
+                            }
+                        }
+                        .onTapGesture { sheet = .spending(item.spending, queue: queue) }
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityIdentifier(item.id)
+                    }
+                }
+                if !s.sorted.isEmpty {
+                    LilacHeading("Разобрано")
+                    ForEach(s.sorted, id: \.date) { day in
+                        LilacDayHeading(title: day.title, subtitle: day.subtitle)
+                        ForEach(Array(day.items.enumerated()), id: \.element.id) { index, expense in
+                            Button { sheet = .spending(expense.spending) } label: {
+                                LilacRow(marker: .dot(Palette.color(expense.row.color)), title: expense.row.title, details: expense.row.details,
+                                         amount: expense.row.amount, symbol: s.symbol, chip: WeekSpendingList.chip(expense.row.mark), first: index == 0,
+                                         chevron: false)
+                            }
+                            .buttonStyle(.card)
+                        }
+                    }
+                }
             }
-            .font(.subheadline)
-            .padding(.horizontal, 12)
-            .frame(height: 32)
-            .background(Ink.canvas, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .errorAlert($error)
+        .sensoryFeedback(.success, trigger: accepted)
+    }
+
+    private func accept(_ spending: String, _ choice: String) {
+        Task {
+            do {
+                try await session.send("spending/\(spending)/\(choice)")
+                accepted += 1
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 }
 
@@ -162,41 +264,33 @@ struct CategorySpendingSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            List {
-                if selected != nil {
-                    Button("Все категории") {
-                        pick(nil)
-                        dismiss()
-                    }
-                }
-                ForEach(categories) { c in
-                    Button {
-                        pick(c.id == selected ? nil : c.id)
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 12) {
-                            IconBadge(icon: c.icon, color: Palette.color(c.color))
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text(c.title)
-                                    Spacer()
-                                    Text(Money.text(c.amount, symbol)).monospacedDigit()
-                                }
-                                GeometryReader { geometry in
-                                    Capsule().fill(Palette.color(c.color)).frame(width: max(3, geometry.size.width * c.share))
-                                }
-                                .frame(height: 4)
-                            }
-                            if c.id == selected { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) }
-                        }
-                    }
-                    .tint(.primary)
+        LilacForm(title: "Расходы по категориям") {
+            if selected != nil {
+                LilacAddRow(label: "Все категории") {
+                    pick(nil)
+                    dismiss()
                 }
             }
-            .navigationTitle("Расходы по категориям")
-            .inlineTitle()
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() } } }
+            ForEach(Array(categories.enumerated()), id: \.element.id) { index, c in
+                Button {
+                    pick(c.id == selected ? nil : c.id)
+                    dismiss()
+                } label: {
+                    LilacRow(marker: .symbol(Icons.symbol(c.icon), Palette.color(c.color)), title: c.title, details: "", amount: c.amount, symbol: symbol,
+                             first: index == 0 && selected == nil, chevron: false) {
+                        GeometryReader { geometry in
+                            Capsule().fill(Palette.color(c.color)).frame(width: max(4, geometry.size.width * c.share))
+                        }
+                        .frame(height: 5)
+                        .padding(.top, 4)
+                    }
+                    .overlay(alignment: .trailing) {
+                        if c.id == selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(Lilac.accent).offset(x: 4, y: -18) }
+                    }
+                }
+                .buttonStyle(.card)
+            }
         }
+        .accessibilityIdentifier("categories-sheet")
     }
 }

@@ -36,7 +36,7 @@ function saved(overrides: Partial<SavedMarking> = {}): SavedMarking {
     categorizations: new Map<string, Categorization>([['sorted', { tag: groceries.id }]]),
     purchasePayments: new Map(),
     regular: [workshop],
-    purchases: [{ id: 5, title: 'Ласты', amount: 300, week: '2026-09-28', envelope: 'week', done: false }],
+    purchases: [{ id: 5, title: 'Ласты', amount: 300, week: '2026-09-28', envelope: 'week', kind: 'flexible', done: false }],
     marks: new Map(),
     categories: NO_SETUP,
     weekStart: 0,

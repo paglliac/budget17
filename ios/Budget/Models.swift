@@ -95,6 +95,8 @@ struct Purchase: Decodable, Hashable {
     let week: String
     /// week or extra.
     let envelope: String
+    /// required, which had better stay in its week, or flexible, which can move.
+    let kind: String
     let done: Bool
     let weekLabel: String
 }
@@ -155,6 +157,7 @@ struct WeekScreen: Decodable {
     let prev: String
     let next: String?
     let total: Total
+    let home: WeekHome
     let limit: WeekLimit
     let days: [Day<Expense>]
     let plan: [PlanItem]
@@ -162,6 +165,42 @@ struct WeekScreen: Decodable {
     let wishes: [WishItem]?
     let weekChoices: [OptionGroup]
     let source: String
+}
+
+/// A figure with what it is.
+struct Figure: Decodable, Hashable {
+    let label: String
+    let amount: Double
+}
+
+/// The top of the week: what is free, what the plan holds by kind, what was spent today (in a past week, in all of
+/// it; nothing in a week ahead), how many expenses wait for a category, and when the server last synced.
+struct WeekHome: Decodable, Hashable {
+    let free: Figure
+    let reserved: Reserved
+    let spent: Figure?
+    let pending: Pending
+    /// An ISO moment.
+    let syncedAt: String?
+
+    struct Reserved: Decodable, Hashable {
+        let label: String
+        let amount: Double
+        let required: Figure
+        let flexible: Figure
+    }
+
+    struct Pending: Decodable, Hashable {
+        let count: Int
+        let label: String
+    }
+
+    var synced: Date? {
+        guard let syncedAt else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: syncedAt)
+    }
 }
 
 /// What a week allows and the usual amount. Another amount posts to /api/week-limits/:week, the usual one back to
@@ -193,11 +232,32 @@ struct MonthScreen: Decodable {
     let next: Option?
     let weeks: [WeekLine]
     let total: Total
+    /// Where the month's income goes; nil without incomes.
+    let flow: Flow?
     let purchases: [PlanItem]
     let spending: [Day<Expense>]
     let newPurchaseWeek: String
     let weekChoices: [OptionGroup]
     let source: String
+}
+
+/// A month's income and where it goes: regular payments, the weeks' budgets, the extras, and savings or what is short.
+struct Flow: Decodable, Hashable {
+    let income: Income
+    let parts: [Part]
+
+    struct Income: Decodable, Hashable {
+        let label: String
+        let amount: Double
+        let note: String
+    }
+
+    struct Part: Decodable, Hashable {
+        let label: String
+        let amount: Double
+        /// Of the income, 0.29 for 29%; below zero for what is short.
+        let share: Double
+    }
 }
 
 // MARK: - Marking
@@ -229,6 +289,8 @@ struct SpendingScreen: Decodable, Hashable {
     let notes: [String]
     let payments: Payments
     let categories: Categories
+    /// What is suggested, such as Похоже на «Продукты».
+    let hint: String?
     let envelopes: [Choice]
     let undo: [Choice]
 
@@ -256,11 +318,18 @@ struct OperationRow: Decodable, Hashable, Identifiable {
     let original: Original?
     /// Set for an expense, which opens to be marked.
     let spending: String?
+    /// What an expense is when it is not an ordinary one of the week, such as Ждёт разбора.
+    let chip: Chip?
     var id: String { row.id }
 
     struct Original: Decodable, Hashable {
         let amount: Double
         let symbol: String
+    }
+
+    struct Chip: Decodable, Hashable {
+        let label: String
+        let tone: String
     }
 
     init(from decoder: Decoder) throws {
@@ -271,6 +340,7 @@ struct OperationRow: Decodable, Hashable, Identifiable {
         hold = try c.value("hold")
         original = try c.optional("original")
         spending = try c.optional("spending")
+        chip = try c.optional("chip")
     }
 }
 
@@ -297,6 +367,8 @@ struct OperationsScreen: Decodable {
     let days: [OperationDay]
     let empty: String
     let categories: [CategorySpending]
+    /// Expenses of the month that wait for a category.
+    let pending: Int
 
     /// What the operations that pass the filter spent and brought, and how many there are.
     struct Totals: Decodable, Hashable {

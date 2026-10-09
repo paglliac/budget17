@@ -232,19 +232,19 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
 
 /** A screen of the app as JSON (see api.ts); null when there is none at the path. */
 function apiScreen(path: string, params: URLSearchParams, { today, demo }: Context): unknown {
-  const budget = { today, source: demo ? ('demo' as const) : ('zenmoney' as const), canSync: Boolean(token) && !demo };
+  const budget = { today, source: demo ? ('demo' as const) : ('zenmoney' as const), canSync: Boolean(token) && !demo, syncedAt: syncedAt?.toISOString() ?? null };
   const collections = () => withRubleSign(loadCollections(demo, today));
   const spending = /^\/api\/spending\/([\w-]+)$/.exec(path);
   if (spending) return spendingScreen(collections(), loadSettings(savedMarking), { today, id: spending[1]! });
   switch (path) {
     case '/api/session': {
       const data = collections();
-      return { user: userName(data), symbol: mainCurrency(data).symbol, ...budget, syncedAt: syncedAt?.toISOString() ?? null };
+      return { user: userName(data), symbol: mainCurrency(data).symbol, ...budget };
     }
     case '/api/week':
       return weekScreen(collections(), loadSettings(savedBudget), { ...budget, week: params.get('week') });
     case '/api/month':
-      return monthScreen(collections(), loadSettings(savedBudget), { ...budget, month: params.get('month') });
+      return monthScreen(collections(), loadSettings(savedBudget), { ...budget, month: params.get('month'), incomes: loadSettings((s) => s.incomes()) });
     case '/api/operations':
       return operationsScreen(collections(), loadSettings(savedMarking), {
         today,

@@ -30,9 +30,9 @@ using settings = new Settings(':memory:');
 settings.addRegularExpense({ title: 'Аренда', amount: 40_000, day: 10, start: null, end: null, icon: 'home' });
 settings.addRegularExpense({ title: 'Связь', amount: 700, day: 2, start: null, end: null, icon: null });
 settings.addRegularExpense({ title: 'Кредит', amount: 9_000, day: 20, start: '2026-11-01', end: '2027-05-31', icon: 'card' });
-const groceries = settings.addPurchase({ title: 'Продукты', amount: 3_000, week: '2026-10-05', envelope: 'week', done: false });
-settings.addPurchase({ title: 'Стрижка', amount: 1_500, week: '2026-10-19', envelope: 'week', done: false });
-settings.addPurchase({ title: 'Куртка', amount: 20_000, week: '2026-10-05', envelope: 'extra', done: false });
+const groceries = settings.addPurchase({ title: 'Продукты', amount: 3_000, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: false });
+settings.addPurchase({ title: 'Стрижка', amount: 1_500, week: '2026-10-19', envelope: 'week', kind: 'flexible', done: false });
+settings.addPurchase({ title: 'Куртка', amount: 20_000, week: '2026-10-05', envelope: 'extra', kind: 'flexible', done: false });
 settings.addWish({ title: 'Укладка для волос', amount: 4_500 });
 settings.addIncome({ title: 'Зарплата', model: 'salary', params: { salary: 200_000, advanceDay: 20, payDay: 5 } });
 settings.addIncome({ title: 'Сдача квартиры', model: 'fixed', params: { amount: 30_000, day: 1 } });
@@ -63,7 +63,8 @@ const screens: Record<string, unknown> = {
   week: weekScreen(data, saved(), budget),
   'week-past': weekScreen(data, saved(), { ...budget, week: '2026-09-28' }),
   'week-ahead': weekScreen(data, saved(), { ...budget, week: '2026-10-19' }),
-  month: monthScreen(data, saved(), budget),
+  month: monthScreen(data, saved(), { ...budget, incomes: settings.incomes() }),
+  'month-without-incomes': monthScreen(data, saved(), budget),
   spending: spendingScreen(data, saved(), { today, id: paying.spending }),
   operations: operationsScreen(data, saved(), { today }),
   uncategorized: uncategorizedScreen(data, saved(), { today }),

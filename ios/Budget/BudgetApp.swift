@@ -8,46 +8,56 @@ struct BudgetApp: App {
         WindowGroup {
             RootView()
                 .environment(session)
-                .tint(Palette.extra)
+                .tint(Lilac.accent)
         }
     }
 }
 
-enum Tab: Hashable { case budget, operations, sort, more }
+enum Tab: Hashable { case home, operations, plan, more }
 
-/// The login until a server is set, then the screens under a tab bar with a round «+» in its middle. The screens stay
-/// alive between tabs, so each keeps its place. Coming back to the app asks the server to sync with ZenMoney.
+/// The login until a server is set, then the screens under the tab bar. The screens stay alive between tabs, so each
+/// keeps its place. Coming back to the app asks the server to sync with ZenMoney.
 struct RootView: View {
     @Environment(Session.self) private var session
     @Environment(\.scenePhase) private var scenePhase
-    @State private var tab = Tab.budget
-    @State private var add: AddRequest?
+    @State private var tab = Tab.home
+    /// What the operations show: all of them, a kind, or the expenses that wait for a category.
+    @State private var filter = OperationsFilter.all
+    /// The tab bar's height, for pages inside a navigation stack, which the inset under the bar does not reach.
+    @State private var barHeight: CGFloat = 0
 
     var body: some View {
         if session.server == nil {
             LoginView()
         } else {
             ZStack {
-                screen(.budget) { BudgetView(add: $add) }
-                screen(.operations) { OperationsView() }
-                screen(.sort) { UncategorizedView() }
+                screen(.home) { BudgetView(openPending: openPending) }
+                screen(.operations) { OperationsView(filter: $filter) }
+                screen(.plan) { PlanView() }
                 screen(.more) { MoreView() }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                TabBar(tab: $tab, pending: session.pending) { request in
-                    tab = .budget
-                    add = request
-                }
+                TabBar(tab: $tab, pending: session.pending)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { barHeight = $0 }
             }
+            .environment(\.tabBarHeight, barHeight)
             // The tab bar stays at the bottom under the keyboard, as when searching operations.
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .task(id: session.version) { await session.refreshPending() }
             // budget://week and budget://sort, from the widget.
-            .onOpenURL { url in tab = url.host() == "sort" ? .sort : .budget }
+            .onOpenURL { url in
+                if url.host() == "sort" { openPending() } else { tab = .home }
+            }
             .onChange(of: scenePhase, initial: true) { _, phase in
                 if phase == .active { Task { await session.sync() } }
             }
         }
+    }
+
+    /// The expenses that wait for a category, among the operations.
+    private func openPending() {
+        filter = .pending
+        tab = .operations
     }
 
     private func screen<Content: View>(_ value: Tab, @ViewBuilder content: () -> Content) -> some View {
@@ -58,45 +68,38 @@ struct RootView: View {
     }
 }
 
-/// The tabs with icons and names, the picked one violet, and the round black «+» in the middle that adds a purchase or
-/// a wish.
+/// The tabs with icons and names, the picked one violet on a lilac disc; the operations carry how many expenses wait for
+/// a category.
 struct TabBar: View {
     @Binding var tab: Tab
     let pending: Int
-    let add: (AddRequest) -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 0) {
-            item(.budget, "calendar", "Бюджет")
-            item(.operations, "list.bullet", "Операции")
-            Menu {
-                Button("Покупка в план недели", systemImage: "cart") { add(.purchase("week")) }
-                Button("Покупка в дополнительные", systemImage: "bag") { add(.purchase("extra")) }
-                Button("Желание", systemImage: "sparkles") { add(.wish) }
-            } label: {
-                Image(systemName: "plus")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 48, height: 48)
-                    .background(Ink.band, in: Circle())
-                    .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
-            }
-            .frame(maxWidth: .infinity)
-            .accessibilityLabel("Добавить")
-            item(.sort, "tag", "Разобрать", badge: pending)
+            item(.home, "house", "Главная")
+            item(.operations, "list.bullet", "Операции", badge: pending)
+            item(.plan, "calendar", "План")
             item(.more, "ellipsis", "Ещё")
         }
-        .padding(.top, 4)
-        .background(Ink.surface.ignoresSafeArea(edges: .bottom))
-        .overlay(alignment: .top) { Rectangle().fill(Ink.hairline).frame(height: 0.5) }
+        .padding(.top, 6)
+        .padding(.bottom, 2)
+        .background {
+            Lilac.surface
+                .ignoresSafeArea(edges: .bottom)
+                .shadow(color: .black.opacity(0.06), radius: 12, y: -2)
+        }
+        .sensoryFeedback(.selection, trigger: tab)
     }
 
     private func item(_ value: Tab, _ icon: String, _ label: String, badge: Int = 0) -> some View {
-        Button { tab = value } label: {
-            VStack(spacing: 4) {
+        let picked = tab == value
+        return Button { tab = value } label: {
+            VStack(spacing: 2) {
                 Image(systemName: icon)
-                    .font(.system(size: 20, weight: .medium))
-                    .frame(height: 24)
+                    .symbolVariant(picked ? .fill : .none)
+                    .font(.system(size: 19, weight: .medium))
+                    .frame(width: 48, height: 34)
+                    .background(picked ? Lilac.tint : .clear, in: Capsule())
                     .overlay(alignment: .topTrailing) {
                         if badge > 0 {
                             Text("\(badge)")
@@ -104,19 +107,19 @@ struct TabBar: View {
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 5)
                                 .frame(minWidth: 17, minHeight: 17)
-                                .background(Palette.color("red"), in: Capsule())
-                                .offset(x: 10, y: -6)
+                                .background(Lilac.accent, in: Capsule())
+                                .offset(x: -2, y: -3)
                         }
                     }
                 Text(label).font(.caption2.weight(.medium))
             }
-            .foregroundStyle(tab == value ? Ink.violet : Ink.muted)
+            .foregroundStyle(picked ? Lilac.accent : Lilac.muted)
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("tab-\(label)")
         .accessibilityLabel(badge > 0 ? "\(label), \(badge)" : label)
-        .accessibilityAddTraits(tab == value ? .isSelected : [])
+        .accessibilityAddTraits(picked ? .isSelected : [])
     }
 }

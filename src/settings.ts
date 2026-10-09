@@ -101,6 +101,7 @@ const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> 
   ['regular_expense', 'start_date', 'TEXT'],
   ['regular_expense', 'end_date', 'TEXT'],
   ['regular_expense', 'icon', 'TEXT'],
+  ['purchase', 'kind', "TEXT NOT NULL DEFAULT 'flexible' CHECK (kind IN ('required', 'flexible'))"],
 ];
 
 /**
@@ -249,7 +250,7 @@ export class Settings {
   /** Purchases by week, then in the order they were added. */
   purchases(): Purchase[] {
     return this.#db
-      .prepare('SELECT id, title, amount, week, envelope, done FROM purchase ORDER BY week, id')
+      .prepare('SELECT id, title, amount, week, envelope, kind, done FROM purchase ORDER BY week, id')
       .all()
       .map((row) => ({
         id: Number(row.id),
@@ -257,14 +258,15 @@ export class Settings {
         amount: Number(row.amount),
         week: String(row.week),
         envelope: row.envelope === 'extra' ? 'extra' : 'week',
+        kind: row.kind === 'required' ? 'required' : 'flexible',
         done: row.done === 1,
       }));
   }
 
   addPurchase(purchase: PurchaseInput): Purchase {
     const { lastInsertRowid } = this.#db
-      .prepare('INSERT INTO purchase (title, amount, week, envelope, done) VALUES (?, ?, ?, ?, ?)')
-      .run(purchase.title, purchase.amount, purchase.week, purchase.envelope, purchase.done ? 1 : 0);
+      .prepare('INSERT INTO purchase (title, amount, week, envelope, kind, done) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(purchase.title, purchase.amount, purchase.week, purchase.envelope, purchase.kind, purchase.done ? 1 : 0);
     return { id: Number(lastInsertRowid), ...purchase };
   }
 
@@ -274,8 +276,8 @@ export class Settings {
     if (!purchase) return false;
     const next = { ...purchase, ...changes };
     this.#db
-      .prepare('UPDATE purchase SET title = ?, amount = ?, week = ?, envelope = ?, done = ? WHERE id = ?')
-      .run(next.title, next.amount, next.week, next.envelope, next.done ? 1 : 0, id);
+      .prepare('UPDATE purchase SET title = ?, amount = ?, week = ?, envelope = ?, kind = ?, done = ? WHERE id = ?')
+      .run(next.title, next.amount, next.week, next.envelope, next.kind, next.done ? 1 : 0, id);
     return true;
   }
 
@@ -316,7 +318,7 @@ export class Settings {
     if (!wish) return null;
     return this.#transaction(() => {
       this.deleteWish(id);
-      return this.addPurchase({ title: wish.title, amount: wish.amount, ...target, done: false });
+      return this.addPurchase({ title: wish.title, amount: wish.amount, ...target, kind: 'flexible', done: false });
     });
   }
 

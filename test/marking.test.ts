@@ -34,7 +34,7 @@ describe('submitMarking', () => {
   it('links an expense to a regular expense or a purchase, picked from a list too, so it counts where that does', () => {
     using settings = new Settings(':memory:');
     const rent = settings.addRegularExpense(regularInput({ title: 'Мастерская аренда', amount: 40_000, day: 10 }));
-    const shoes = settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-09-28', envelope: 'extra', done: false });
+    const shoes = settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-09-28', envelope: 'extra', kind: 'flexible', done: false });
     settings.markSpending('rent', 'extra');
     settings.categorize('kiosk', { tag: 'cafe' });
 

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// What is set up once in a while, switched on the band: regular expenses, incomes and categories. The budget's
+/// What is set up once in a while, switched under the title: regular expenses, incomes and categories. The budget's
 /// setup and the server are behind the gear.
 struct MoreView: View {
     enum Part: Hashable { case regular, income, categories }
@@ -9,41 +9,45 @@ struct MoreView: View {
     @State private var showSettings = false
 
     var body: some View {
-        Group {
-            switch part {
-            case .regular: RegularPanel(frame: frame)
-            case .income: IncomePanel(frame: frame)
-            case .categories: CategoriesPanel(frame: frame)
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                LilacTitle(text: "Ещё") {
+                    LilacIconButton(systemImage: "gearshape", label: "Настройки") { showSettings = true }
+                }
+                LilacSegmented(
+                    items: [Segment(value: Part.regular, label: "Регулярные"), Segment(value: .income, label: "Доходы"), Segment(value: .categories, label: "Категории")],
+                    selection: $part,
+                    width: nil
+                )
             }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 4)
+            Group {
+                switch part {
+                case .regular: RegularPanel()
+                case .income: IncomePanel()
+                case .categories: CategoriesPanel()
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
         }
+        .background(LilacBackground())
         .sheet(isPresented: $showSettings) { SettingsSheet() }
     }
-
-    private var frame: MoreFrame { MoreFrame(part: $part, showSettings: $showSettings) }
 }
 
-/// The header and band every part of «Ещё» shares.
-struct MoreFrame {
-    @Binding var part: MoreView.Part
-    @Binding var showSettings: Bool
+/// A part of «Ещё»: its rows scrolling under the title and the switch.
+struct MorePage<Content: View>: View {
+    @ViewBuilder var content: () -> Content
 
-    var header: some View {
-        TopHeader {
-            Text("Ещё").font(.title2.weight(.bold))
-        } trailing: {
-            HeaderButton(systemImage: "gearshape", label: "Настройки") { showSettings = true }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) { content() }
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+                .padding(.bottom, 24)
         }
-    }
-
-    var band: some View {
-        BandSwitch(
-            items: [
-                BandItem(value: MoreView.Part.regular, label: "Регулярные"),
-                BandItem(value: .income, label: "Доходы"),
-                BandItem(value: .categories, label: "Категории"),
-            ],
-            selection: $part
-        )
+        .scrollIndicators(.hidden)
     }
 }
 
@@ -52,56 +56,67 @@ struct ServerSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            Form {
-                ServerSections { dismiss() }
-            }
-            .navigationTitle("Сервер")
-            .inlineTitle()
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() } } }
+        LilacForm(title: "Сервер") {
+            ServerPanel { dismiss() }.padding(.top, 16)
         }
         .presentationDetents([.medium, .large])
+        .accessibilityIdentifier("server-sheet")
     }
 }
 
 /// Where the server is, when it last synced, another server instead of it, and the way out.
-struct ServerSections: View {
+struct ServerPanel: View {
     /// Called once another server is kept, to close what shows them.
     let switched: () -> Void
-    var header: String?
     @Environment(Session.self) private var session
     @State private var confirmSignOut = false
+    @State private var switching = false
 
     var body: some View {
-        Section {
-            LabeledContent("Адрес", value: session.server?.absoluteString ?? "")
+        LilacPanel {
+            LilacPanelLine(title: "Адрес", first: true) {
+                Text(session.server?.absoluteString ?? "").foregroundStyle(Lilac.muted).lineLimit(1).truncationMode(.middle)
+            }
             if let syncedAt = session.syncedAt {
-                LabeledContent("Обновлено", value: syncedAt.formatted(.relative(presentation: .named)))
+                LilacPanelLine(title: "Обновлено") { Text(syncedAt.formatted(.relative(presentation: .named))).foregroundStyle(Lilac.muted) }
             }
             Button {
                 Task { await session.sync() }
             } label: {
-                HStack {
-                    Text("Обновить из ZenMoney")
-                    if session.isSyncing { Spacer(); ProgressView() }
+                LilacPanelLine(title: "Обновить из ZenMoney", titleColor: Lilac.accent) {
+                    if session.isSyncing { ProgressView() }
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .disabled(session.isSyncing)
-            NavigationLink("Сменить сервер") {
-                ServerForm(action: "Подключить", address: session.server?.absoluteString ?? "", token: session.token, done: switched)
-                    .navigationTitle("Другой сервер")
-                    .inlineTitle()
-            }
-        } header: {
-            if let header { Text(header) }
-        }
-        Section {
-            Button("Выйти", role: .destructive) { confirmSignOut = true }
-                .confirmationDialog("Выйти из приложения?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-                    Button("Выйти", role: .destructive) { session.signOut() }
-                } message: {
-                    Text("Данные останутся на сервере, а сохранённые на телефоне удалятся. Чтобы войти снова, понадобится токен доступа.")
+            Button { switching = true } label: {
+                LilacPanelLine(title: "Сменить сервер", titleColor: Lilac.accent) {
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Lilac.muted)
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        LilacPanel {
+            Button { confirmSignOut = true } label: {
+                LilacPanelLine(title: "Выйти", first: true, titleColor: Lilac.red) { EmptyView() }.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.top, 12)
+        .confirmationDialog("Выйти из приложения?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+            Button("Выйти", role: .destructive) { session.signOut() }
+        } message: {
+            Text("Данные останутся на сервере, а сохранённые на телефоне удалятся. Чтобы войти снова, понадобится токен доступа.")
+        }
+        .sheet(isPresented: $switching) {
+            LilacForm(title: "Другой сервер") {
+                ServerForm(action: "Подключить", address: session.server?.absoluteString ?? "", token: session.token) {
+                    switching = false
+                    switched()
+                }
+            }
         }
     }
 }

@@ -41,10 +41,10 @@ function data(): EntityCollections {
 function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
   return {
     purchases: [
-      { id: 1, title: 'Ботинки Савве', amount: 8_000, week: '2026-10-05', envelope: 'week', done: false },
-      { id: 2, title: 'Подарок', amount: 5_000, week: '2026-10-05', envelope: 'week', done: true },
-      { id: 3, title: 'Куртка', amount: 20_000, week: '2026-10-05', envelope: 'extra', done: false },
-      { id: 4, title: 'Стрижка', amount: 1_500, week: '2026-10-19', envelope: 'week', done: false },
+      { id: 1, title: 'Ботинки Савве', amount: 8_000, week: '2026-10-05', envelope: 'week', kind: 'required', done: false },
+      { id: 2, title: 'Подарок', amount: 5_000, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: true },
+      { id: 3, title: 'Куртка', amount: 20_000, week: '2026-10-05', envelope: 'extra', kind: 'flexible', done: false },
+      { id: 4, title: 'Стрижка', amount: 1_500, week: '2026-10-19', envelope: 'week', kind: 'flexible', done: false },
     ],
     wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500 }],
     marks: new Map(marks),
@@ -100,7 +100,8 @@ describe('api', () => {
     });
 
     const [boots, gift, jacket, school] = week.plan;
-    assert.equal(boots.details, 'ждёт покупки');
+    assert.equal(boots.details, 'Обязательная', 'waiting to be bought goes without saying');
+    assert.equal(boots.purchase.kind, 'required');
     assert.equal(boots.finishable, true);
     assert.deepEqual(boots.actions, [
       { action: 'move', label: 'В дополнительные' },
@@ -125,7 +126,31 @@ describe('api', () => {
     const ahead = plain(weekScreen(data(), saved(), { ...budget, week: '2026-10-19' }));
     assert.equal(ahead.phase, 'ahead');
     assert.equal(ahead.total.label, 'Будет свободно');
-    assert.deepEqual(ahead.plan.map((p: { title: string; details: string; finishable: boolean }) => [p.title, p.details, p.finishable]), [['Стрижка', 'в плане', false]]);
+    assert.deepEqual(ahead.plan.map((p: { title: string; details: string; finishable: boolean }) => [p.title, p.details, p.finishable]), [['Стрижка', 'Гибкая', false]]);
+    assert.equal(ahead.home.free.label, 'Будет свободно');
+    assert.equal(ahead.home.spent, null, 'nothing is spent in a week ahead');
+  });
+
+  it('tells on top what is free, what the plan holds by kind, what was spent today and what waits to be sorted', () => {
+    const paid = { ...saved(), purchasePayments: new Map([['pyaterochka', 1]]) };
+    const week = plain(weekScreen(data(), paid, { ...budget, today: '2026-10-05', syncedAt: '2026-10-05T11:42:00.000Z' }));
+
+    assert.deepEqual(week.home, {
+      free: { label: 'Свободно', amount: -3_000 },
+      reserved: {
+        label: 'Зарезервировано',
+        amount: 7_527,
+        required: { label: 'обязательное', amount: 7_527 },
+        flexible: { label: 'гибкое', amount: 0 },
+      },
+      spent: { label: 'Сегодня потрачено', amount: 40_473 },
+      pending: { count: 2, label: 'траты ждут разбора' },
+      syncedAt: '2026-10-05T11:42:00.000Z',
+    });
+    assert.equal(week.plan[0].details, 'Обязательная · оплачено 473 ₽ из 8 000 ₽');
+
+    const past = plain(weekScreen(data(), saved(), { ...budget, week: '2026-09-28' }));
+    assert.deepEqual([past.home.free.label, past.home.spent], ['Итог недели', { label: 'Потрачено за неделю', amount: 30_000 }]);
   });
 
   it('gives the month’s weeks and its extras with where they count', () => {
@@ -140,6 +165,28 @@ describe('api', () => {
     assert.deepEqual(month.spending.map((d: { date: string }) => d.date), ['2026-10-01']);
     assert.deepEqual(month.spending[0].items.map((o: { title: string; details: string; mark: string }) => [o.title, o.details, o.mark]), [['Дарья Ч.', 'без категории', 'extra']]);
     assert.equal(month.newPurchaseWeek, '2026-10-05');
+    assert.equal(month.flow, null, 'without incomes there is no income to split');
+  });
+
+  it('splits the month’s income into the regular payments, the weeks, the extras and what is left for savings', () => {
+    const rent = { id: 1, title: 'Аренда', model: 'fixed' as const, params: { amount: 500_000, day: 5 } };
+    const month = plain(monthScreen(data(), { ...saved(), weekLimits: new Map([['2026-10-12', 30_000]]) }, { ...budget, incomes: [rent] }));
+    assert.deepEqual(month.flow.income, { label: 'Доход', amount: 500_000, note: 'в этом месяце' });
+    assert.deepEqual(
+      month.flow.parts.map((p: { label: string; amount: number }) => [p.label, p.amount]),
+      [
+        ['Обязательные расходы', 45_000],
+        ['Недельные бюджеты', 4 * 45_000 + 30_000],
+        ['Доп. бюджет', 100_000],
+        ['В накопления', 500_000 - 45_000 - 210_000 - 100_000],
+      ],
+      'five weeks belong to October, one of them with an amount of its own',
+    );
+    assert.equal(month.flow.parts[0].share, 45_000 / 500_000);
+
+    const short = plain(monthScreen(data(), saved(), { ...budget, month: '2026-11', incomes: [{ ...rent, params: { amount: 200_000, day: 5 } }] }));
+    assert.equal(short.flow.income.note, 'в ноябре');
+    assert.deepEqual(short.flow.parts.at(-1), { label: 'Не хватает', amount: 200_000 - 45_000 - 4 * 45_000 - 100_000, share: -125_000 / 200_000 });
   });
 
   it('opens an expense with what is known of it and the choices to mark it', () => {
@@ -155,6 +202,8 @@ describe('api', () => {
       spending.envelopes.map((c: { choice: string }) => c.choice),
       ['week', 'extra', 'outside', 'ignored'],
     );
+    assert.equal(spending.envelopes[0].detail, 'Учесть в текущей неделе', 'the app says what each place means');
+    assert.equal(spending.hint, null, 'nothing to suggest for a transfer to a person');
     assert.deepEqual(spending.undo, []);
   });
 
@@ -179,6 +228,12 @@ describe('api', () => {
     const salary = monday.items.find((o: { id: string }) => o.id === 'salary');
     assert.deepEqual([salary.kind, salary.spending, salary.color, salary.details], ['income', null, 'green', 'Доход'], 'no account money came to');
     assert.equal(monday.items.find((o: { id: string }) => o.id === 'transfer').spending, 'transfer');
+    assert.deepEqual(monday.items.find((o: { id: string }) => o.id === 'transfer').chip, { label: 'Ждёт разбора', tone: 'red' });
+    assert.equal(monday.items.find((o: { id: string }) => o.id === 'pyaterochka').chip, null, 'an ordinary expense of the week has no chip');
+    assert.equal(salary.chip, null);
+    assert.equal(operations.pending, 2, 'the transfer and last week’s expense wait for a category');
+    const moved = plain(operationsScreen(data(), saved([['pyaterochka', 'extra']]), { today })).days[0].items;
+    assert.deepEqual(moved.find((o: { id: string }) => o.id === 'pyaterochka').chip, { label: 'Дополнительные', tone: 'violet' });
     assert.deepEqual(operations.categories[0], { id: 'none', title: 'Без категории', icon: 'tag', color: 'gray', amount: 70_000, share: 70_000 / 70_473 });
 
     const filtered = plain(operationsScreen(data(), saved(), { today, kind: 'income', query: 'работа' }));
@@ -200,6 +255,7 @@ describe('api', () => {
     const school = screen.pending.flatMap((d: { items: unknown[] }) => d.items).find((p: { spending: string }) => p.spending === 'school-oct');
     assert.deepEqual(school.suggestion, { choice: 'regular-7', name: 'регулярную «Школа, ЛДК»' });
     assert.equal(school.details, 'похоже на регулярную «Школа, ЛДК»');
+    assert.equal(plain(spendingScreen(later, sorted, { today, id: 'school-oct' })).hint, 'Похоже на регулярную «Школа, ЛДК»');
     assert.equal(screen.total.label, 'Без категории в октябре');
     assert.match(screen.total.note, /^3 траты из 4$/);
   });
