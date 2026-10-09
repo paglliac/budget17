@@ -61,10 +61,10 @@ export function section(options: { title: string; body: Content }): Html {
 }
 
 /** The heading of a page with a sentence about what matters now. */
-export function pageIntro(options: { title: string; emoji?: string; text: string }): Html {
+export function pageIntro(options: { title: string; emoji?: string; text: string; badge?: { text: string; tone?: Tone } }): Html {
   return html`<header class="intro"><h1>${options.title}${
     options.emoji ? html` <span aria-hidden="true">${options.emoji}</span>` : null
-  }</h1><p>${options.text}</p></header>`;
+  }${options.badge ? badge(options.badge) : null}</h1><p>${options.text}</p></header>`;
 }
 
 /** What to show when there is nothing to show: say why and what to do. */
