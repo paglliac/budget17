@@ -426,6 +426,8 @@ a.amount:hover, a.amount[aria-current] { background: var(--fill); }
 .assistant-orb { flex: none; width: 72px; height: 72px; border-radius: 22px; box-shadow: 0 12px 30px -10px rgb(140 108 239 / .55); }
 .assistant-intro h2 { font-size: 20px; font-weight: 500; letter-spacing: -0.01em; }
 .assistant-intro p { margin-top: 6px; font-size: 13px; color: var(--text); }
+.assistant-intro form { margin-top: 8px; }
+.assistant-intro form button { gap: 6px; margin-left: -12px; color: var(--violet); }
 .assistant-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .assistant-chip { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px; border-radius: 999px; background: rgb(255 255 255 / .8); color: var(--text); font-size: 12px; box-shadow: 0 1px 2px rgb(0 0 0 / .05); }
 .assistant-chip .icon { color: var(--violet); }
@@ -491,6 +493,7 @@ a.cmap-item:hover { background: rgb(255 255 255 / .85); }
   .panel-main { padding: 12px 14px 22px; }
   .intro h1 { font-size: 22px; }
   .search { width: 100%; }
+  .segment { padding: 0 10px; }
   .flow { grid-template-columns: minmax(0, 1fr); }
   .flow-chart { min-height: 180px; }
   .figure-amount { font-size: 26px; }

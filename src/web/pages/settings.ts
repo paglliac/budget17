@@ -1,6 +1,8 @@
-// Settings: the day a week begins on, the user's own name in transfers to themselves, and the categories expenses and
-// incomes are sorted into. The day is picked in one click and posts to /budget/week-start/:day; the name opens by
-// ?edit=self-payee and posts to /budget/self-payee (see submitBudget). The amount of one week is changed on the week
+// Settings: the day a week begins on, the user's own name in transfers to themselves, the token Claude signs in by,
+// and the categories expenses and incomes are sorted into. The day is picked in one click and posts to
+// /budget/week-start/:day; the name opens by ?edit=self-payee and posts to /budget/self-payee, the token by
+// ?edit=claude-token to /budget/claude-token, and only its last characters are ever shown (see submitBudget). The
+// amount of one week is changed on the week
 // itself (see dashboard.ts). ZenMoney's categories can be renamed or hidden, and the user adds their own; ZenMoney
 // itself is never changed. They are listed in the order marking offers them, the most popular first, the incomes'
 // apart; hidden ones go together under «Скрытые». A row opens for editing by ?edit=<category id>, or
@@ -50,6 +52,8 @@ export interface BudgetSetup {
 
 export interface SettingsData {
   budget: BudgetSetup;
+  /** The last characters of the token Claude signs in by; null when none is set. */
+  claudeToken: string | null;
   /** Categories most popular first, with how many expenses went into each lately. */
   categories: CategoryCount[];
   /** Income categories the same way. */
@@ -67,7 +71,7 @@ export function loadBudgetSetup(data: EntityCollections, saved: Pick<SavedMarkin
 export function loadSettingsPage(
   data: EntityCollections,
   saved: SavedMarking,
-  options: { today: DateString; edit?: string | null; form?: CategoryForm },
+  options: { today: DateString; edit?: string | null; form?: CategoryForm; claudeToken?: string | null },
 ): SettingsData {
   const counted = (kind: CategoryKind, operations: ReturnType<typeof allExpenses>): CategoryCount[] =>
     byPopularity(categoryCatalog(data.tag ?? [], saved.categories, kind), operations, options.today).map((category) => ({
@@ -78,6 +82,7 @@ export function loadSettingsPage(
   const form = options.form;
   return {
     budget: loadBudgetSetup(data, saved),
+    claudeToken: options.claudeToken ? options.claudeToken.slice(-TOKEN_SHOWN) : null,
     categories: counted('expense', allExpenses(data, saved)),
     incomeCategories: counted('income', allIncomes(data, saved)),
     edit: form?.id ? categoryKey(form.id, form.kind) : (options.edit ?? null),
@@ -86,14 +91,28 @@ export function loadSettingsPage(
   };
 }
 
+/** How many last characters of the Claude token the page shows, to tell which one is set. */
+const TOKEN_SHOWN = 4;
+const TOKEN_MAX = 500;
+
 /**
- * Applies a form posted to /budget/week-start/:day, 0 for Monday to 6 for Sunday, or to /budget/self-payee with the
- * user's name in `name`; an empty name forgets it.
+ * Applies a form posted to /budget/week-start/:day, 0 for Monday to 6 for Sunday, to /budget/self-payee with the
+ * user's name in `name`, an empty name forgetting it, or to /budget/claude-token with the token in `token`, spaces and
+ * line breaks of a paste taken out; an empty one changes nothing, and /budget/claude-token/delete forgets it.
  */
 export function submitBudget(settings: Settings, path: string, body: URLSearchParams = new URLSearchParams()): { status: 'saved' } | { status: 'missing' } {
   if (path === '/budget/self-payee') {
     const name = (body.get('name') ?? '').trim().slice(0, 80);
     settings.setSelfPayee(name || null);
+    return { status: 'saved' };
+  }
+  if (path === '/budget/claude-token') {
+    const token = (body.get('token') ?? '').replace(/\s+/g, '').slice(0, TOKEN_MAX);
+    if (token) settings.setClaudeToken(token);
+    return { status: 'saved' };
+  }
+  if (path === '/budget/claude-token/delete') {
+    settings.setClaudeToken(null);
     return { status: 'saved' };
   }
   const start = /^\/budget\/week-start\/([0-6])$/.exec(path);
@@ -202,6 +221,7 @@ export function renderSettings(d: SettingsData, href: Href): Html {
           ],
         }),
       }),
+      section({ title: 'Claude', body: entryList({ label: 'Claude', items: [d.edit === 'claude-token' ? claudeTokenForm(d, href) : claudeTokenRow(d, href)] }) }),
       section({ title: 'Категории расходов', body: list('expense', d.categories) }),
       section({ title: 'Категории доходов', body: list('income', d.incomeCategories) }),
       hidden.length > 0 ? section({ title: 'Скрытые', body: entryList({ label: 'Скрытые категории', items: hidden.map(item) }) }) : null,
@@ -256,6 +276,38 @@ function selfPayeeForm(b: BudgetSetup, href: Href): Html {
     icon: 'card',
     color: toneColor('violet'),
     fields: field({ label: 'Ваше имя, как его пишет банк в переводах себе в другие банки', name: 'name', value: b.selfPayee ?? '', placeholder: 'Иван И.', maxLength: 80 }),
+    cancelHref: href('/settings'),
+  });
+}
+
+/** Whether a Claude token is set, by its last characters; the row opens a form to set another or forget it. */
+function claudeTokenRow(d: SettingsData, href: Href): Html {
+  return entryRow({
+    id: 'claude-token',
+    title: 'Токен Claude',
+    details: d.claudeToken ? `…${d.claudeToken} · сервер сам разбирает месяц по кнопке на разборе` : 'не задан · разбор месяца — по правилам',
+    icon: 'sparkles',
+    color: toneColor('violet'),
+    href: href('/settings', { edit: 'claude-token' }),
+  });
+}
+
+/** The token is never filled in: a new one replaces the old, and «Удалить» forgets it. */
+function claudeTokenForm(d: SettingsData, href: Href): Html {
+  return entryForm({
+    id: 'claude-token',
+    action: href('/budget/claude-token'),
+    submitLabel: 'Сохранить',
+    icon: 'sparkles',
+    color: toneColor('violet'),
+    fields: field({
+      label: d.claudeToken ? `Новый токен вместо …${d.claudeToken}, из claude setup-token` : 'Токен подписки Claude, из claude setup-token',
+      name: 'token',
+      type: 'password',
+      placeholder: 'sk-ant-oat01-…',
+      maxLength: TOKEN_MAX,
+    }),
+    deleteAction: d.claudeToken ? href('/budget/claude-token/delete') : undefined,
     cancelHref: href('/settings'),
   });
 }

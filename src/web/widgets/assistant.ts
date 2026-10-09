@@ -5,13 +5,25 @@ import { html, type Html } from '../html.ts';
 import { icon, type IconName } from '../icons.ts';
 import { toneColor, type Tone } from '../tones.ts';
 
-/** The assistant's greeting: what it did and found, and questions to ask it as chips; the one answered is highlighted. */
-export function assistantHero(options: { title: string; text: string; chips: Array<{ label: string; icon: IconName; href: string; active?: boolean }> }): Html {
+/**
+ * The assistant's greeting: what it did and found, a quiet button that posts a form when given (such as to look at the
+ * month again), and questions to ask it as chips; the one answered is highlighted.
+ */
+export function assistantHero(options: {
+  title: string;
+  text: string;
+  action?: { label: string; icon: IconName; action: string };
+  chips: Array<{ label: string; icon: IconName; href: string; active?: boolean }>;
+}): Html {
   return html`
     <section class="assistant">
       <div class="assistant-intro">
         <img class="assistant-orb" src="/apple-touch-icon.png" alt="" width="72" height="72">
-        <div><h2>${options.title}</h2><p>${options.text}</p></div>
+        <div><h2>${options.title}</h2><p>${options.text}</p>${
+          options.action
+            ? html`<form method="post" action="${options.action.action}"><button class="entry-quiet" type="submit">${icon(options.action.icon, 14)}${options.action.label}</button></form>`
+            : null
+        }</div>
       </div>
       <nav class="assistant-chips" aria-label="Вопросы ассистенту">${options.chips.map(
         (c) => html`<a class="assistant-chip" href="${c.href}"${c.active ? html` aria-current="true"` : null}>${icon(c.icon, 14)}${c.label}</a>`,

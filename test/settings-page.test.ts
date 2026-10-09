@@ -139,6 +139,18 @@ describe('settings page budget', () => {
     const form = render(settings, { edit: 'self-payee' });
     assert.ok(form.includes('action="/budget/self-payee"') && form.includes('value="Иван И."'));
   });
+
+  it('shows only the last characters of the Claude token, and never fills it in', () => {
+    using settings = new Settings(':memory:');
+    assert.ok(render(settings).includes('<b>Токен Claude</b><small>не задан · разбор месяца — по правилам</small>'));
+    const token = 'sk-ant-oat01-secret-part-wxyz';
+    const page = render(settings, { claudeToken: token });
+    assert.ok(page.includes('<b>Токен Claude</b><small>…wxyz · сервер сам разбирает месяц по кнопке на разборе</small>'));
+    const form = render(settings, { edit: 'claude-token', claudeToken: token });
+    assert.ok(form.includes('action="/budget/claude-token"') && form.includes('type="password"'));
+    assert.ok(form.includes('formaction="/budget/claude-token/delete"'));
+    for (const html of [page, form]) assert.ok(!html.includes('secret'), 'the token stays on the server');
+  });
 });
 
 describe('submitBudget', () => {
@@ -159,6 +171,17 @@ describe('submitBudget', () => {
     assert.equal(settings.selfPayee(), 'Кирилл А.');
     assert.deepEqual(submitBudget(settings, '/budget/self-payee', new URLSearchParams({ name: ' ' })), { status: 'saved' });
     assert.equal(settings.selfPayee(), null);
+  });
+
+  it('saves the Claude token without the breaks of a paste, keeps it when sent empty, and forgets it on delete', () => {
+    using settings = new Settings(':memory:');
+
+    assert.deepEqual(submitBudget(settings, '/budget/claude-token', new URLSearchParams({ token: ' sk-ant-oat01-ab\ncd ' })), { status: 'saved' });
+    assert.equal(settings.claudeToken(), 'sk-ant-oat01-abcd');
+    submitBudget(settings, '/budget/claude-token', new URLSearchParams({ token: '' }));
+    assert.equal(settings.claudeToken(), 'sk-ant-oat01-abcd');
+    assert.deepEqual(submitBudget(settings, '/budget/claude-token/delete'), { status: 'saved' });
+    assert.equal(settings.claudeToken(), null);
   });
 });
 

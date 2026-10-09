@@ -3,10 +3,10 @@
 DB := data/zenmoney.db
 
 .DEFAULT_GOAL := help
-.PHONY: help install sync balances web resync test typecheck ios-check ios-install check
+.PHONY: help install sync balances web claude-review resync test typecheck ios-check ios-install check
 
 help: ## Список команд
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-13s %s\n", $$1, $$2}'
 
 install: ## Установить зависимости
 	npm install
@@ -19,6 +19,9 @@ balances: ## Синхронизация, затем счета и итоговы
 
 web: ## Веб-интерфейс: обзор и виджеты на localhost:4317
 	@npm run --silent web
+
+claude-review: ## Claude по подписке разбирает месяц: MONTH=2026-09 или о чём просили на странице, WATCH=1 — ждать просьб, SERVER=…
+	@npm run --silent claude-review -- --server $(or $(SERVER),http://localhost:4317) $(if $(MONTH),--month $(MONTH)) $(if $(WATCH),--watch)
 
 resync: ## Удалить копию ZenMoney и скачать всё заново (регулярные траты остаются)
 	rm -f $(DB)

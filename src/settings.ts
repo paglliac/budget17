@@ -3,6 +3,8 @@ import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { OWN_CATEGORY_PREFIX, type CategoryKind, type CategorySetup, type OwnCategory, type Subcategory, type SubcategorySetup } from './categories.ts';
 import type { Categorization } from './categorization.ts';
+import type { ClaudeAnswer, ClaudeDecision, ClaudeReview, ClaudeSaved } from './claude-review.ts';
+import type { MonthString } from './dates.ts';
 import { isIncomeModel, type Income, type IncomeInput } from './income.ts';
 import type { RegularExpense, RegularExpenseInput } from './regular.ts';
 import { alignWeek, type Envelope, type Purchase, type PurchaseInput, type WeekStart, type Wish, type WishInput } from './week.ts';
@@ -119,8 +121,9 @@ const SCHEMA = `
     hint TEXT PRIMARY KEY
   ) STRICT;
 
-  -- Single values the user picked, such as week_start, the day a week begins on (0 for Monday), or self_payee, the
-  -- user's own name as banks write it in transfers to their accounts in other banks.
+  -- Single values the user picked, such as week_start, the day a week begins on (0 for Monday), self_payee, the
+  -- user's own name as banks write it in transfers to their accounts in other banks, or claude_token, the token Claude
+  -- signs in by on the user's subscription.
   CREATE TABLE IF NOT EXISTS preference (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -131,6 +134,31 @@ const SCHEMA = `
     week TEXT PRIMARY KEY,
     amount REAL NOT NULL CHECK (amount > 0)
   ) STRICT;
+
+  -- Claude's review of a month (claude-review.ts): its answer as JSON, when it came, and what each expense of the
+  -- month's weeks was then, as JSON of state by ZenMoney transaction id. A new answer replaces the month's.
+  CREATE TABLE IF NOT EXISTS claude_review (
+    month TEXT PRIMARY KEY,
+    made_at TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    seen TEXT NOT NULL
+  ) STRICT;
+
+  -- Months the user asked Claude to review again, until an answer made after asked_at comes; error says why Claude
+  -- did not answer, and such a request waits until the user asks anew.
+  CREATE TABLE IF NOT EXISTS claude_request (
+    month TEXT PRIMARY KEY,
+    asked_at TEXT NOT NULL
+  ) STRICT;
+
+  -- What the user did with Claude's word about an expense (spending:<ZenMoney transaction id>) or a category
+  -- (split:<category id>): accepted, turned down, or answered with the option picked.
+  CREATE TABLE IF NOT EXISTS claude_decision (
+    key TEXT PRIMARY KEY,
+    decision TEXT NOT NULL CHECK (decision IN ('accepted', 'declined', 'answered')),
+    answer TEXT,
+    decided_at TEXT NOT NULL
+  ) STRICT;
 `;
 
 /** Columns added after their table was created: databases made before them get them on open. */
@@ -140,6 +168,7 @@ const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> 
   ['regular_expense', 'icon', 'TEXT'],
   ['purchase', 'kind', "TEXT NOT NULL DEFAULT 'flexible' CHECK (kind IN ('required', 'flexible'))"],
   ['own_category', 'kind', "TEXT NOT NULL DEFAULT 'expense' CHECK (kind IN ('expense', 'income'))"],
+  ['claude_request', 'error', 'TEXT'],
 ];
 
 /**
@@ -255,6 +284,18 @@ export class Settings {
   setSelfPayee(name: string | null): void {
     if (name === null) this.#db.prepare("DELETE FROM preference WHERE key = 'self_payee'").run();
     else this.#db.prepare("INSERT INTO preference (key, value) VALUES ('self_payee', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(name);
+  }
+
+  /** The token Claude signs in by on the user's subscription, from `claude setup-token`; null when none is set. */
+  claudeToken(): string | null {
+    const row = this.#db.prepare("SELECT value FROM preference WHERE key = 'claude_token'").get();
+    return row ? String(row.value) : null;
+  }
+
+  /** Null forgets it. */
+  setClaudeToken(token: string | null): void {
+    if (token === null) this.#db.prepare("DELETE FROM preference WHERE key = 'claude_token'").run();
+    else this.#db.prepare("INSERT INTO preference (key, value) VALUES ('claude_token', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(token);
   }
 
   /**
@@ -629,6 +670,85 @@ export class Settings {
     const insert = this.#db.prepare('INSERT OR IGNORE INTO dismissed_hint (hint) VALUES (?)');
     this.#transaction(() => {
       for (const hint of hints) insert.run(hint);
+    });
+  }
+
+  /** Claude's review of a month, whether the user asked for another, and what the user did with Claude's word. */
+  claude(month: MonthString): ClaudeSaved {
+    const row = this.#db.prepare('SELECT made_at, answer, seen FROM claude_review WHERE month = ?').get(month);
+    const asked = this.#db.prepare('SELECT asked_at, error FROM claude_request WHERE month = ?').get(month);
+    const review: ClaudeReview | null = row
+      ? {
+          month,
+          madeAt: String(row.made_at),
+          answer: JSON.parse(String(row.answer)) as ClaudeAnswer,
+          seen: new Map(Object.entries(JSON.parse(String(row.seen)) as Record<string, string>)),
+        }
+      : null;
+    return {
+      review,
+      askedAt: asked ? String(asked.asked_at) : null,
+      failed: asked?.error == null ? null : String(asked.error),
+      decisions: this.claudeDecisions(),
+    };
+  }
+
+  /** Keeps Claude's review of its month, replacing the one before; a request made before it is answered by it. */
+  saveClaudeReview(review: ClaudeReview): void {
+    this.#transaction(() => {
+      this.#db
+        .prepare(
+          'INSERT INTO claude_review (month, made_at, answer, seen) VALUES (?, ?, ?, ?) ON CONFLICT (month) DO UPDATE SET made_at = excluded.made_at, answer = excluded.answer, seen = excluded.seen',
+        )
+        .run(review.month, review.madeAt, JSON.stringify(review.answer), JSON.stringify(Object.fromEntries(review.seen)));
+      this.#db.prepare('DELETE FROM claude_request WHERE month = ? AND asked_at <= ?').run(review.month, review.madeAt);
+    });
+  }
+
+  /** Asks Claude to review a month (again) as of `at`, an ISO time, forgetting a failure; null takes the request back. */
+  requestClaudeReview(month: MonthString, at: string | null): void {
+    if (at === null) {
+      this.#db.prepare('DELETE FROM claude_request WHERE month = ?').run(month);
+      return;
+    }
+    this.#db
+      .prepare('INSERT INTO claude_request (month, asked_at, error) VALUES (?, ?, NULL) ON CONFLICT (month) DO UPDATE SET asked_at = excluded.asked_at, error = NULL')
+      .run(month, at);
+  }
+
+  /** Keeps why Claude did not answer the request about a month; the request then waits until the user asks anew. */
+  failClaudeRequest(month: MonthString, error: string): void {
+    this.#db.prepare('UPDATE claude_request SET error = ? WHERE month = ?').run(error, month);
+  }
+
+  /** The months Claude was asked to review and has not answered nor failed to, with when, the earliest asked first. */
+  claudeRequests(): Array<{ month: MonthString; askedAt: string }> {
+    return this.#db
+      .prepare('SELECT month, asked_at FROM claude_request WHERE error IS NULL ORDER BY asked_at')
+      .all()
+      .map((row) => ({ month: String(row.month), askedAt: String(row.asked_at) }));
+  }
+
+  /** What the user did with Claude's word, by spending:<id> or split:<category id>. */
+  claudeDecisions(): Map<string, ClaudeDecision> {
+    return new Map(
+      this.#db
+        .prepare('SELECT key, decision, answer FROM claude_decision')
+        .all()
+        .map((row): [string, ClaudeDecision] => [
+          String(row.key),
+          { decision: String(row.decision) as ClaudeDecision['decision'], answer: row.answer === null ? null : String(row.answer) },
+        ]),
+    );
+  }
+
+  /** Keeps what the user did with Claude's word about each of `keys`, replacing what was kept; `at` is an ISO time. */
+  decideClaude(keys: readonly string[], decision: ClaudeDecision, at: string): void {
+    const upsert = this.#db.prepare(
+      'INSERT INTO claude_decision (key, decision, answer, decided_at) VALUES (?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET decision = excluded.decision, answer = excluded.answer, decided_at = excluded.decided_at',
+    );
+    this.#transaction(() => {
+      for (const key of keys) upsert.run(key, decision.decision, decision.answer, at);
     });
   }
 

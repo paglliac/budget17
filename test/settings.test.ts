@@ -413,4 +413,64 @@ describe('Settings', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('adds Claude’s reviews, requests and what was done with them to a file made before them, keeping its hints', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
+    try {
+      const path = join(dir, 'settings.db');
+      {
+        using db = new DatabaseSync(path);
+        db.exec('CREATE TABLE dismissed_hint (hint TEXT PRIMARY KEY) STRICT');
+        db.exec(`INSERT INTO dismissed_hint (hint) VALUES ('hide:gifts')`);
+      }
+      using settings = new Settings(path);
+      assert.deepEqual(settings.claude('2026-09'), { review: null, askedAt: null, failed: null, decisions: new Map() });
+      const reply = { paragraphs: ['Коротко.'], expenses: [] };
+      const answer = { findings: [], marking: [], questions: [], splits: [], avoidable: [], answers: { overspend: reply, check: reply, optimize: reply, plan: reply } };
+      settings.requestClaudeReview('2026-09', '2026-10-09T12:00:00.000Z');
+      settings.requestClaudeReview('2026-08', '2026-10-09T12:30:00.000Z');
+      settings.saveClaudeReview({ month: '2026-09', madeAt: '2026-10-09T12:10:00.000Z', answer, seen: new Map([['t1', 'food||week||']]) });
+      settings.decideClaude(['spending:t1'], { decision: 'answered', answer: 'В дополнительные' }, '2026-10-09T12:20:00.000Z');
+
+      const saved = settings.claude('2026-09');
+      assert.deepEqual(saved.review, { month: '2026-09', madeAt: '2026-10-09T12:10:00.000Z', answer, seen: new Map([['t1', 'food||week||']]) });
+      assert.equal(saved.askedAt, null, 'the answer came after the request');
+      assert.deepEqual([...saved.decisions], [['spending:t1', { decision: 'answered', answer: 'В дополнительные' }]]);
+      assert.deepEqual(settings.claudeRequests(), [{ month: '2026-08', askedAt: '2026-10-09T12:30:00.000Z' }]);
+      assert.deepEqual([...settings.dismissedHints()], ['hide:gifts']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps why Claude did not answer until the user asks anew, in a file whose requests came before that', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
+    try {
+      const path = join(dir, 'settings.db');
+      {
+        using db = new DatabaseSync(path);
+        db.exec('CREATE TABLE claude_request (month TEXT PRIMARY KEY, asked_at TEXT NOT NULL) STRICT');
+        db.exec(`INSERT INTO claude_request (month, asked_at) VALUES ('2026-09', '2026-10-09T12:00:00.000Z')`);
+      }
+      using settings = new Settings(path);
+      assert.deepEqual(settings.claudeRequests(), [{ month: '2026-09', askedAt: '2026-10-09T12:00:00.000Z' }]);
+      settings.failClaudeRequest('2026-09', 'claude не установлен');
+      assert.deepEqual(settings.claudeRequests(), [], 'a failed request is not tried again by itself');
+      assert.equal(settings.claude('2026-09').failed, 'claude не установлен');
+      settings.requestClaudeReview('2026-09', '2026-10-09T13:00:00.000Z');
+      assert.deepEqual(settings.claude('2026-09').failed, null);
+      assert.deepEqual(settings.claudeRequests(), [{ month: '2026-09', askedAt: '2026-10-09T13:00:00.000Z' }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the token Claude signs in by, and forgets it', () => {
+    using settings = new Settings(':memory:');
+    assert.equal(settings.claudeToken(), null);
+    settings.setClaudeToken('sk-ant-oat01-abcd');
+    assert.equal(settings.claudeToken(), 'sk-ant-oat01-abcd');
+    settings.setClaudeToken(null);
+    assert.equal(settings.claudeToken(), null);
+  });
 });

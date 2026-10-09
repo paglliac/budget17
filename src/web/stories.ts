@@ -637,7 +637,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
     },
     { name: 'Просто суммы', width: 420, props: { label: 'Регулярные', items: [{ label: 'Школа', amount: 45_000 }, { label: 'Аренда', amount: 40_000 }] } },
   ]),
-  doc(assistantHero, { group: 'Ассистент', description: 'Приветствие ассистента: что он сделал и нашёл, вопросы чипами; отвеченный подсвечен.' }, [
+  doc(assistantHero, { group: 'Ассистент', description: 'Приветствие ассистента: что он сделал и нашёл, тихая кнопка (например, «Пересмотреть») и вопросы чипами; отвеченный подсвечен.' }, [
     {
       name: 'С выбранным вопросом',
       width: 440,
@@ -648,6 +648,19 @@ export const WIDGET_DOCS: WidgetDoc[] = [
           { label: 'Где перерасход и почему', icon: 'trendingUp', href: '#', active: true },
           { label: 'Какие траты проверить', icon: 'search', href: '#' },
           { label: 'На чём сэкономить', icon: 'piggy', href: '#' },
+        ],
+      },
+    },
+    {
+      name: 'С кнопкой',
+      width: 440,
+      props: {
+        title: 'Claude разобрал сентябрь',
+        text: '9 октября в 19:45 · 5 выводов, 12 подсказок',
+        action: { label: 'Пересмотреть', icon: 'refresh', action: '#' },
+        chips: [
+          { label: 'Где перерасход и почему', icon: 'trendingUp', href: '#' },
+          { label: 'Какие траты проверить', icon: 'search', href: '#' },
         ],
       },
     },

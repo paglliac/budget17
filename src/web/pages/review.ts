@@ -1,8 +1,10 @@
 // The month review, /review: what happened with a month's money and what to fix, the month just gone unless
 // ?month= asks for another. The main column holds income, spending and what is left, where the income went, what the
 // weeks were made of as a map of tiles, the weeks against their limits, and the regular payments. The side is the
-// assistant: what it found, its answers to four questions (?ask=) and its hints, worked out by rules from the review
-// for now (see src/review.ts). A tile of the map opens on the side instead (?tile=): what it holds, the hints about
+// assistant: what it found, its answers to four questions (?ask=), its hints and what could be spared, as tabs
+// (?list=). They are Claude's once it has reviewed the month (see src/claude-review.ts), and worked out by rules from
+// the review until then (see src/review.ts); what is done with Claude's word posts to /review/claude/… (see
+// submitClaude). A tile of the map opens on the side instead (?tile=): what it holds, Claude's word and the hints about
 // it, and where to put its expenses — into another category, or a subcategory, a shop's for good and a transfer's
 // one by one; those post to /review/… (see submitReview). What to check also opens on its own page,
 // /review/check?kind=, one kind at a time by day; an expense opens in place there by ?edit=spending-<ZenMoney id> to be
@@ -10,7 +12,23 @@
 
 import { mainCurrency } from '../../balances.ts';
 import { categoryCatalog, NO_SUBCATEGORIES, subcategoryOf, type Subcategory, type SubcategorySetup } from '../../categories.ts';
-import { addDays, monthOf, shiftMonth } from '../../dates.ts';
+import {
+  claudeInput,
+  NO_CLAUDE,
+  openExpenses,
+  openWord,
+  readAnswer,
+  spendingKey,
+  splitKey,
+  stateOf,
+  type ClaudeInput,
+  type ClaudeSaved,
+  type ClaudeSplit,
+  type Current,
+  type OpenWord,
+  type Placement,
+} from '../../claude-review.ts';
+import { addDays, localDate, monthOf, shiftMonth, type MonthString } from '../../dates.ts';
 import { parseTitle } from '../../input.ts';
 import { listOperations, type Operation } from '../../ledger.ts';
 import { operationKind } from '../../operations.ts';
@@ -32,6 +50,7 @@ import {
   type Finding,
   type Hint,
   type MonthReview,
+  type Question,
   type ReviewedExpense,
   type ToCheck,
   type WeekPart,
@@ -58,9 +77,7 @@ import { budgetOf, type SavedBudget } from './dashboard.ts';
 import { allExpenses, allIncomes, envelopeMark, loadMarking, markingActions, markingPanel, markingTitle, type Marking } from './marking.ts';
 
 /** Questions to the assistant, as its chips offer them. */
-type Question = 'overspend' | 'check' | 'optimize' | 'plan';
-
-const QUESTIONS: Array<{ key: Question; label: string; icon: IconName }> = [
+const CHIPS: Array<{ key: Question; label: string; icon: IconName }> = [
   { key: 'overspend', label: 'Где перерасход и почему', icon: 'trendingUp' },
   { key: 'check', label: 'Какие траты проверить', icon: 'search' },
   { key: 'optimize', label: 'На чём сэкономить', icon: 'piggy' },
@@ -94,15 +111,36 @@ export interface ReviewData {
   selfPayee: string | null;
   /** On /review: the part of the map open on the side, its piece or one expense (see partId and opened). */
   tile: string | null;
+  /** The expenses of the month's weeks as they are now, largest first. */
+  current: Current[];
+  /** Claude's review of the month as saved, and what of its marking, questions and splits is still open. */
+  claude: ClaudeSaved;
+  word: OpenWord | null;
+  /** The list the side shows. */
+  list: List;
 }
+
+/** The lists of the assistant, one at a time (?list=); what could be spared comes only from Claude. */
+const LISTS = ['findings', 'hints', 'spare'] as const;
+type List = (typeof LISTS)[number];
 
 export function loadReview(
   data: EntityCollections,
   saved: SavedBudget,
-  options: { today: DateString; month?: string | null; ask?: string | null; kind?: string | null; edit?: string | null; tile?: string | null },
+  options: {
+    today: DateString;
+    month?: string | null;
+    ask?: string | null;
+    kind?: string | null;
+    edit?: string | null;
+    tile?: string | null;
+    list?: string | null;
+    /** Claude's review of the month as saved; none when not given. */
+    claude?: (month: MonthString) => ClaudeSaved;
+  },
 ): ReviewData {
   const { today } = options;
-  const month = options.month ? parseMonth(options.month, monthOf(today)) : shiftMonth(monthOf(today), -1);
+  const month = reviewedMonth(options.month, today);
   const weeks = weeksOfMonth(month, saved.weekStart);
   // Three months before tell what is usual.
   const earliest = weeksOfMonth(shiftMonth(month, -3), saved.weekStart)[0] ?? weeks[0]!;
@@ -114,11 +152,13 @@ export function loadReview(
   const marking = loadMarking(data, saved, history, today);
   const subcategories = saved.subcategories ?? NO_SUBCATEGORIES;
   const selfPayee = saved.selfPayee ?? null;
+  const current = review.expenses.map((e) => ({ ...e, subcategory: subcategoryOf(e.operation, subcategories, { shop: !isTransfer(e.operation, selfPayee) }) }));
+  const claude = options.claude?.(month) ?? NO_CLAUDE;
   return {
     today,
     review,
     findings: findings(review, today, saved.regular),
-    ask: QUESTIONS.find((q) => q.key === options.ask)?.key ?? null,
+    ask: CHIPS.find((q) => q.key === options.ask)?.key ?? null,
     kind,
     regular: saved.regular,
     marking,
@@ -140,14 +180,23 @@ export function loadReview(
     subcategories,
     selfPayee,
     tile: options.tile ?? null,
+    current,
+    claude,
+    word: claude.review ? openWord(claude.review, claude.decisions, current, marking.categories) : null,
+    list: LISTS.find((l) => l === options.list) ?? 'findings',
   };
+}
+
+/** The month a review is of: the one asked for, if it has begun, or else the month just gone. */
+export function reviewedMonth(value: string | null | undefined, today: DateString): MonthString {
+  return value ? parseMonth(value, monthOf(today)) : shiftMonth(monthOf(today), -1);
 }
 
 interface Page {
   d: ReviewData;
   href: Href;
-  /** This page with an expense, an answer or a tile open or closed, keeping the rest of its state. */
-  here: (changes: { edit?: string | null; ask?: string | null; tile?: string | null }) => string;
+  /** This page with an expense, an answer, a tile or a list open or closed, keeping the rest of its state. */
+  here: (changes: { edit?: string | null; ask?: string | null; tile?: string | null; list?: string | null }) => string;
 }
 
 /** The page of one kind of expenses to check, with one of them open. */
@@ -156,7 +205,7 @@ function checkHref(d: ReviewData, href: Href, kind: ToCheck, edit?: string): str
 }
 
 export function renderReview(d: ReviewData, href: Href): Html {
-  const here: Page['here'] = (changes) => href('/review', { month: d.review.month, ask: d.ask, tile: d.tile, ...changes });
+  const here: Page['here'] = (changes) => href('/review', { month: d.review.month, ask: d.ask, tile: d.tile, list: d.list === 'findings' ? null : d.list, ...changes });
   const page: Page = { d, href, here };
   const tile = d.tile ? tileSide(page) : null;
   const body = appShell({
@@ -212,7 +261,7 @@ function main(page: Page, tile: Html[] | null): Html[] {
     pageIntro({
       title: `Разбор ${monthName(r.month, 'genitive')}`,
       text: 'Что произошло с деньгами и что стоит поправить.',
-      badge: d.findings.length ? { text: `ассистент сделал ${count(d.findings.length, ['вывод', 'вывода', 'выводов'])}`, tone: 'green' } : undefined,
+      badge: badge(d),
     }),
     grid({
       columns: 3,
@@ -379,7 +428,7 @@ function weekMap(page: Page, tile: Html[] | null): Html {
   const open = tile ? opened(d) : null;
   const total = d.parts.reduce((s, p) => s + p.amount, 0);
   const unsorted = d.parts.filter((p) => !p.category).reduce((s, p) => s + p.amount, 0);
-  const moved = hinted(d.hints);
+  const moved = new Set([...hinted(d.hints), ...(d.word ? openExpenses(d.word) : [])]);
   const hasHint = (expenses: Operation[]) => expenses.some((o) => moved.has(o.id));
   const link = (id: string) => here({ tile: d.tile === id ? null : id });
   return panelCard({
@@ -465,7 +514,8 @@ function tileSide(page: Page): Html[] {
         ? `${partLabel(open.part)} › Ещё ${open.rest.length}`
         : partLabel(open.part);
   const ids = new Set(expenses.map((o) => o.id));
-  const hints = d.hints.filter((h) => h.kind !== 'hide' && h.expenses.some((o) => ids.has(o.id)));
+  const hints = ruleHints(d).filter((h) => h.kind !== 'hide' && h.expenses.some((o) => ids.has(o.id)));
+  const word = claudeAbout(page, ids, open.piece || open.expense || open.rest ? null : open.part.category);
   return [
     back,
     figureCard({
@@ -474,6 +524,8 @@ function tileSide(page: Page): Html[] {
       symbol: d.symbol,
       note: open.expense ? open.expense.account : `${count(expenses.length, EXPENSES)}, ${percent(amount / Math.max(1, d.review.inWeeks))} недель`,
     }),
+    word.length ? listHeading({ title: 'Claude об этом', count: word.length }) : null,
+    word.length ? suggestionList({ label: 'Claude об этом', items: word }) : null,
     hints.length ? suggestionList({ label: 'Подсказки', items: hints.map((h) => hintItem(page, h)) }) : null,
     ...(open.expense ? expenseTile(page, open.expense, open.part) : open.piece ? pieceTile(page, open.part, open.piece) : partTile(page, open.part, open.rest ?? open.part.pieces)),
   ].filter((block): block is Html => block !== null);
@@ -738,23 +790,332 @@ export function submitReview(settings: Settings, data: EntityCollections, path: 
   return { status: 'missing' };
 }
 
+// ---- Claude's word
+
+/**
+ * Applies a form posted to /review/claude/…, about Claude's word on `month` as the review shows it now (see openWord):
+ * - accept — Claude's marking of the expenses in `spending` (ids, by commas) is applied to them;
+ * - answer — the option numbered `option` of Claude's question about `spending` is applied to them;
+ * - split — Claude's split of `category` makes its subcategories and puts its payees' expenses into them: a shop's for
+ *   good, a transfer's of the month one by one;
+ * - decline — Claude's marking of `spending`, or its split of `category`, is turned down;
+ * - ask — asks Claude to review the month again; cancel takes that back.
+ * What is done with Claude's word is kept, so that a later answer brings none of it back.
+ */
+export function submitClaude(
+  settings: Settings,
+  data: EntityCollections,
+  path: string,
+  form: URLSearchParams,
+  context: { today: DateString; saved: SavedBudget; now: Date },
+): ReviewSubmission {
+  const month = reviewedMonth(form.get('month'), context.today);
+  const at = context.now.toISOString();
+  if (path === '/review/claude/ask' || path === '/review/claude/cancel') {
+    settings.requestClaudeReview(month, path === '/review/claude/ask' ? at : null);
+    return { status: 'saved' };
+  }
+  const word = loadReview(data, context.saved, { today: context.today, month, claude: (m) => settings.claude(m) });
+  if (!word.word) return { status: 'missing' };
+  const ids = (form.get('spending') ?? '').split(',').filter(Boolean);
+  const about = (expenses: readonly Operation[]) => ids.length > 0 && ids.every((id) => expenses.some((o) => o.id === id));
+  const named = (expenses: readonly Operation[]) => expenses.filter((o) => ids.includes(o.id));
+  const marking = word.word.marking.find((m) => about(m.expenses));
+  const split = word.word.splits.find((x) => x.category.id === form.get('category'));
+  switch (path) {
+    case '/review/claude/accept':
+      if (!marking) return { status: 'missing' };
+      place(settings, named(marking.expenses), marking.item);
+      settings.decideClaude(ids.map(spendingKey), { decision: 'accepted', answer: null }, at);
+      return { status: 'saved' };
+    case '/review/claude/answer': {
+      const question = word.word.questions.find((q) => about(q.expenses));
+      const option = /^\d+$/.test(form.get('option') ?? '') ? question?.item.options[Number(form.get('option'))] : undefined;
+      if (!question || !option) return { status: 'missing' };
+      place(settings, named(question.expenses), option);
+      settings.decideClaude(ids.map(spendingKey), { decision: 'answered', answer: option.label }, at);
+      return { status: 'saved' };
+    }
+    case '/review/claude/split':
+      if (!split) return { status: 'missing' };
+      splitCategory(settings, word, split.item);
+      settings.decideClaude([splitKey(split.category.id)], { decision: 'accepted', answer: null }, at);
+      return { status: 'saved' };
+    case '/review/claude/decline':
+      if (split) settings.decideClaude([splitKey(split.category.id)], { decision: 'declined', answer: null }, at);
+      else if (marking) settings.decideClaude(ids.map(spendingKey), { decision: 'declined', answer: null }, at);
+      else return { status: 'missing' };
+      return { status: 'saved' };
+  }
+  return { status: 'missing' };
+}
+
+/** Puts expenses where Claude's word says, as moves on the map do; payments of regular expenses keep where they are. */
+function place(settings: Settings, expenses: readonly Operation[], p: Placement): void {
+  const sub = p.category !== null && p.subcategory !== null ? settings.addSubcategory(p.category, p.subcategory) : null;
+  for (const o of expenses) {
+    if (o.regular) continue;
+    if (p.category !== null) settings.categorize(o.id, { tag: p.category });
+    if (sub) settings.putSpending(o.id, sub.id);
+    if (p.envelope !== null) settings.markSpending(o.id, p.envelope);
+  }
+}
+
+/**
+ * Makes the subcategories of Claude's split and puts its payees into them: a shop of the month for good, as the map
+ * does, and the month's transfers in the category one by one.
+ */
+function splitCategory(settings: Settings, d: ReviewData, split: ClaudeSplit): void {
+  const shops = new Set(d.current.map((c) => shopKey(c.operation.payee)));
+  for (const { title, payees } of split.subcategories) {
+    const sub = settings.addSubcategory(split.category, title);
+    for (const payee of payees) {
+      const key = shopKey(payee);
+      if (!isTransfer({ payee }, d.selfPayee)) {
+        if (shops.has(key)) settings.putShop(split.category, key, sub.id);
+        continue;
+      }
+      for (const { operation: o } of d.current) if (o.category?.id === split.category && shopKey(o.payee) === key) settings.putSpending(o.id, sub.id);
+    }
+  }
+}
+
+/**
+ * Keeps Claude's answer about `month`, replacing the one before, with what each expense of the month is now; an
+ * answer to a request made before it ends the request. Errors say why the answer is none; `dropped`, what of it names
+ * nothing of the month and was left out.
+ */
+export function saveClaudeAnswer(
+  settings: Settings,
+  data: EntityCollections,
+  value: unknown,
+  context: { today: DateString; month: string | null; saved: SavedBudget; now: Date },
+): { status: 'saved'; month: MonthString; dropped: string[] } | { status: 'invalid'; errors: string[] } {
+  const d = loadReview(data, context.saved, { today: context.today, month: context.month });
+  const read = readAnswer(value, { expenses: new Set(d.current.map((c) => c.operation.id)), categories: new Set(d.marking.categories.map((c) => c.id)) });
+  if ('errors' in read) return { status: 'invalid', errors: read.errors };
+  const month = d.review.month;
+  settings.saveClaudeReview({ month, madeAt: context.now.toISOString(), answer: read.answer, seen: new Map(d.current.map((c) => [c.operation.id, stateOf(c)])) });
+  return { status: 'saved', month, dropped: read.dropped };
+}
+
+/** The month as Claude is given it to review (see claudeInput), with what it said before and what became of it. */
+export function loadClaudeInput(
+  data: EntityCollections,
+  saved: SavedBudget,
+  options: { today: DateString; month: string | null; claude: (month: MonthString) => ClaudeSaved },
+): ClaudeInput {
+  const d = loadReview(data, saved, options);
+  const r = d.review;
+  return claudeInput({
+    review: r,
+    today: d.today,
+    weekStart: saved.weekStart,
+    month: d.current,
+    ignored: listOperations(data, { from: r.from, to: r.to }, saved, { withIgnored: true }).filter((o) => o.kind === 'expense' && o.ignored),
+    history: allExpenses(data, saved),
+    categories: d.marking.categories,
+    subcategories: d.subcategories.subcategories,
+    regular: d.regular,
+    selfPayee: d.selfPayee,
+    claude: d.claude,
+  });
+}
+
 // ---- The assistant
 
+/**
+ * The assistant: a card with what it did and the four questions as chips, the answer asked for, and its lists as tabs —
+ * what it found, its hints, and what could be spared. Once Claude has reviewed the month, the card, the findings, the
+ * answers and what could be spared are Claude's, and its questions, marking and splits lead the hints, before those
+ * of rules; until then all of it comes from rules, and the card offers to ask Claude.
+ */
 function side(page: Page): Html[] {
   const { d, here } = page;
-  const items = d.findings.map((f) => insight(page, f));
+  const review = d.claude.review;
+  const found = review ? review.answer.findings.map((f) => claudeFinding(page, f)) : d.findings.map((f) => insight(page, f));
+  const hints = [...claudeHints(page), ...ruleHints(d).map((h) => hintItem(page, h))];
+  const spare = review?.answer.avoidable ?? [];
+  const lists = LISTS.filter((l) => l !== 'spare' || review).map((key) => ({
+    key,
+    label: { findings: 'Выводы', hints: 'Подсказки', spare: 'Лишние траты' }[key],
+    count: { findings: found.length, hints: hints.length, spare: spare.length }[key],
+  }));
+  const list = lists.some((l) => l.key === d.list) ? d.list : 'findings';
+  const body =
+    list === 'hints'
+      ? hints.length
+        ? suggestionList({ label: 'Подсказки', items: hints })
+        : emptyState({ text: 'Подсказок нет.' })
+      : list === 'spare'
+        ? spare.length
+          ? insightList({ label: 'Лишние траты', items: spare.map((a) => ({ icon: 'piggy', tone: 'teal', title: a.title, text: a.text, href: tileOf(page, null, a.expenses) })) })
+          : emptyState({ text: 'Лишнего Claude не нашёл.' })
+        : found.length
+          ? insightList({ label: 'Главные выводы', items: found })
+          : emptyState({ text: 'Ничего особенного не нашёл.' });
   return [
-    assistantHero({
-      title: `Разобрал ${monthName(d.review.month)}`,
-      text: d.findings.length ? `Нашёл ${count(d.findings.length, ['важный момент', 'важных момента', 'важных моментов'])}.` : 'Ничего особенного не нашёл.',
-      chips: QUESTIONS.map((q) => ({ label: q.label, icon: q.icon, href: here({ ask: d.ask === q.key ? null : q.key }), active: d.ask === q.key })),
+    hero(page, found.length, hints.length),
+    d.ask ? (review ? claudeAnswer(page, d.ask) : answer(page, d.ask)) : null,
+    segmentedLinks({
+      label: 'Что нашёл ассистент',
+      items: lists.map((l) => ({ label: l.label, count: l.count, href: here({ list: l.key === 'findings' ? null : l.key }), active: l.key === list })),
     }),
-    d.ask ? answer(page, d.ask) : null,
-    items.length ? listHeading({ title: 'Главные выводы', count: items.length }) : null,
-    items.length ? insightList({ label: 'Главные выводы', items }) : null,
-    d.hints.length ? listHeading({ title: 'Подсказки', count: d.hints.length }) : null,
-    d.hints.length ? suggestionList({ label: 'Подсказки', items: d.hints.map((h) => hintItem(page, h)) }) : null,
+    body,
   ].filter((block): block is Html => block !== null);
+}
+
+/** The main column's word on the assistant: how many findings it made. */
+function badge(d: ReviewData): { text: string; tone: Tone } | undefined {
+  const n = d.claude.review?.answer.findings.length ?? d.findings.length;
+  if (!n) return undefined;
+  return { text: `${d.claude.review ? 'Claude' : 'ассистент'} сделал ${count(n, ['вывод', 'вывода', 'выводов'])}`, tone: 'green' };
+}
+
+/** The card of the assistant: Claude's review and when it was made, or the rules' until Claude reviews the month. */
+function hero(page: Page, found: number, hints: number): Html {
+  const { d, href, here } = page;
+  const { review, failed } = d.claude;
+  // A request Claude failed waits until the user asks anew, so the card offers to.
+  const askedAt = failed ? null : d.claude.askedAt;
+  const month = d.review.month;
+  const chips = CHIPS.map((q) => ({ label: q.label, icon: q.icon, href: here({ ask: d.ask === q.key ? null : q.key }), active: d.ask === q.key }));
+  const cancel = { label: 'Отменить', icon: 'x' as const, action: href('/review/claude/cancel', { month }) };
+  if (review) {
+    const fresh = d.word?.fresh.length ?? 0;
+    return assistantHero({
+      title: `Claude разобрал ${monthName(month)}`,
+      text: askedAt
+        ? `Пересматриваю с ${timeOf(askedAt)}: учту разметку, ваши описания и ответы.`
+        : failed
+          ? `${moment(review.madeAt)}. Пересмотреть не вышло: ${failed}`
+          : [
+              `${moment(review.madeAt)} · ${count(found, ['вывод', 'вывода', 'выводов'])}, ${count(hints, ['подсказка', 'подсказки', 'подсказок'])}`,
+              fresh ? `с тех пор ${count(fresh, ['новая трата', 'новые траты', 'новых трат'])}` : '',
+            ]
+              .filter(Boolean)
+              .join(' · '),
+      action: askedAt ? cancel : { label: 'Пересмотреть', icon: 'refresh', action: href('/review/claude/ask', { month }) },
+      chips,
+    });
+  }
+  return assistantHero({
+    title: `Разобрал ${monthName(month)}`,
+    text: askedAt
+      ? `Пока по правилам: Claude разбирает месяц с ${timeOf(askedAt)}.`
+      : failed
+        ? `Пока по правилам: Claude не ответил — ${failed}`
+        : `${found ? `Нашёл ${count(found, ['важный момент', 'важных момента', 'важных моментов'])}` : 'Ничего особенного не нашёл'} по правилам, Claude этот месяц ещё не смотрел.`,
+    action: askedAt ? cancel : { label: 'Попросить Claude', icon: 'sparkles', action: href('/review/claude/ask', { month }) },
+    chips,
+  });
+}
+
+/** An ISO time as the server's clock shows it: 21:14. */
+function timeOf(iso: string): string {
+  const at = new Date(iso);
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+}
+
+/** An ISO time with its day: 9 октября в 21:14. */
+function moment(iso: string): string {
+  return `${dayMonth(localDate(new Date(iso)))} в ${timeOf(iso)}`;
+}
+
+/**
+ * Where a word about expenses or a category leads on the map: one expense opens itself, a category its part, and
+ * several expenses the part of the first of them; nothing when none of it is on the map.
+ */
+function tileOf(page: Page, category: TagId | null, expenses: readonly string[]): string | undefined {
+  const { d, here } = page;
+  const link = (tile: string) => here({ tile });
+  const part = (id: string) => d.parts.find((p) => p.expenses.some((o) => o.id === id));
+  if (expenses.length === 1 && part(expenses[0]!)) return link(`spending-${expenses[0]}`);
+  const byCategory = category ? d.parts.find((p) => p.category?.id === category) : undefined;
+  if (byCategory) return link(partId(byCategory));
+  const first = expenses.map(part).find(Boolean);
+  return first ? link(partId(first)) : undefined;
+}
+
+function claudeFinding(page: Page, f: { tone: string; icon: string; title: string; text: string; category: TagId | null; expenses: string[] }) {
+  return { icon: f.icon as IconName, tone: f.tone as Tone, title: f.title, text: f.text, href: tileOf(page, f.category, f.expenses) };
+}
+
+/** Claude's answer to one of the four questions, with links to the expenses it points at. */
+function claudeAnswer(page: Page, ask: Question): Html {
+  const { d, here } = page;
+  const reply = d.claude.review!.answer.answers[ask];
+  const expenses = reply.expenses.map((id) => d.review.expenses.find((e) => e.operation.id === id)).filter((e): e is ReviewedExpense => e !== undefined);
+  return assistantAnswer({
+    question: ask === 'plan' ? `План на ${monthName(d.review.next.month)}` : CHIPS.find((q) => q.key === ask)!.label,
+    paragraphs: reply.paragraphs,
+    links: expenses.map((e) => expenseLink(page, e)),
+    closeHref: here({ ask: null }),
+  });
+}
+
+/** An expense an answer points at: one to check opens on its page, any other on the operations of its month. */
+function expenseLink(page: Page, e: ReviewedExpense): { label: string; detail: string; href: string } {
+  const { d, href } = page;
+  const o = e.operation;
+  return {
+    label: `${dayMonth(o.date)} · ${markingTitle(o)}`,
+    detail: money(o.amount, d.symbol),
+    href: isToCheck(e.kind) ? checkHref(d, href, e.kind, `spending-${o.id}`) : href('/operations', { month: monthOf(o.date), q: o.payee, edit: `spending-${o.id}` }),
+  };
+}
+
+type Suggestion = Parameters<typeof suggestionList>[0]['items'][number];
+
+/** Claude's open word as hints: its questions first, then its marking and its splits. */
+function claudeHints(page: Page, only?: (expenses: readonly Operation[], category: TagId | null) => boolean): Suggestion[] {
+  const { d, href } = page;
+  const word = d.word;
+  if (!word) return [];
+  const month = d.review.month;
+  const ids = (expenses: readonly Operation[]) => expenses.map((o) => o.id).join(',');
+  const decline = (params: Record<string, string>) => ({ label: 'Не надо', action: href('/review/claude/decline', { month, ...params }) });
+  const keep = only ?? (() => true);
+  return [
+    ...word.questions
+      .filter((q) => keep(q.expenses, null))
+      .map(({ item, expenses }) => ({
+        icon: 'message' as IconName,
+        tone: 'yellow' as Tone,
+        title: item.title,
+        text: item.text,
+        actions: item.options.map((o, i) => ({ label: o.label, action: href('/review/claude/answer', { month, spending: ids(expenses), option: String(i) }) })),
+      })),
+    ...word.marking
+      .filter((m) => keep(m.expenses, null))
+      .map(({ item, expenses }) => ({
+        icon: 'sparkles' as IconName,
+        tone: 'violet' as Tone,
+        title: item.title,
+        text: `${stop(`${count(expenses.length, EXPENSES)} на ${money(sum(expenses), d.symbol)}`)} ${capitalize(item.why)}`,
+        actions: [{ label: 'Принять', action: href('/review/claude/accept', { month, spending: ids(expenses) }) }, decline({ spending: ids(expenses) })],
+      })),
+    ...word.splits
+      .filter((x) => keep([], x.category.id))
+      .map(({ item, category }) => ({
+        icon: 'layers' as IconName,
+        tone: 'violet' as Tone,
+        title: `Разбить «${category.title}»: ${item.subcategories.map((x) => x.title).join(', ')}`,
+        text: item.why,
+        actions: [{ label: 'Разбить', action: href('/review/claude/split', { month, category: category.id }) }, decline({ category: category.id })],
+      })),
+  ];
+}
+
+/** Claude's open word about the expenses of an open tile, and its split of the tile's category when the tile is it. */
+function claudeAbout(page: Page, ids: ReadonlySet<string>, category: { id: TagId } | null): Suggestion[] {
+  return claudeHints(page, (expenses, split) => (split ? split === category?.id : expenses.some((o) => ids.has(o.id))));
+}
+
+/** The rules' hints, less those about expenses all of which Claude has a word about already. */
+function ruleHints(d: ReviewData): Hint[] {
+  const claude = d.word ? openExpenses(d.word) : new Set<string>();
+  return d.hints.filter((h) => h.kind === 'hide' || !h.expenses.every((o) => claude.has(o.id)));
 }
 
 function insight(page: Page, f: Finding): { icon: IconName; tone: Tone; title: string; text: string; href?: string } {

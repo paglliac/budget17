@@ -1,7 +1,9 @@
 // Web UI and the JSON API of the iPhone app: the week's budget at /, operations at /operations, expenses without a
 // category at /uncategorized, incomes at /income, regular expenses at /regular, the day a week begins on and categories
 // at /settings, the widget
-// storyboard at /storyboard, and the same screens as JSON under /api (see api.ts). Forms post to the same paths
+// storyboard at /storyboard, and the same screens as JSON under /api (see api.ts), along with the month as Claude
+// reviews it and where its answer is posted (see src/claude/run.ts); with a Claude token in the settings the server
+// has Claude review what the user asks for by itself (see reviewRequested). Forms post to the same paths
 // whether they come from a page or, under /api, from the app, which gets JSON back instead of a redirect. Reads the
 // local ZenMoney copy (data/zenmoney.db) and syncs it on start, every SYNC_MINUTES and on POST /sync when
 // ZENMONEY_TOKEN is set. Without a local copy, or with ?demo, it shows demo data. Purchases, wishes, how expenses are
@@ -36,7 +38,8 @@ import { isAccessToken, isAuthorized, sessionCookie } from './auth.ts';
 import { demoCollections } from './demo.ts';
 import { escape } from './html.ts';
 import { createHref, userName } from './pages/chrome.ts';
-import { loadReview, renderReview, renderReviewCheck, submitReview } from './pages/review.ts';
+import { askClaude } from '../claude/ask.ts';
+import { loadClaudeInput, loadReview, renderReview, renderReviewCheck, saveClaudeAnswer, submitClaude, submitReview } from './pages/review.ts';
 import { budgetOf, loadDashboard, renderDashboard, submitDashboard, type DashboardForm, type SavedBudget } from './pages/dashboard.ts';
 import { loadIncome, renderIncome, submitIncome } from './pages/income.ts';
 import { renderLogin } from './pages/login.ts';
@@ -78,6 +81,40 @@ function syncNow(): Promise<void> {
     syncing = null;
   });
   return syncing;
+}
+
+let reviewing: Promise<void> | null = null;
+
+/**
+ * Has Claude review the months the user asked for, one at a time, when the settings hold the token it signs in by;
+ * a month asked for while a review runs waits for it. A failure is kept on its request, which waits until the user
+ * asks anew. Without a token requests wait for src/claude/run.ts.
+ */
+function reviewRequested(): void {
+  if (reviewing || !existsSync(DB_PATH)) return;
+  const token = loadSettings((s) => s.claudeToken());
+  if (!token) return;
+  reviewing = (async () => {
+    for (let next = loadSettings((s) => s.claudeRequests())[0]; next; next = loadSettings((s) => s.claudeRequests())[0]) {
+      const { month } = next;
+      const today = localDate();
+      try {
+        const input = loadClaudeInput(loadCollections(false, today), loadSettings(savedBudget), { today, month, claude: (m) => loadSettings((s) => s.claude(m)) });
+        console.log(`Claude разбирает ${month}: ${input.expenses.length} трат…`);
+        const answer = await askClaude(month, input, { token });
+        using settings = new Settings(SETTINGS_PATH);
+        const saved = saveClaudeAnswer(settings, loadCollections(false, today), answer, { today, month, saved: savedBudget(settings), now: new Date() });
+        if (saved.status === 'invalid') throw new Error(`ответ не по схеме: ${saved.errors.slice(0, 3).join('; ')}`);
+        console.log(`Claude разобрал ${month}${saved.dropped.length ? `, пропущено: ${saved.dropped.join('; ')}` : ''}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`Claude не разобрал ${month}:`, message);
+        loadSettings((s) => s.failClaudeRequest(month, message));
+      }
+    }
+  })().finally(() => {
+    reviewing = null;
+  });
 }
 
 function loadCollections(demo: boolean, today: string): EntityCollections {
@@ -127,15 +164,19 @@ function isSameOrigin(request: IncomingMessage): boolean {
   return origin === undefined || origin === `http://${request.headers.host}` || origin === `https://${request.headers.host}`;
 }
 
-async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
+async function readBody(request: IncomingMessage, limit: number): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request as AsyncIterable<Buffer>) {
     size += chunk.length;
-    if (size > 65_536) throw new Error('Слишком большая форма');
+    if (size > limit) throw new Error('Слишком большая форма');
     chunks.push(chunk);
   }
-  return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
+  return new URLSearchParams(await readBody(request, 65_536));
 }
 
 function send(response: ServerResponse, status: number, type: string, body: string): void {
@@ -196,6 +237,14 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     const back = new URL(backTo(request), 'http://localhost');
     return { status: 'invalid', errors: result.form.errors, page: () => dashboardPage(back.searchParams, context, result.form) };
   }
+  if (path.startsWith('/review/claude/')) {
+    const form = new URLSearchParams([...new URL(request.url ?? '/', 'http://localhost').searchParams, ...body]);
+    using settings = new Settings(SETTINGS_PATH);
+    const result = submitClaude(settings, loadCollections(demo, today), path, form, { today, saved: savedBudget(settings), now: new Date() });
+    if (result.status !== 'saved') return { status: 'missing', message: 'Такой подсказки Claude больше нет' };
+    if (path === '/review/claude/ask') reviewRequested();
+    return { status: 'saved', next: backTo(request) };
+  }
   if (path.startsWith('/review/')) {
     // Choices post empty forms to URLs that carry what was chosen, so the query and the fields read alike.
     const form = new URLSearchParams([...new URL(request.url ?? '/', 'http://localhost').searchParams, ...body]);
@@ -219,12 +268,15 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     const result = submitSettings(settings, collections, path, body);
     if (result.status === 'saved') return { status: 'saved', next: href('/settings') };
     if (result.status === 'missing') return { status: 'missing', message: 'Такой категории нет' };
-    const page = () => renderSettings(loadSettingsPage(collections, loadSettings(savedMarking), { today, form: result.form }), href).toString();
+    const page = () =>
+      renderSettings(loadSettingsPage(collections, loadSettings(savedMarking), { today, form: result.form, claudeToken: loadSettings((s) => s.claudeToken()) }), href).toString();
     return { status: 'invalid', errors: { title: result.form.error }, page };
   }
   if (path.startsWith('/budget/')) {
-    using settings = new Settings(SETTINGS_PATH);
-    return submitBudget(settings, path, body).status === 'saved' ? { status: 'saved', next: href('/settings') } : { status: 'missing', message: 'Такой настройки нет' };
+    const saved = loadSettings((settings) => submitBudget(settings, path, body)).status === 'saved';
+    // A new Claude token may answer what waited for one.
+    if (saved && path === '/budget/claude-token') reviewRequested();
+    return saved ? { status: 'saved', next: href('/settings') } : { status: 'missing', message: 'Такой настройки нет' };
   }
   if (/^\/regular(\/|$)/.test(path)) {
     using settings = new Settings(SETTINGS_PATH);
@@ -280,6 +332,10 @@ function apiScreen(path: string, params: URLSearchParams, { today, demo }: Conte
       return budgetSettingsScreen(collections(), loadSettings(savedMarking));
     case '/api/widget':
       return widgetScreen(collections(), loadSettings(savedBudget), { today, syncedAt: budget.syncedAt });
+    case '/api/review/claude/input':
+      return loadClaudeInput(loadCollections(demo, today), loadSettings(savedBudget), { today, month: params.get('month'), claude: (m) => loadSettings((s) => s.claude(m)) });
+    case '/api/review/claude/requests':
+      return { requests: loadSettings((s) => s.claudeRequests()) };
     default:
       return null;
   }
@@ -340,6 +396,20 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       }
       return;
     }
+    if (isApi && path === '/review/claude/answer') {
+      // Claude's answer comes as the JSON it gave, from whatever ran it (see src/claude/run.ts).
+      let value: unknown;
+      try {
+        value = JSON.parse(await readBody(request, 1_048_576));
+      } catch {
+        sendJson(response, 422, { errors: ['Ответ — не JSON'] });
+        return;
+      }
+      using settings = new Settings(SETTINGS_PATH);
+      const saved = saveClaudeAnswer(settings, loadCollections(demo, today), value, { today, month: params.get('month'), saved: savedBudget(settings), now: new Date() });
+      sendJson(response, saved.status === 'saved' ? 200 : 422, saved);
+      return;
+    }
     const result = submitForm(path, await readForm(request), request, context);
     if (result === null) {
       if (isApi) sendJson(response, 404, { error: 'Такого действия нет' });
@@ -379,6 +449,8 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
         kind: params.get('kind'),
         edit: params.get('edit'),
         tile: params.get('tile'),
+        list: params.get('list'),
+        claude: (month) => loadSettings((s) => s.claude(month)),
       });
       send(response, 200, 'text/html', (url.pathname === '/review' ? renderReview(review, href) : renderReviewCheck(review, href)).toString());
       return;
@@ -410,7 +482,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       return;
     }
     case '/settings': {
-      const page = loadSettingsPage(loadCollections(demo, today), loadSettings(savedMarking), { today, edit: params.get('edit') });
+      const page = loadSettingsPage(loadCollections(demo, today), loadSettings(savedMarking), { today, edit: params.get('edit'), claudeToken: loadSettings((s) => s.claudeToken()) });
       send(response, 200, 'text/html', renderSettings(page, href).toString());
       return;
     }
@@ -439,6 +511,7 @@ try {
 } catch (error) {
   console.error('Не удалось синхронизироваться, показываю локальную копию:', error instanceof Error ? error.message : error);
 }
+reviewRequested();
 if (token && SYNC_MINUTES > 0) {
   setInterval(() => {
     syncNow().catch((error: unknown) => console.error('Не удалось синхронизироваться:', error instanceof Error ? error.message : error));

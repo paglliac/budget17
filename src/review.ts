@@ -25,6 +25,10 @@ const MARKETPLACE_LIMIT = 20_000;
 /** How many months before the reviewed one tell what is usual. */
 const USUAL_MONTHS = 3;
 
+/** The four questions the review answers, as the assistant's chips ask them. */
+export const QUESTIONS = ['overspend', 'check', 'optimize', 'plan'] as const;
+export type Question = (typeof QUESTIONS)[number];
+
 export function isToCheck(kind: Kind): kind is ToCheck {
   return (TO_CHECK as readonly string[]).includes(kind);
 }

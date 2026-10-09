@@ -12,6 +12,7 @@
     "sync": "node --env-file-if-exists=.env src/cli.ts sync",
     "balances": "node --env-file-if-exists=.env src/cli.ts balances",
     "web": "node --env-file-if-exists=.env src/web/server.ts",
+    "claude-review": "node --env-file-if-exists=.env src/claude/run.ts",
     "test": "node --test 'test/**/*.test.ts'",
     "typecheck": "tsc"
   },

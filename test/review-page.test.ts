@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { NO_SETUP } from '../src/categories.ts';
+import type { ClaudeAnswer } from '../src/claude-review.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { createHref } from '../src/web/pages/chrome.ts';
 import type { SavedBudget } from '../src/web/pages/dashboard.ts';
-import { loadReview, renderReview, renderReviewCheck, submitReview } from '../src/web/pages/review.ts';
+import { loadReview, renderReview, renderReviewCheck, saveClaudeAnswer, submitClaude, submitReview } from '../src/web/pages/review.ts';
 import { Settings } from '../src/settings.ts';
 import { account, regular, RUB, tag, transaction, user } from './fixtures.ts';
 
@@ -206,5 +207,175 @@ describe('review forms', () => {
     assert.deepEqual(submitReview(settings, data, '/review/hide/nothing', form({})), { status: 'missing' });
     assert.deepEqual(submitReview(settings, data, '/review/dismiss', form({ hints: 'spending:person,hide:food,whatever' })), { status: 'saved' });
     assert.deepEqual([...settings.dismissedHints()], ['hide:food', 'spending:person']);
+  });
+});
+
+describe('Claude on the review', () => {
+  const madeAt = new Date('2026-10-09T12:45:00Z');
+  const none = { category: null, subcategory: null, envelope: null };
+  const reply = (paragraph: string, expenses: string[] = []) => ({ paragraphs: [paragraph], expenses });
+  const answer: ClaudeAnswer = {
+    findings: [{ tone: 'red', icon: 'trendingUp', title: 'Третью неделю раздул один перевод', text: 'Татьяне А. 70 000.', category: null, expenses: ['person'] }],
+    marking: [{ title: 'Иван И. → «Продукты › Ozon и WB»', why: 'Некруглая сумма — покупка на Ozon.', expenses: ['self'], category: food.id, subcategory: 'Ozon и WB', envelope: null }],
+    questions: [
+      {
+        title: '70 000 Татьяне А. — что это?',
+        text: 'Самая крупная трата месяца.',
+        expenses: ['person'],
+        options: [
+          { ...none, label: 'Обычная трата недели', envelope: 'week' },
+          { ...none, label: 'В дополнительные', envelope: 'extra' },
+        ],
+      },
+    ],
+    splits: [{ category: food.id, why: 'Лента отдельно от рынка.', subcategories: [{ title: 'Лента', payees: ['Лента'] }, { title: 'Рынок', payees: ['Татьяна А.'] }] }],
+    avoidable: [{ title: 'Мелочь без категории — 500', text: 'Непонятно что.', expenses: ['untitled'] }],
+    answers: {
+      overspend: reply('Недели потратили 254 тыс. при плане 180 тыс.', ['person']),
+      check: reply('Сначала Татьяна А.'),
+      optimize: reply('Лента выросла.'),
+      plan: reply('Хватит 45 000 в неделю.'),
+    },
+  };
+  const form = (fields: Record<string, string>) => new URLSearchParams(fields);
+
+  /** Settings with Claude's answer about September kept, as it came for the expenses of `saved()`. */
+  function withClaude(): Settings {
+    const settings = new Settings(':memory:');
+    const result = saveClaudeAnswer(settings, data, answer, { today, month: '2026-09', saved: saved(), now: madeAt });
+    assert.deepEqual(result, { status: 'saved', month: '2026-09', dropped: [] });
+    return settings;
+  }
+  const claudePage = (settings: Settings, options: Omit<Parameters<typeof loadReview>[2], 'today'> = {}) =>
+    plain(renderReview(loadReview(data, saved(), { today, ...options, claude: (m) => settings.claude(m) }), createHref()));
+  const submit = (settings: Settings, path: string, fields: Record<string, string>) => submitClaude(settings, data, path, form({ month: '2026-09', ...fields }), { today, saved: saved(), now: madeAt });
+
+  it('puts Claude’s findings, answers and what could be spared in place of the rules’', () => {
+    using settings = withClaude();
+    const html = claudePage(settings);
+    assert.ok(html.includes('Claude разобрал сентябрь'));
+    assert.ok(html.includes('9 октября в '));
+    assert.ok(html.includes('1 вывод, 3 подсказки'));
+    assert.ok(html.includes('action="/review/claude/ask?month=2026-09"'), 'Пересмотреть');
+    assert.ok(html.includes('Claude сделал 1 вывод'));
+    assert.ok(html.includes('Третью неделю раздул один перевод'));
+    assert.ok(html.includes('href="/review?month=2026-09&amp;tile=spending-person"'), 'a finding about one expense opens it on the map');
+    assert.ok(!html.includes('Недели потратили на 73 547 ₽ больше плана'), 'the rules’ findings give way');
+    assert.ok(html.includes('href="/review?month=2026-09&amp;list=hints"'));
+    assert.ok(html.includes('href="/review?month=2026-09&amp;list=spare"'));
+
+    const spare = claudePage(settings, { list: 'spare' });
+    assert.ok(spare.includes('Мелочь без категории — 500'));
+    const overspend = claudePage(settings, { ask: 'overspend' });
+    assert.ok(overspend.includes('Недели потратили 254 тыс. при плане 180 тыс.'));
+    assert.ok(overspend.includes('href="/review/check?month=2026-09&amp;kind=person&amp;edit=spending-person#spending-person"'));
+    assert.ok(claudePage(settings, { ask: 'plan' }).includes('План на октябрь'));
+  });
+
+  it('leads the hints with Claude’s questions, marking and splits, each applied by a click', () => {
+    using settings = withClaude();
+    const html = claudePage(settings, { list: 'hints' });
+    const at = (text: string) => html.indexOf(text);
+    assert.ok(at('70 000 Татьяне А. — что это?') < at('Иван И. → «Продукты › Ozon и WB»'));
+    assert.ok(at('Иван И. → «Продукты › Ozon и WB»') < at('Разбить «Продукты»: Лента, Рынок'));
+    assert.ok(html.includes('action="/review/claude/answer?month=2026-09&amp;spending=person&amp;option=1"'));
+    assert.ok(html.includes('1 трата на 2 547 ₽. Некруглая сумма — покупка на Ozon.'));
+    assert.ok(html.includes('action="/review/claude/accept?month=2026-09&amp;spending=self"'));
+    assert.ok(html.includes('action="/review/claude/decline?month=2026-09&amp;spending=self"'));
+    assert.ok(html.includes('action="/review/claude/split?month=2026-09&amp;category=food"'));
+    assert.ok(html.includes('action="/review/claude/decline?month=2026-09&amp;category=food"'));
+  });
+
+  it('outlines on the map what Claude has a word about, and says it at the open tile', () => {
+    using settings = withClaude();
+    assert.ok(claudePage(settings).includes('Переводы людям: 70 000 ₽ · есть подсказка'));
+    const tile = claudePage(settings, { tile: 'check-person' });
+    assert.ok(tile.includes('Claude об этом'));
+    assert.ok(tile.includes('70 000 Татьяне А. — что это?'));
+    const category = claudePage(settings, { tile: 'category-food' });
+    assert.ok(category.includes('Разбить «Продукты»: Лента, Рынок'), 'the split of a category, at the category');
+    assert.ok(!claudePage(settings, { tile: 'category-food:shop-lenta' }).includes('Разбить «Продукты»'));
+  });
+
+  it('keeps to the rules while Claude has not reviewed the month, and offers to ask it', () => {
+    using settings = new Settings(':memory:');
+    const html = claudePage(settings);
+    assert.ok(html.includes('Разобрал сентябрь'));
+    assert.ok(html.includes('по правилам, Claude этот месяц ещё не смотрел'));
+    assert.ok(html.includes('Попросить Claude'));
+    assert.ok(html.includes('Недели потратили на 73 547 ₽ больше плана'));
+    assert.ok(!html.includes('list=spare'), 'what could be spared comes from Claude only');
+
+    assert.deepEqual(submit(settings, '/review/claude/ask', {}), { status: 'saved' });
+    assert.ok(claudePage(settings).includes('Пока по правилам: Claude разбирает месяц с '));
+    assert.deepEqual(settings.claudeRequests(), [{ month: '2026-09', askedAt: madeAt.toISOString() }]);
+    submit(settings, '/review/claude/cancel', {});
+    assert.deepEqual(settings.claudeRequests(), []);
+  });
+
+  it('says Claude is looking again until an answer made after the request comes', () => {
+    using settings = withClaude();
+    settings.requestClaudeReview('2026-09', '2026-10-09T13:00:00.000Z');
+    const html = claudePage(settings);
+    assert.ok(html.includes('Пересматриваю с '));
+    assert.ok(html.includes('action="/review/claude/cancel?month=2026-09"'));
+    saveClaudeAnswer(settings, data, answer, { today, month: '2026-09', saved: saved(), now: new Date('2026-10-09T13:02:00Z') });
+    assert.deepEqual(settings.claudeRequests(), []);
+  });
+
+  it('says why Claude did not answer, and offers to ask again', () => {
+    using settings = withClaude();
+    settings.requestClaudeReview('2026-09', '2026-10-09T13:00:00.000Z');
+    settings.failClaudeRequest('2026-09', 'claude не установлен');
+    const html = claudePage(settings);
+    assert.ok(html.includes('Пересмотреть не вышло: claude не установлен'));
+    assert.ok(html.includes('action="/review/claude/ask?month=2026-09"'));
+
+    using none = new Settings(':memory:');
+    none.requestClaudeReview('2026-09', '2026-10-09T13:00:00.000Z');
+    none.failClaudeRequest('2026-09', 'claude не установлен');
+    assert.ok(claudePage(none).includes('Пока по правилам: Claude не ответил — claude не установлен'));
+  });
+
+  it('applies what is accepted or answered as the map does, and keeps it so that it does not come back', () => {
+    using settings = withClaude();
+    assert.deepEqual(submit(settings, '/review/claude/accept', { spending: 'self' }), { status: 'saved' });
+    const ozon = settings.subcategorySetup().subcategories.find((s) => s.title === 'Ozon и WB')!;
+    assert.deepEqual(settings.categorizations().get('self'), { tag: food.id });
+    assert.equal(settings.subcategorySetup().spending.get('self'), ozon.id);
+
+    assert.deepEqual(submit(settings, '/review/claude/answer', { spending: 'person', option: '1' }), { status: 'saved' });
+    assert.equal(settings.spendingMarks().get('person'), 'extra');
+    assert.deepEqual(settings.claudeDecisions().get('spending:person'), { decision: 'answered', answer: 'В дополнительные' });
+
+    assert.deepEqual(submit(settings, '/review/claude/decline', { category: food.id }), { status: 'saved' });
+    assert.deepEqual([...settings.claudeDecisions().keys()].sort(), ['spending:person', 'spending:self', 'split:food']);
+    assert.ok(claudePage(settings, { list: 'hints' }).includes('Подсказок нет.'), 'and a new answer with the same brings none of it back');
+    saveClaudeAnswer(settings, data, answer, { today, month: '2026-09', saved: saved(), now: new Date('2026-10-09T14:00:00Z') });
+    assert.ok(claudePage(settings, { list: 'hints' }).includes('Подсказок нет.'));
+
+    assert.deepEqual(submit(settings, '/review/claude/accept', { spending: 'self' }), { status: 'missing' }, 'it is done already');
+    assert.deepEqual(submit(settings, '/review/claude/answer', { spending: 'untitled', option: '0' }), { status: 'missing' });
+  });
+
+  it('splits a category: a shop for good, the month’s transfers in it one by one', () => {
+    using settings = withClaude();
+    assert.deepEqual(submit(settings, '/review/claude/split', { category: food.id }), { status: 'saved' });
+    const setup = settings.subcategorySetup();
+    assert.deepEqual(setup.subcategories.map((s) => s.title), ['Лента', 'Рынок']);
+    assert.deepEqual([...setup.shops.get(food.id)!], [['lenta', setup.subcategories[0]!.id]]);
+    assert.deepEqual([...setup.spending], [], 'Татьяна А. has no expense in Продукты this month');
+    assert.deepEqual(settings.claudeDecisions().get('split:food'), { decision: 'accepted', answer: null });
+  });
+
+  it('keeps an answer with what each expense was, and turns down one of another shape', () => {
+    using settings = new Settings(':memory:');
+    const result = saveClaudeAnswer(settings, data, { ...answer, avoidable: [{ title: 'Что-то', text: '', expenses: ['untitled', 'nothing'] }] }, { today, month: '2026-09', saved: saved(), now: madeAt });
+    assert.deepEqual(result, { status: 'saved', month: '2026-09', dropped: ['лишняя трата «Что-то»: нет траты nothing'] });
+    const kept = settings.claude('2026-09').review!;
+    assert.equal(kept.madeAt, madeAt.toISOString());
+    assert.equal(kept.seen.get('person'), '||week||');
+    assert.equal(kept.seen.get('groceries'), 'food||week||');
+    assert.deepEqual(saveClaudeAnswer(settings, data, { findings: 'нет' }, { today, month: '2026-09', saved: saved(), now: madeAt }).status, 'invalid');
   });
 });

@@ -1,0 +1,373 @@
+{
+  "description": "Разбор месяца от Claude: выводы, подсказки к разметке, вопросы, разбиения категорий, лишние траты и ответы на четыре вопроса. Траты и категории названы их id из входных данных.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "findings",
+    "marking",
+    "questions",
+    "splits",
+    "avoidable",
+    "answers"
+  ],
+  "properties": {
+    "findings": {
+      "description": "Главные выводы о месяце, самое важное первым.",
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tone",
+          "icon",
+          "title",
+          "text",
+          "category",
+          "expenses"
+        ],
+        "properties": {
+          "tone": {
+            "description": "red — перерасход, orange — рост, yellow — стоит проверить, violet — повторы и подписки, blue — переводы, green — хорошо, gray — непонятное.",
+            "enum": [
+              "red",
+              "orange",
+              "yellow",
+              "green",
+              "violet",
+              "blue",
+              "teal",
+              "gray"
+            ]
+          },
+          "icon": {
+            "enum": [
+              "trendingUp",
+              "trendingDown",
+              "cart",
+              "coffee",
+              "car",
+              "bus",
+              "home",
+              "heart",
+              "phone",
+              "gift",
+              "bag",
+              "shirt",
+              "ticket",
+              "book",
+              "briefcase",
+              "zap",
+              "repeat",
+              "tag",
+              "search",
+              "flag",
+              "card",
+              "arrowUpRight",
+              "piggy",
+              "banknote",
+              "receipt",
+              "clock",
+              "check",
+              "layers",
+              "target",
+              "sparkles"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "description": "Суть до 60 знаков, с одним числом."
+          },
+          "text": {
+            "type": "string",
+            "description": "Одно предложение до 100 знаков: что это значит или что сделать."
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "id категории, которую открыть на карте, или null."
+          },
+          "expenses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "id трат, о которых вывод; одна трата откроется на карте."
+          }
+        }
+      }
+    },
+    "marking": {
+      "description": "Разметка, в которой Claude уверен: одна подсказка — один получатель или одна понятная группа и одна цель.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "why",
+          "expenses",
+          "category",
+          "subcategory",
+          "envelope"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "«Получатель → «Категория»» или «Получатель → «Категория › Подкатегория»»."
+          },
+          "why": {
+            "type": "string",
+            "description": "Несколько слов: почему так."
+          },
+          "expenses": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "id категории из categories, или null, если категория не меняется."
+          },
+          "subcategory": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Название подкатегории, существующей или новой, или null."
+          },
+          "envelope": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "week",
+              "extra",
+              "outside",
+              "ignored",
+              null
+            ],
+            "description": "Где трата должна считаться, если не там, где сейчас, иначе null."
+          }
+        }
+      }
+    },
+    "questions": {
+      "description": "Чего по данным не понять, но что важно; варианты ответа — готовая разметка.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "text",
+          "expenses",
+          "options"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Сумма, кто и когда, до 50 знаков."
+          },
+          "text": {
+            "type": "string",
+            "description": "Несколько слов, почему спрашивает, или пусто."
+          },
+          "expenses": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "options": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label",
+                "category",
+                "subcategory",
+                "envelope"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Текст кнопки, два-три слова."
+                },
+                "category": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "subcategory": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "envelope": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "week",
+                    "extra",
+                    "outside",
+                    "ignored",
+                    null
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "maxItems": 3
+    },
+    "splits": {
+      "description": "Категории, которые стоит разбить на подкатегории, с получателями каждой.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "category",
+          "why",
+          "subcategories"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "id категории."
+          },
+          "why": {
+            "type": "string"
+          },
+          "subcategories": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "payees"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "payees": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Получатели, как они записаны в expenses."
+                }
+              }
+            },
+            "maxItems": 4
+          }
+        }
+      },
+      "maxItems": 2
+    },
+    "avoidable": {
+      "description": "Траты, без которых можно было обойтись.",
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "text",
+          "expenses"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "«Что — сумма»."
+          },
+          "text": {
+            "type": "string",
+            "description": "Несколько слов или пусто."
+          },
+          "expenses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "answers": {
+      "description": "Ответы на четыре вопроса пользователя.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overspend",
+        "check",
+        "optimize",
+        "plan"
+      ],
+      "properties": {
+        "overspend": {
+          "$ref": "#/definitions/answer"
+        },
+        "check": {
+          "$ref": "#/definitions/answer"
+        },
+        "optimize": {
+          "$ref": "#/definitions/answer"
+        },
+        "plan": {
+          "$ref": "#/definitions/answer"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "paragraphs",
+        "expenses"
+      ],
+      "properties": {
+        "paragraphs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "type": "string"
+          }
+        },
+        "expenses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "id трат, на которые стоит посмотреть."
+        }
+      }
+    }
+  }
+}
