@@ -26,9 +26,9 @@ function data(): EntityCollections {
 function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
   return {
     purchases: [
-      { id: 1, title: 'Ботинки Савве', amount: 8_000, week: '2026-10-05', envelope: 'week', done: false },
-      { id: 2, title: 'Подарок', amount: 5_000, week: '2026-10-05', envelope: 'week', done: true },
-      { id: 3, title: 'Куртка', amount: 20_000, week: '2026-10-05', envelope: 'extra', done: false },
+      { id: 1, title: 'Ботинки Савве', amount: 8_000, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: false },
+      { id: 2, title: 'Подарок', amount: 5_000, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: true },
+      { id: 3, title: 'Куртка', amount: 20_000, week: '2026-10-05', envelope: 'extra', kind: 'flexible', done: false },
     ],
     wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500 }],
     marks: new Map(marks),
@@ -107,7 +107,7 @@ describe('dashboard', () => {
     const groceries = tag({ id: 'groceries', title: 'Продукты' });
     const collections = { ...data(), tag: [groceries], transaction: data().transaction!.map((t) => (t.id === 'groceries' ? { ...t, tag: [groceries.id] } : t)) };
     const page = (title: string) => {
-      const budget = { ...saved(), purchases: [{ id: 4, title, amount: 3_000, week: '2026-10-05', envelope: 'week' as const, done: false }], purchasePayments: new Map([['groceries', 4]]) };
+      const budget = { ...saved(), purchases: [{ id: 4, title, amount: 3_000, week: '2026-10-05', envelope: 'week' as const, kind: 'flexible' as const, done: false }], purchasePayments: new Map([['groceries', 4]]) };
       return String(renderDashboard(loadDashboard(collections, budget, options), createHref())).replaceAll('\u00a0', ' ');
     };
 
@@ -172,7 +172,7 @@ describe('dashboard', () => {
         transaction({ id: 'coffee', date: '2026-09-22', outcome: 300, payee: 'Кофейня', tag: [cafe.id] }),
       ],
     };
-    const budget = { ...saved(), purchases: [...saved().purchases, { id: 4, title: 'Продукты на неделю', amount: 3_000, week: '2026-10-05', envelope: 'week' as const, done: false }] };
+    const budget = { ...saved(), purchases: [...saved().purchases, { id: 4, title: 'Продукты на неделю', amount: 3_000, week: '2026-10-05', envelope: 'week' as const, kind: 'flexible' as const, done: false }] };
     const page = String(renderDashboard(loadDashboard(collections, budget, { ...options, edit: 'spending-groceries' }), createHref())).replaceAll('\u00a0', ' ');
     const choices = (label: string) => [...(new RegExp(`aria-label="${label}">(.*?)</div>`, 's').exec(page)?.[1] ?? '').matchAll(/<span>([^<]*)/g)].map((m) => m[1]!.trim());
 
@@ -187,7 +187,7 @@ describe('dashboard', () => {
   });
 
   it('offers the whole plan of the expense’s week to pay, however long it is', () => {
-    const plan = ['Ласты', 'Продукты', 'Подарок Серёге', 'Проезд'].map((title, i) => ({ id: 10 + i, title, amount: 1_000 * (i + 1), week: '2026-10-05', envelope: 'week' as const, done: false }));
+    const plan = ['Ласты', 'Продукты', 'Подарок Серёге', 'Проезд'].map((title, i) => ({ id: 10 + i, title, amount: 1_000 * (i + 1), week: '2026-10-05', envelope: 'week' as const, kind: 'flexible' as const, done: false }));
     const page = render({ edit: 'spending-groceries' }, { ...saved(), purchases: [...saved().purchases, ...plan] });
     const payments = [...(/aria-label="Оплата">(.*?)<\/div>/s.exec(page)?.[1] ?? '').matchAll(/<span>([^<]*)/g)].map((m) => m[1]!.trim());
 
@@ -256,8 +256,8 @@ describe('dashboard', () => {
     const budget = {
       ...saved(),
       purchases: [
-        { id: 4, title: 'Стрижка', amount: 3_500, week: '2026-11-16', envelope: 'week' as const, done: false },
-        { id: 5, title: 'Пальто', amount: 15_000, week: '2026-11-02', envelope: 'extra' as const, done: false },
+        { id: 4, title: 'Стрижка', amount: 3_500, week: '2026-11-16', envelope: 'week' as const, kind: 'flexible' as const, done: false },
+        { id: 5, title: 'Пальто', amount: 15_000, week: '2026-11-02', envelope: 'extra' as const, kind: 'flexible' as const, done: false },
       ],
     };
     const page = render({ view: 'month', month: '2026-11' }, budget);
@@ -276,7 +276,7 @@ describe('dashboard', () => {
   });
 
   it('opens a week ahead with what is planned in it, which cannot be bought yet, and its regular payments', () => {
-    const budget = { ...saved(), purchases: [{ id: 4, title: 'Стрижка', amount: 3_500, week: '2026-11-02', envelope: 'week' as const, done: false }] };
+    const budget = { ...saved(), purchases: [{ id: 4, title: 'Стрижка', amount: 3_500, week: '2026-11-02', envelope: 'week' as const, kind: 'flexible' as const, done: false }] };
     const page = render({ week: '2026-11-02' }, budget);
 
     assert.ok(page.includes('Неделя 2–8 ноября'));
@@ -368,7 +368,7 @@ describe('submitDashboard', () => {
 
     assert.deepEqual(submit('/purchases', { title: 'Ласты', amount: '5 000', week: '2026-10-05', envelope: 'week' }), { status: 'saved' });
     const [flippers] = settings.purchases();
-    assert.deepEqual(flippers && { ...flippers, id: 0 }, { id: 0, title: 'Ласты', amount: 5_000, week: '2026-10-05', envelope: 'week', done: false });
+    assert.deepEqual(flippers && { ...flippers, id: 0 }, { id: 0, title: 'Ласты', amount: 5_000, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: false });
 
     submit(`/purchases/${flippers!.id}/done`);
     assert.equal(settings.purchases()[0]!.done, true);
@@ -405,9 +405,27 @@ describe('submitDashboard', () => {
     assert.deepEqual(settings.purchases().map((p) => [p.amount, p.week]), [[4_000, '2026-11-16']], 'a form without the week keeps it');
   });
 
+  it('keeps whether a purchase is required or flexible, and a form without the kind keeps it', () => {
+    using settings = new Settings(':memory:');
+    const submit = (path: string, fields: Record<string, string> = {}) => submitDashboard(settings, path, form(fields), context(settings));
+
+    submit('/purchases', { title: 'Стрижка', amount: '7000', week: '2026-10-05', envelope: 'week', kind: 'required' });
+    const [haircut] = settings.purchases();
+    assert.equal(haircut!.kind, 'required');
+    submit(`/purchases/${haircut!.id}`, { title: 'Стрижка', amount: '6500' });
+    assert.deepEqual(settings.purchases().map((p) => [p.amount, p.kind]), [[6_500, 'required']]);
+    submit(`/purchases/${haircut!.id}`, { title: 'Стрижка', amount: '6500', kind: 'flexible' });
+    assert.equal(settings.purchases()[0]!.kind, 'flexible');
+
+    const invalid = submitDashboard(settings, '/purchases', form({ title: '', amount: '1', kind: 'required' }), context(settings));
+    assert.equal(invalid.status === 'invalid' && invalid.form.purchaseKind, 'required', 'the form comes back with the kind picked');
+    const page = render({ form: invalid.status === 'invalid' ? invalid.form : undefined }).replaceAll(' ', ' ');
+    assert.match(page, /<option value="required" selected>Обязательная: лучше не трогать<\/option>/);
+  });
+
   it('plans a wish into the advised week', () => {
     using settings = new Settings(':memory:');
-    settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-10-05', envelope: 'week', done: false });
+    settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: false });
     const styler = settings.addWish({ title: 'Укладка', amount: 4_500 });
 
     submitDashboard(settings, `/wishes/${styler.id}/plan`, form({}), context(settings));

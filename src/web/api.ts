@@ -19,6 +19,7 @@ import {
   loadDashboard,
   monthWeekLine,
   PLAN_AHEAD,
+  PURCHASE_KINDS,
   purchaseActions,
   purchaseLine,
   regularPaymentLine,
@@ -124,15 +125,19 @@ function expenseDays(m: Pick<Marking, 'marks' | 'purchases'>, expenses: readonly
   return byDay(expenses, (o) => o.date, today).map((day) => ({ ...day, items: day.items.map((o) => expenseRow(m, o)) }));
 }
 
+/**
+ * A purchase of a plan, saying first whether it is required or flexible; until it is bought, what paid it follows, and
+ * that it waits to be bought goes without saying.
+ */
 function purchaseRow(status: PurchaseStatus, current: DateString, symbol: string) {
-  const { purchase: p, bought } = status;
+  const { purchase: p, bought, covered } = status;
   const key = `purchase-${p.id}`;
   const line = purchaseLine(status, current, symbol);
   return {
     ...row({
       id: key,
       title: p.title,
-      details: line.details,
+      details: bought ? line.details : [PURCHASE_KINDS[p.kind].label, covered > 0 ? line.details : null].filter(Boolean).join(' · '),
       icon: categoryIcon(p.title),
       color: bought ? toneColor('gray') : p.envelope === 'extra' ? toneColor('violet') : categoryColor(key, null),
       amount: line.amount,
@@ -169,6 +174,37 @@ export interface BudgetOptions {
   today: DateString;
   source: 'zenmoney' | 'demo';
   canSync: boolean;
+  /** When the server last synced with ZenMoney, as an ISO moment; null before it has, or when it cannot. */
+  syncedAt?: string | null;
+}
+
+/**
+ * The top of the week in the app: what is free, what the plan holds by kind, what was spent today (in a past week, in
+ * all of it), how many expenses wait for a category, and when the data came from ZenMoney.
+ */
+function weekHome(d: ReturnType<typeof loadDashboard>, data: EntityCollections, saved: SavedBudget, options: BudgetOptions) {
+  const { today } = options;
+  const w = d.week;
+  const phase = w.week > d.current ? 'ahead' : w.week < d.current ? 'past' : 'current';
+  const todaySpent = w.spending.filter((o) => o.date === today && envelopeOf(d.marking, o) === 'week').reduce((sum, o) => sum + o.amount, 0);
+  const pending = loadUncategorized(data, saved, { today }).pending.length;
+  return {
+    free: { label: phase === 'current' ? 'Свободно' : phase === 'past' ? 'Итог недели' : 'Будет свободно', amount: w.free },
+    reserved: {
+      label: 'Зарезервировано',
+      amount: w.planned,
+      required: { label: 'обязательное', amount: w.required },
+      flexible: { label: 'гибкое', amount: w.planned - w.required },
+    },
+    spent:
+      phase === 'current'
+        ? { label: 'Сегодня потрачено', amount: todaySpent }
+        : phase === 'past'
+          ? { label: 'Потрачено за неделю', amount: w.spent }
+          : null,
+    pending: { count: pending, label: pending === 0 ? 'Всё разобрано' : `${plural(pending, ['трата ждёт', 'траты ждут', 'трат ждут'])} разбора` },
+    syncedAt: options.syncedAt ?? null,
+  };
 }
 
 /** The week tab: what is left, the spending by days, the plan and, in the current week, the wishes. */
@@ -189,6 +225,7 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
     prev: addDays(w.week, -7),
     next: next <= addDays(current, 7 * PLAN_AHEAD) ? next : null,
     total: weekTotal(w, current, d.symbol),
+    home: weekHome(d, data, saved, options),
     /** What the week allows and the usual amount; another amount posts to /api/week-limits/:week, the usual one back to /api/week-limits/:week/delete. */
     limit: { amount: w.limit, usual: WEEK_LIMIT },
     days: expenseDays(d.marking, w.spending, today),

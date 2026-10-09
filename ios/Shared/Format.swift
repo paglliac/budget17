@@ -65,6 +65,19 @@ enum Money {
         "\(number(amount, sign: sign))\u{00A0}\(symbol)"
     }
 
+    /// An amount as it is being typed, its thousands apart: 7000 becomes 7 000, 1500,5 becomes 1 500,5.
+    static func typing(_ text: String) -> String {
+        let kept = text.replacingOccurrences(of: ".", with: ",").filter { $0.isNumber || $0 == "," }
+        let parts = kept.split(separator: ",", maxSplits: 1, omittingEmptySubsequences: false)
+        var grouped = ""
+        for (index, digit) in (parts.first ?? "").reversed().enumerated() {
+            if index > 0 && index % 3 == 0 { grouped.append("\u{00A0}") }
+            grouped.append(digit)
+        }
+        grouped = String(grouped.reversed())
+        return parts.count > 1 ? "\(grouped),\(parts[1].filter(\.isNumber).prefix(2))" : grouped
+    }
+
     /// An amount as the user would type it into a form: 1500 or 1500,5.
     static func input(_ amount: Double) -> String {
         amount == amount.rounded() ? String(Int(amount)) : String(amount).replacingOccurrences(of: ".", with: ",")

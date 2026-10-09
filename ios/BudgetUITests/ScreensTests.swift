@@ -15,14 +15,56 @@ final class ScreensTests: XCTestCase {
         folder = environment["SCREENSHOTS"].map { URL(fileURLWithPath: $0) }
         app = XCUIApplication()
         app.launchArguments = ["-server", environment["SERVER"] ?? "http://localhost:4318"]
+        // Prototype: the variant to start with, A or B.
+        if let variant = environment["VARIANT"] { app.launchArguments += ["-variant", variant] }
         app.launch()
     }
 
     func testScreens() throws {
-        let expense = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'spending-'")).firstMatch
-        XCTAssert(expense.waitForExistence(timeout: 15), "the week loads")
-        shot("week")
+        let reserved = app.buttons["reserved"]
+        XCTAssert(reserved.waitForExistence(timeout: 15), "the main page loads")
+        shot("home")
 
+        app.buttons["week-limit"].tap()
+        if app.buttons["Сохранить"].waitForExistence(timeout: 5) {
+            shot("week-limit")
+            app.buttons["Отмена"].tap()
+        } else {
+            XCTFail("the week's budget opens")
+        }
+
+        app.buttons["pick-week"].tap()
+        if app.buttons["week-prev"].waitForExistence(timeout: 5) {
+            shot("week-picker")
+            app.buttons["week-prev"].tap()
+            XCTAssert(app.buttons["Сейчас"].waitForExistence(timeout: 10), "the week before opens")
+            sleep(2)
+            shot("home-past")
+            app.buttons["Сейчас"].tap()
+            sleep(2)
+        } else {
+            XCTFail("the week picker opens")
+        }
+
+        reserved.tap()
+        XCTAssert(app.staticTexts["Зарезервировано"].waitForExistence(timeout: 10), "the plan opens")
+        shot("reserved")
+        let purchase = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'purchase-'")).firstMatch
+        if purchase.waitForExistence(timeout: 5) {
+            purchase.tap()
+            if app.descendants(matching: .any)["purchase-sheet"].waitForExistence(timeout: 5) { shot("purchase") }
+            app.buttons["Отмена"].tap()
+        }
+        app.buttons["Добавить в план"].firstMatch.tap()
+        if app.descendants(matching: .any)["purchase-sheet"].waitForExistence(timeout: 5) { shot("purchase-new") }
+        app.buttons["Отмена"].tap()
+        app.swipeUp()
+        shot("reserved-more")
+        back()
+
+        let expense = openWeekSpending()
+        XCTAssert(expense.waitForExistence(timeout: 10), "the week's spending opens")
+        shot("week-spending")
         expense.tap()
         if app.descendants(matching: .any)["marking"].waitForExistence(timeout: 10) {
             shot("spending")
@@ -34,42 +76,24 @@ final class ScreensTests: XCTestCase {
         } else {
             XCTFail("the expense opens")
         }
+        back()
 
-        app.buttons["week-limit"].tap()
-        if app.buttons["Сохранить"].waitForExistence(timeout: 5) {
-            shot("week-limit")
-            app.buttons["Отмена"].tap()
-        } else {
-            XCTFail("the week's budget opens")
-        }
+        // Prototype: B has the spending on the page.
+        app.buttons["variant-B"].tap()
+        sleep(1)
+        shot("home-b")
+        app.swipeUp()
+        shot("home-b-spending")
+        app.swipeDown()
+        app.buttons["variant-A"].tap()
 
-        pill("План").tap()
-        shot("week-plan")
-        let addToPlan = app.buttons["Добавить в план"]
-        if addToPlan.waitForExistence(timeout: 5) {
-            // A long plan puts it at the bottom edge, under the tab bar.
-            app.swipeUp()
-            addToPlan.tap()
-            if app.navigationBars["Новая покупка"].waitForExistence(timeout: 5) { shot("purchase-new") }
-            app.buttons["Отмена"].tap()
-        }
-        pill("Хочу").tap()
-        shot("week-wishes")
-
-        // Dragging the band up gives the sheet the summary's room, down gives it back.
-        let band = app.descendants(matching: .any)["band"].firstMatch
-        let middle = band.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
-        middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: -200)))
-        XCTAssert(app.buttons["Раньше"].exists && !app.staticTexts["Окт"].exists, "the band drags the sheet over the summary")
-        shot("week-expanded")
-        let raised = band.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
-        raised.press(forDuration: 0.1, thenDragTo: raised.withOffset(CGVector(dx: 0, dy: 200)))
-
-        app.buttons["Месяц"].tap()
+        app.buttons["Месяц"].firstMatch.tap()
         sleep(2)
         shot("month")
         pill("Дополнительные").tap()
         shot("month-extras")
+        app.buttons["Неделя"].firstMatch.tap()
+        sleep(1)
 
         app.buttons["Добавить"].tap()
         shot("add-menu")
@@ -112,8 +136,9 @@ final class ScreensTests: XCTestCase {
     /// against a server with copied databases: TEST_RUNNER_MARKING=1.
     func testMarking() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["MARKING"] == "1", "changes data: only against a copy")
-        let expense = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'spending-'")).firstMatch
-        XCTAssert(expense.waitForExistence(timeout: 15))
+        XCTAssert(app.buttons["reserved"].waitForExistence(timeout: 15))
+        let expense = openWeekSpending()
+        XCTAssert(expense.waitForExistence(timeout: 10))
         expense.tap()
         XCTAssert(app.descendants(matching: .any)["marking"].waitForExistence(timeout: 10))
         shot("marking-before")
@@ -147,21 +172,21 @@ final class ScreensTests: XCTestCase {
     /// Loads the screens from the server, opens the app again with a server that is gone, and switches back to the
     /// working one from the pill. It reads only, so it runs against real data.
     func testOffline() throws {
-        let expense = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'spending-'")).firstMatch
-        XCTAssert(expense.waitForExistence(timeout: 15), "the week loads")
+        let reserved = app.buttons["reserved"]
+        XCTAssert(reserved.waitForExistence(timeout: 15), "the week loads")
         sleep(2)
         app.terminate()
         let server = app.launchArguments[1]
         app.launchArguments = ["-server", "http://localhost:9"]
         app.launch()
 
-        XCTAssert(expense.waitForExistence(timeout: 5), "the saved week shows")
+        XCTAssert(reserved.waitForExistence(timeout: 5), "the saved week shows")
         let offline = app.buttons["offline"].firstMatch
         XCTAssert(offline.waitForExistence(timeout: 20), "the pill says the server is gone")
         shot("offline-week")
         tab("Ещё")
         shot("offline-more")
-        tab("Бюджет")
+        tab("Главная")
 
         offline.tap()
         XCTAssert(app.navigationBars["Сервер"].waitForExistence(timeout: 5))
@@ -196,6 +221,18 @@ final class ScreensTests: XCTestCase {
             if let pill = matches.allElementsBoundByIndex.first(where: { $0.isHittable }) { return pill }
         }
         return app.buttons[label]
+    }
+
+    /// Opens the week's spending from today's spending under the circle; the first expense of it.
+    private func openWeekSpending() -> XCUIElement {
+        app.buttons["spent"].tap()
+        return app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'spending-'")).firstMatch
+    }
+
+    /// Back from a pushed page of the main page.
+    private func back() {
+        app.navigationBars.buttons.firstMatch.tap()
+        sleep(1)
     }
 
     private func tab(_ title: String) {

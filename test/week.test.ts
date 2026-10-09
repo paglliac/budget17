@@ -25,7 +25,7 @@ function spending(id: string, date: string, amount: number): Operation {
 }
 
 function purchase(id: number, title: string, amount: number, overrides: Partial<Purchase> = {}): Purchase {
-  return { id, title, amount, week, envelope: 'week', done: false, ...overrides };
+  return { id, title, amount, week, envelope: 'week', kind: 'flexible', done: false, ...overrides };
 }
 
 /** The user's week: five purchases on 22 000 from the week's money. */

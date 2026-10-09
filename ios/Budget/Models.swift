@@ -95,6 +95,8 @@ struct Purchase: Decodable, Hashable {
     let week: String
     /// week or extra.
     let envelope: String
+    /// required, which had better stay in its week, or flexible, which can move.
+    let kind: String
     let done: Bool
     let weekLabel: String
 }
@@ -155,6 +157,7 @@ struct WeekScreen: Decodable {
     let prev: String
     let next: String?
     let total: Total
+    let home: WeekHome
     let limit: WeekLimit
     let days: [Day<Expense>]
     let plan: [PlanItem]
@@ -162,6 +165,42 @@ struct WeekScreen: Decodable {
     let wishes: [WishItem]?
     let weekChoices: [OptionGroup]
     let source: String
+}
+
+/// A figure with what it is.
+struct Figure: Decodable, Hashable {
+    let label: String
+    let amount: Double
+}
+
+/// The top of the week: what is free, what the plan holds by kind, what was spent today (in a past week, in all of
+/// it; nothing in a week ahead), how many expenses wait for a category, and when the server last synced.
+struct WeekHome: Decodable, Hashable {
+    let free: Figure
+    let reserved: Reserved
+    let spent: Figure?
+    let pending: Pending
+    /// An ISO moment.
+    let syncedAt: String?
+
+    struct Reserved: Decodable, Hashable {
+        let label: String
+        let amount: Double
+        let required: Figure
+        let flexible: Figure
+    }
+
+    struct Pending: Decodable, Hashable {
+        let count: Int
+        let label: String
+    }
+
+    var synced: Date? {
+        guard let syncedAt else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: syncedAt)
+    }
 }
 
 /// What a week allows and the usual amount. Another amount posts to /api/week-limits/:week, the usual one back to

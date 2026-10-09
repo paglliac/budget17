@@ -23,6 +23,9 @@ const WISH_HORIZON = 8;
  */
 export type Envelope = 'week' | 'extra' | 'outside' | 'ignored';
 
+/** Whether a purchase had better stay where it is planned (a haircut booked for Friday) or can move to another week. */
+export type PurchaseKind = 'required' | 'flexible';
+
 /** Something to buy in a week, from the week's money or from the month's extras. */
 export interface Purchase {
   id: number;
@@ -32,6 +35,7 @@ export interface Purchase {
   /** First day of the week it is planned for. */
   week: DateString;
   envelope: 'week' | 'extra';
+  kind: PurchaseKind;
   /** Finished: it keeps what the expenses linked to it paid, and the rest of its amount goes back. */
   done: boolean;
 }
@@ -133,6 +137,8 @@ export interface WeekSummary {
   spent: number;
   /** What the plan still holds for purchases from the week's money. */
   planned: number;
+  /** The part of `planned` held for required purchases; the rest is for flexible ones. */
+  required: number;
   /** What is left after the spending and the planned purchases; negative when over the limit. */
   free: number;
   /** All expenses of the week, whatever they count towards, newest first. */
@@ -150,7 +156,9 @@ export function summarizeWeek(budget: Budget, week: DateString): WeekSummary {
   const spending = budget.expenses.filter((o) => o.date >= week && o.date <= end);
   const purchases = budget.purchases.filter((p) => p.week === week).map((p) => purchaseStatus(p, budget.expenses));
   const spent = sum(spending.filter((o) => envelopeOf(budget, o) === 'week').map((o) => o.amount));
-  const planned = sum(purchases.filter((p) => p.purchase.envelope === 'week').map((p) => p.left));
+  const fromWeek = purchases.filter((p) => p.purchase.envelope === 'week');
+  const planned = sum(fromWeek.map((p) => p.left));
+  const required = sum(fromWeek.filter((p) => p.purchase.kind === 'required').map((p) => p.left));
   const regular = [monthOf(week), monthOf(end)]
     .filter((month, i, months) => months.indexOf(month) === i)
     .flatMap((month) => budget.regular.flatMap((expense) => {
@@ -160,7 +168,7 @@ export function summarizeWeek(budget: Budget, week: DateString): WeekSummary {
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
   const limit = weekLimit(budget, week);
-  return { week, limit, spent, planned, free: limit - spent - planned, spending, purchases, regular };
+  return { week, limit, spent, planned, required, free: limit - spent - planned, spending, purchases, regular };
 }
 
 /** What a week allows: the amount the user set for it, or WEEK_LIMIT. */

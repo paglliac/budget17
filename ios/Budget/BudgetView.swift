@@ -12,6 +12,8 @@ struct BudgetView: View {
     enum Mode: Hashable { case week, month }
 
     @Binding var add: AddRequest?
+    /// Opens «Разобрать», from the expenses that wait for a category.
+    let openSort: () -> Void
     @State private var mode = Mode.week
     /// nil is the current week or month.
     @State private var week: String?
@@ -21,7 +23,7 @@ struct BudgetView: View {
     var body: some View {
         Group {
             switch mode {
-            case .week: WeekView(mode: $mode, week: $week, sheet: $sheet, add: $add)
+            case .week: HomeView(mode: $mode, week: $week, sheet: $sheet, add: $add, openSort: openSort)
             case .month: MonthView(mode: $mode, month: $month, sheet: $sheet, add: $add) { opened in
                 week = opened
                 mode = .week
@@ -51,178 +53,6 @@ struct ModeTabs: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(mode == value ? .isSelected : [])
-    }
-}
-
-/// The days of a week from the day it begins on, after its month; today is dark, a picked day shows only its spending.
-struct WeekStrip: View {
-    /// The week's first day, the one picked in the settings.
-    let start: String
-    let today: String
-    @Binding var selected: String?
-
-    var body: some View {
-        let days = (0..<7).map { Dates.adding($0, to: start) }
-        HStack(spacing: 0) {
-            // The week belongs to the month of its fourth day, as the server counts it.
-            StripMonth(text: Dates.parts(days[3])?.month ?? "")
-            ForEach(days, id: \.self) { day in
-                dayButton(day, letter: Dates.weekdayLetter(day))
-            }
-        }
-    }
-
-    private func dayButton(_ day: String, letter: String) -> some View {
-        let picked = selected == day || (selected == nil && day == today)
-        let ahead = day > today
-        return Button {
-            // A day ahead has no spending to show yet.
-            guard !ahead else { return }
-            withAnimation(.snappy) { selected = selected == day ? nil : day }
-        } label: {
-            VStack(spacing: 3) {
-                Text(letter).font(.caption2.weight(.medium)).foregroundStyle(Ink.muted)
-                Text(Dates.parts(day)?.day ?? "")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(picked ? Ink.onStrong : ahead ? Ink.muted : Color.primary)
-                    .frame(width: 30, height: 30)
-                    .background(picked ? Ink.strong : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Dates.parts(day).map { "\($0.day) \($0.month)" } ?? day)
-    }
-}
-
-struct WeekView: View {
-    enum Part: Hashable { case spending, plan, wishes }
-
-    @Binding var mode: BudgetView.Mode
-    @Binding var week: String?
-    @Binding var sheet: BudgetSheet?
-    @Binding var add: AddRequest?
-    @Environment(Session.self) private var session
-    @State private var part = Part.spending
-    /// A day picked in the strip, whose spending alone shows.
-    @State private var day: String?
-    @State private var error: String?
-
-    var body: some View {
-        Screen(path: "week", query: ["week": week]) { (s: WeekScreen) in
-            let shown = shownPart(s)
-            SplitScreen {
-                TopHeader {
-                    ModeTabs(mode: $mode)
-                } trailing: {
-                    PeriodSteps(
-                        back: { go(s.prev) },
-                        forward: s.next.map { next in { go(next) } },
-                        toCurrent: s.phase == "current" ? nil : { go(nil) }
-                    )
-                }
-            } summary: {
-                WeekStrip(start: s.week, today: s.today, selected: $day)
-                VStack(alignment: .leading, spacing: 8) {
-                    // In the current week the figure is what can still be spent, which goes without saying.
-                    if s.phase != "current" { SummaryLabel(s.total.label) }
-                    HStack(alignment: .center, spacing: 8) {
-                        BigAmount(amount: s.total.amount, symbol: s.symbol)
-                        Spacer(minLength: 0)
-                        SummaryChip(text: "из \(Money.number(s.limit.amount))", highlighted: s.limit.changed) {
-                            sheet = .weekLimit(WeekLimitDraft(week: s.week, title: s.title, limit: s.limit, symbol: s.symbol))
-                        }
-                        .accessibilityIdentifier("week-limit")
-                        .accessibilityLabel("Бюджет недели \(Money.text(s.limit.amount, s.symbol))")
-                    }
-                    SummaryBar(parts: s.total.parts ?? [], total: s.total.amount)
-                }
-            } band: {
-                BandSwitch(items: parts(s), selection: Binding(get: { shown }, set: { part = $0 }))
-            } content: {
-                switch shown {
-                case .spending: spending(s)
-                case .plan: plan(s)
-                case .wishes: wishes(s)
-                }
-            }
-            .onChange(of: add) { _, request in handle(request, s) }
-        }
-        .errorAlert($error)
-    }
-
-    private func go(_ target: String?) {
-        day = nil
-        week = target
-    }
-
-    private func parts(_ s: WeekScreen) -> [BandItem<Part>] {
-        if s.phase == "ahead" { return [BandItem(value: .plan, label: "План \(s.plan.count)")] }
-        let count = s.days.reduce(0) { $0 + $1.items.count }
-        return [BandItem(value: .spending, label: "Траты \(count)"), BandItem(value: .plan, label: "План \(s.plan.count)")]
-            + (s.wishes.map { [BandItem(value: .wishes, label: "Хочу \($0.count)")] } ?? [])
-    }
-
-    /// A week ahead has only its plan, and only the current week has wishes.
-    private func shownPart(_ s: WeekScreen) -> Part {
-        if s.phase == "ahead" { return .plan }
-        if part == .wishes && s.wishes == nil { return .spending }
-        return part
-    }
-
-    @ViewBuilder
-    private func spending(_ s: WeekScreen) -> some View {
-        let days = s.days.filter { day == nil || $0.date == day }
-        if days.isEmpty { EmptyCard(text: "Трат пока нет.") }
-        ForEach(days, id: \.date) { group in
-            DayHeading(title: group.title, subtitle: group.subtitle)
-            ForEach(group.items) { expense in
-                Button { sheet = .spending(expense.spending) } label: { Card(row: expense.row, symbol: s.symbol, monogram: true) }
-                    .buttonStyle(.card)
-                    .accessibilityIdentifier(expense.id)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func plan(_ s: WeekScreen) -> some View {
-        ForEach(s.plan) { item in PlanCard(item: item, symbol: s.symbol, choices: s.weekChoices, sheet: $sheet, error: $error) }
-        AddCard(label: "Добавить в план") { sheet = .purchase(draft(s, envelope: "week")) }
-    }
-
-    @ViewBuilder
-    private func wishes(_ s: WeekScreen) -> some View {
-        ForEach(s.wishes ?? []) { item in
-            Card(row: item.row, symbol: s.symbol) {
-                if item.plannable {
-                    CardAction(label: "Запланировать") { run { try await session.send("wishes/\(item.wish.id)/plan") } }
-                }
-            }
-            .onTapGesture { sheet = .wish(item) }
-            .accessibilityAddTraits(.isButton)
-        }
-        AddCard(label: "Добавить желание") { sheet = .wish(nil) }
-    }
-
-    /// A purchase for this week, or for the current one when this one is over.
-    private func draft(_ s: WeekScreen, envelope: String) -> PurchaseDraft {
-        PurchaseDraft(purchase: nil, week: s.phase == "past" ? s.current : s.week, envelope: envelope, choices: s.weekChoices, actions: [])
-    }
-
-    private func handle(_ request: AddRequest?, _ s: WeekScreen) {
-        guard let request else { return }
-        add = nil
-        switch request {
-        case .purchase(let envelope): sheet = .purchase(draft(s, envelope: envelope))
-        case .wish: sheet = .wish(nil)
-        }
-    }
-
-    private func run(_ change: @escaping () async throws -> Void) {
-        Task {
-            do { try await change() } catch { self.error = error.localizedDescription }
-        }
     }
 }
 

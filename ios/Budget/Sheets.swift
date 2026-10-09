@@ -35,6 +35,7 @@ struct PurchaseDraft: Hashable {
     let envelope: String
     let choices: [OptionGroup]
     let actions: [PurchaseAction]
+    var symbol = "₽"
 }
 
 extension View {
@@ -106,6 +107,8 @@ struct WeekLimitSheet: View {
     }
 }
 
+/// A purchase in the new style: its name and amount large, whether it is required or flexible, its week and, for a new
+/// one, whether it comes from the week's money or the extras; one to change also moves, finishes or goes.
 struct PurchaseSheet: View {
     let draft: PurchaseDraft
     @Environment(Session.self) private var session
@@ -114,64 +117,118 @@ struct PurchaseSheet: View {
     @State private var amount = ""
     @State private var week = ""
     @State private var envelope = "week"
+    @State private var kind = "flexible"
     @State private var errors: [String: String] = [:]
     @State private var error: String?
     @State private var confirmDelete = false
     @State private var busy = false
 
+    private static let kinds = [
+        LilacChoiceTiles.Choice(value: "required", title: "Обязательная", hint: "Лучше не трогать"),
+        LilacChoiceTiles.Choice(value: "flexible", title: "Гибкая", hint: "Можно перенести"),
+    ]
+
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField(draft.envelope == "extra" ? "Например, куртка" : "Например, ботинки", text: $title)
-                    FieldError(text: errors["title"])
-                    TextField("Сумма", text: $amount).decimalKeyboard()
-                    FieldError(text: errors["amount"])
+        VStack(spacing: 0) {
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark").font(.system(size: 18, weight: .medium)).frame(width: 40, height: 40).contentShape(Rectangle())
                 }
-                Section {
-                    Picker("Неделя", selection: $week) {
-                        ForEach(weekGroups, id: \.label) { group in
-                            Section(group.label) {
-                                ForEach(group.options, id: \.value) { Text($0.label).tag($0.value) }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Отмена")
+                Spacer()
+                if draft.purchase != nil {
+                    Button("Удалить") { confirmDelete = true }.foregroundStyle(Lilac.red)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    TextField(draft.envelope == "extra" ? "Например, куртка" : "Например, ботинки", text: $title, axis: .vertical)
+                        .font(.system(size: 32, weight: .regular))
+                        .lineLimit(1...3)
+                        .accessibilityIdentifier("purchase-title")
+                    FieldError(text: errors["title"])
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        TextField("0", text: $amount)
+                            .font(.system(size: 44, weight: .bold))
+                            .monospacedDigit()
+                            .decimalKeyboard()
+                            .fixedSize()
+                            .accessibilityIdentifier("purchase-amount")
+                            .onChange(of: amount) { _, typed in
+                                let grouped = Money.typing(typed)
+                                if grouped != typed { amount = grouped }
+                            }
+                        Text(draft.symbol).font(.system(size: 44, weight: .bold)).foregroundStyle(amount.isEmpty ? Lilac.muted.opacity(0.6) : Color.primary)
+                    }
+                    .padding(.top, 6)
+                    FieldError(text: errors["amount"])
+
+                    LilacFieldLabel(text: "Тип траты")
+                    LilacChoiceTiles(choices: Self.kinds, selection: $kind)
+
+                    LilacFieldLabel(text: "Неделя")
+                    HStack {
+                        Picker("Неделя", selection: $week) {
+                            ForEach(weekGroups, id: \.label) { group in
+                                Section(group.label) {
+                                    ForEach(group.options, id: \.value) { Text($0.label).tag($0.value) }
+                                }
                             }
                         }
+                        .labelsHidden()
+                        .tint(Color.primary)
+                        Spacer()
                     }
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 52)
+                    .background(Lilac.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
+
                     if draft.purchase == nil {
-                        Picker("Откуда", selection: $envelope) {
-                            Text("Из недели").tag("week")
-                            Text("Из дополнительных").tag("extra")
+                        LilacFieldLabel(text: "Откуда")
+                        LilacSegmented(items: [BandItem(value: "week", label: "Из недели"), BandItem(value: "extra", label: "Из дополнительных")],
+                                       selection: $envelope, width: nil)
+                    } else if let purchase = draft.purchase {
+                        HStack(spacing: 10) {
+                            ForEach(draft.actions, id: \.action) { action in
+                                Button(action.label) { run(action: action.action, purchase: purchase) }
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Lilac.accent)
+                                    .padding(.horizontal, 16)
+                                    .frame(height: 40)
+                                    .background(Lilac.tint, in: Capsule())
+                                    .buttonStyle(.plain)
+                            }
                         }
-                        .pickerStyle(.segmented)
+                        .padding(.top, 24)
                     }
                 }
-                if let purchase = draft.purchase {
-                    Section {
-                        ForEach(draft.actions, id: \.action) { action in
-                            Button(action.label) { run(action: action.action, purchase: purchase) }
-                        }
-                        Button("Удалить", role: .destructive) { confirmDelete = true }
-                    }
-                }
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
-            .navigationTitle(draft.purchase == nil ? "Новая покупка" : "Покупка")
-            .inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(draft.purchase == nil ? "В план" : "Сохранить") { save() }.disabled(busy)
-                }
-            }
-            .presentationDetents([.medium, .large])
-            .confirmationDialog("Удалить покупку?", isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button("Удалить", role: .destructive) { submit("purchases/\(draft.purchase!.id)/delete", [:]) }
-            }
-            .errorAlert($error)
-            .onAppear {
-                title = draft.purchase?.title ?? ""
-                amount = draft.purchase.map { Money.input($0.amount) } ?? ""
-                week = draft.week
-                envelope = draft.envelope
-            }
+            .scrollDismissesKeyboard(.interactively)
+            LilacPrimaryButton(label: draft.purchase == nil ? "В план" : "Сохранить", busy: busy) { save() }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+                .accessibilityIdentifier("purchase-save")
+        }
+        .background(LilacBackground())
+        .presentationDetents([.large])
+        .accessibilityIdentifier("purchase-sheet")
+        .confirmationDialog("Удалить покупку?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Удалить", role: .destructive) { submit("purchases/\(draft.purchase!.id)/delete", [:]) }
+        }
+        .errorAlert($error)
+        .onAppear {
+            title = draft.purchase?.title ?? ""
+            amount = draft.purchase.map { Money.typing(Money.input($0.amount)) } ?? ""
+            week = draft.week
+            envelope = draft.envelope
+            kind = draft.purchase?.kind ?? "flexible"
         }
     }
 
@@ -182,7 +239,7 @@ struct PurchaseSheet: View {
         return [OptionGroup(label: "Сейчас", options: [Option(value: purchase.week, label: purchase.weekLabel)])] + draft.choices
     }
 
-    private var fields: [String: String] { ["title": title, "amount": amount, "week": week] }
+    private var fields: [String: String] { ["title": title, "amount": amount, "week": week, "kind": kind] }
 
     private func save() {
         if let purchase = draft.purchase {
