@@ -37,6 +37,7 @@ settings.addWish({ title: 'Укладка для волос', amount: 4_500 });
 settings.addIncome({ title: 'Зарплата', model: 'salary', params: { salary: 200_000, advanceDay: 20, payDay: 5 } });
 settings.addIncome({ title: 'Сдача квартиры', model: 'fixed', params: { amount: 30_000, day: 1 } });
 settings.addOwnCategory('Дети');
+settings.addOwnCategory('Кэшбэк', 'income');
 settings.setWeekLimit('2026-10-05', 30_000);
 
 const saved = (): SavedBudget => ({
@@ -58,6 +59,9 @@ const [paying, moved] = weekScreen(data, saved(), budget).days.flatMap((d) => d.
 if (!paying || !moved) throw new Error('В демо-данных у недели нет трат');
 settings.linkPurchase(paying.spending, groceries.id);
 settings.markSpending(moved.spending, 'extra');
+// An income opens to be marked too, with its categories and whether it counts.
+const income = operationsScreen(data, saved(), { today, kind: 'income' }).days.flatMap((d) => d.items)[0];
+if (!income?.spending) throw new Error('В демо-данных нет доходов');
 
 const screens: Record<string, unknown> = {
   session: { user: 'demo', symbol: '₽', today, source: 'demo', canSync: false, syncedAt: null },
@@ -67,7 +71,9 @@ const screens: Record<string, unknown> = {
   month: monthScreen(data, saved(), { ...budget, incomes: settings.incomes() }),
   'month-without-incomes': monthScreen(data, saved(), budget),
   spending: spendingScreen(data, saved(), { today, id: paying.spending }),
+  'spending-income': spendingScreen(data, saved(), { today, id: income.spending }),
   operations: operationsScreen(data, saved(), { today }),
+  'operations-income': operationsScreen(data, saved(), { today, kind: 'income' }),
   uncategorized: uncategorizedScreen(data, saved(), { today }),
   regular: regularScreen(data, saved(), { today }),
   income: incomeScreen(data, settings.incomes(), { today }),

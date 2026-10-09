@@ -1,9 +1,10 @@
 // Marking an expense, the same on every page that lists expenses: what it paid (a payment of a regular expense or a
 // purchase planned in a week), its category, which wins over ZenMoney's, and where it counts in the budget, if at all.
 // An open expense shows under its row when and how it was paid, then these as choices made in one click, the
-// likeliest payments and the most popular categories first, and what the user wrote about it. Choices post to
-// /spending/:id/:choice, the list of other payments to /spending/:id with the choice as `target`, and the description
-// to /spending/:id/description (see submitMarking).
+// likeliest payments and the most popular categories first, and what the user wrote about it. An income is marked the
+// same way, only it pays nothing, its categories are the income ones, and it either counts among the incomes or not
+// at all. Choices post to /spending/:id/:choice, the list of other payments to /spending/:id with the choice as
+// `target`, and the description to /spending/:id/description (see submitMarking).
 
 import { mainCurrency } from '../../balances.ts';
 import { MAX_DESCRIPTION, parseDescription } from '../../input.ts';
@@ -11,6 +12,7 @@ import { byPopularity, categoryCatalog, type CategoryEntry, type CategorySetup }
 import { paymentChoices, suggester, type Categorization, type PaymentChoice, type Suggestion } from '../../categorization.ts';
 import { addDays } from '../../dates.ts';
 import { listOperations, PURCHASE_CATEGORY, REGULAR_CATEGORY, type Operation } from '../../ledger.ts';
+import { operationKind } from '../../operations.ts';
 import { nearestPayment, type RegularExpense } from '../../regular.ts';
 import type { Settings } from '../../settings.ts';
 import { envelopeOf, purchaseStatus, weekOf, type Envelope, type Purchase, type WeekStart } from '../../week.ts';
@@ -21,16 +23,16 @@ import { categoryColor, type Tone } from '../tones.ts';
 import { choiceGroup, factList, inlineForm } from '../widgets/basics.ts';
 import type { Href } from './chrome.ts';
 
-/** What the user keeps in the app about expenses. */
+/** What the user keeps in the app about expenses and incomes. */
 export interface SavedMarking {
   categorizations: ReadonlyMap<string, Categorization>;
   /** The purchase each expense paid, by ZenMoney transaction id. */
   purchasePayments: ReadonlyMap<string, number>;
   regular: RegularExpense[];
   purchases: Purchase[];
-  /** Envelopes of spending moved out of where it counts by default. */
+  /** Envelopes of spending moved out of where it counts by default, and incomes not counted. */
   marks: ReadonlyMap<string, Envelope>;
-  /** What the user wrote about expenses, by ZenMoney transaction id. */
+  /** What the user wrote about expenses and incomes, by ZenMoney transaction id. */
   descriptions: ReadonlyMap<string, string>;
   categories: CategorySetup;
   weekStart: WeekStart;
@@ -38,17 +40,20 @@ export interface SavedMarking {
   selfPayee?: string | null;
 }
 
-/** What marking an expense needs besides the expense. */
+/** What marking an expense or an income needs besides it. */
 export interface Marking {
-  /** Categories to offer, most popular first. */
+  /** Categories to offer expenses, most popular first. */
   categories: CategoryEntry[];
+  /** Categories to offer incomes, most popular first. */
+  incomeCategories: CategoryEntry[];
   regular: RegularExpense[];
   purchases: Purchase[];
   /** Expenses with what they paid, to tell what is paid already. */
   expenses: Operation[];
   marks: ReadonlyMap<string, Envelope>;
   categorizations: ReadonlyMap<string, Categorization>;
-  suggest: (expense: Operation) => Suggestion | null;
+  /** For an expense or an income. */
+  suggest: (operation: Operation) => Suggestion | null;
   symbol: string;
   weekStart: WeekStart;
 }
@@ -58,16 +63,25 @@ export function allExpenses(data: EntityCollections, saved: SavedMarking): Opera
   return listOperations(data, { from: '0000-01-01', to: '9999-12-31' }, saved).filter((o) => o.kind === 'expense');
 }
 
+/** All incomes that count, as the user sorted them, newest first. */
+export function allIncomes(data: EntityCollections, saved: SavedMarking): Operation[] {
+  return listOperations(data, { from: '0000-01-01', to: '9999-12-31' }, saved).filter((o) => o.kind === 'income');
+}
+
 /** `expenses` are all of them, as allExpenses lists them. */
 export function loadMarking(data: EntityCollections, saved: SavedMarking, expenses: Operation[], today: DateString): Marking {
+  const incomes = allIncomes(data, saved);
+  const suggestExpense = suggester(expenses, saved.regular);
+  const suggestIncome = suggester(incomes, []);
   return {
     categories: byPopularity(categoryCatalog(data.tag ?? [], saved.categories), expenses, today),
+    incomeCategories: byPopularity(categoryCatalog(data.tag ?? [], saved.categories, 'income'), incomes, today),
     regular: saved.regular,
     purchases: saved.purchases,
     expenses,
     marks: saved.marks,
     categorizations: saved.categorizations,
-    suggest: suggester(expenses, saved.regular),
+    suggest: (o) => (o.kind === 'income' ? suggestIncome(o) : suggestExpense(o)),
     symbol: mainCurrency(data).symbol,
     weekStart: saved.weekStart,
   };
@@ -84,11 +98,14 @@ const ENVELOPES: Envelope[] = ['week', 'extra', 'outside', 'ignored'];
  * category (tag-<id>), the regular expense or purchase the expense paid (regular-<id>, purchase-<id>), unlink,
  * uncategorize, or where it counts (week, extra, outside, ignored for nowhere). A payment counts where what it paid
  * counts, so linking one drops where the expense was moved, and counts it again if it was not counted. The expense and what it is put into must exist.
- * `description` gives the expense the `description` of the form, and an empty one takes it away.
+ * `description` gives the expense the `description` of the form, and an empty one takes it away. An income takes an
+ * income category, uncategorize, counted or ignored, and a description.
  */
 export function submitMarking(settings: Settings, data: EntityCollections, path: string, body: URLSearchParams): MarkingSubmission {
   const [, id, action] = /^\/spending\/([\w-]+)(?:\/([\w-]+))?$/.exec(path) ?? [];
-  if (!id || !(data.transaction ?? []).some((t) => t.id === id && !t.deleted)) return { status: 'missing' };
+  const transaction = id ? (data.transaction ?? []).find((t) => t.id === id && !t.deleted) : undefined;
+  const operation = transaction ? operationKind(transaction) : null;
+  if (!id || operation === null || operation === 'transfer') return { status: 'missing' };
   const choice = action ?? body.get('target') ?? '';
   const sorted = settings.categorizations().get(id);
 
@@ -98,6 +115,7 @@ export function submitMarking(settings: Settings, data: EntityCollections, path:
     settings.describeSpending(id, description.value);
     return { status: 'saved' };
   }
+  if (operation === 'income') return markIncome(settings, data, id, choice);
   const envelope = ENVELOPES.find((e) => e === choice);
   if (envelope) {
     settings.markSpending(id, envelope);
@@ -131,6 +149,24 @@ export function submitMarking(settings: Settings, data: EntityCollections, path:
   return { status: 'missing' };
 }
 
+/** An income goes into one of the income categories, or none, and counts among the incomes or not at all. */
+function markIncome(settings: Settings, data: EntityCollections, id: string, choice: string): MarkingSubmission {
+  if (choice === 'counted' || choice === 'ignored') {
+    settings.markSpending(id, choice === 'ignored' ? 'ignored' : 'week');
+    return { status: 'saved' };
+  }
+  if (choice === 'uncategorize') {
+    settings.categorize(id, null);
+    return { status: 'saved' };
+  }
+  const [, target] = /^tag-([\w-]+)$/.exec(choice) ?? [];
+  if (target && categoryCatalog(data.tag ?? [], settings.categorySetup(), 'income').some((c) => c.id === target)) {
+    settings.categorize(id, { tag: target });
+    return { status: 'saved' };
+  }
+  return { status: 'missing' };
+}
+
 // ---- Page parts
 
 /** How many likely payments show as buttons at least; the whole plan of the expense's week always does. */
@@ -141,6 +177,8 @@ const LIST_WEEKS_BEFORE = 4;
 const LIST_WEEKS_AFTER = 13;
 
 const ENVELOPE_CHOICE: Record<Envelope, string> = { week: 'Неделя', extra: 'Дополнительные', outside: 'Вне бюджета', ignored: 'Не учитывать' };
+/** Whether an income counts: among the incomes, or not at all. */
+const INCOME_CHOICE = { counted: 'В доходах', ignored: ENVELOPE_CHOICE.ignored };
 /**
  * Where an expense or a purchase counts, as a dot before its amount: yellow as what the week spent, violet as the
  * extras, an empty ring outside the budget.
@@ -181,10 +219,16 @@ export function envelopeMark(m: Pick<Marking, 'marks' | 'purchases'>, o: Operati
   return ENVELOPE_MARK[envelopeOf(m, o)];
 }
 
-/** What an open expense shows under its row. */
+/** What an open expense or income shows under its row; an income pays nothing. */
 export function markingPanel(m: Marking, o: Operation, href: Href): Html[] {
   const suggestion = o.category === null ? m.suggest(o) : null;
-  return [facts(m, o), paymentGroup(m, o, href, suggestion), categoryGroup(m, o, href, suggestion), envelopeGroup(m, o, href), descriptionForm(o, href)];
+  return [
+    facts(m, o),
+    o.kind === 'expense' ? paymentGroup(m, o, href, suggestion) : null,
+    categoryGroup(m, o, href, suggestion),
+    envelopeGroup(m, o, href),
+    descriptionForm(o, href),
+  ].filter((part) => part !== null);
 }
 
 /** When, from where and how the bank put it, with whatever else it said: comment, foreign amount, not settled yet. */
@@ -202,7 +246,7 @@ export function markingFacts(m: Pick<Marking, 'symbol'>, o: Operation): Array<{ 
 }
 
 function facts(m: Marking, o: Operation): Html {
-  return factList({ label: 'О трате', items: markingFacts(m, o) });
+  return factList({ label: o.kind === 'income' ? 'О доходе' : 'О трате', items: markingFacts(m, o) });
 }
 
 function descriptionForm(o: Operation, href: Href): Html {
@@ -211,7 +255,7 @@ function descriptionForm(o: Operation, href: Href): Html {
     action: href(`/spending/${o.id}/description`),
     name: 'description',
     value: o.description ?? '',
-    placeholder: 'Например, подарок маме',
+    placeholder: o.kind === 'income' ? 'Например, вернули долг' : 'Например, подарок маме',
     maxLength: MAX_DESCRIPTION,
     submitLabel: 'Сохранить',
   });
@@ -344,8 +388,9 @@ function paymentDetail(c: PaymentChoice, week: DateString, symbol: string): stri
 }
 
 /**
- * Categories most popular first, the expense's one highlighted. The one ZenMoney gave it is marked, and picking it
- * again drops the pick made in the app. A payment of a regular expense keeps its category while it is linked.
+ * Categories most popular first, the expense's one highlighted; an income gets the income ones. The one ZenMoney gave
+ * it is marked, and picking it again drops the pick made in the app. A payment of a regular expense keeps its category
+ * while it is linked.
  */
 export function categoryOptions(m: Marking, o: Operation, suggestion: Suggestion | null): { choices: MarkingChoice[]; empty: string } {
   if (o.regular) return { choices: [], empty: `«${o.category?.title ?? ''}», пока трата привязана к платежу` };
@@ -354,8 +399,11 @@ export function categoryOptions(m: Marking, o: Operation, suggestion: Suggestion
   const zenmoney = o.zenmoneyCategory?.id ?? null;
   const current = picked ?? zenmoney;
   const suggested = suggestion && 'category' in suggestion ? suggestion.category.id : null;
+  const catalog: Array<Pick<CategoryEntry, 'id' | 'title' | 'color' | 'hidden'>> = o.kind === 'income' ? m.incomeCategories : m.categories;
+  // A refund comes as an income with the shop's spending category from ZenMoney, which is offered still to go back to.
+  const own = o.zenmoneyCategory && !catalog.some((c) => c.id === zenmoney) ? [{ ...o.zenmoneyCategory, hidden: false }] : [];
   return {
-    choices: m.categories
+    choices: [...own, ...catalog]
       .filter((c) => !c.hidden || c.id === current || c.id === zenmoney)
       .map((c) => ({
         choice: c.id === zenmoney ? 'uncategorize' : `tag-${c.id}`,
@@ -365,7 +413,7 @@ export function categoryOptions(m: Marking, o: Operation, suggestion: Suggestion
         current: c.id === current,
         suggested: c.id === suggested,
       })),
-    empty: 'Категорий нет: добавьте их в настройках.',
+    empty: o.kind === 'income' ? 'Категорий доходов нет: добавьте их в настройках.' : 'Категорий нет: добавьте их в настройках.',
   };
 }
 
@@ -376,14 +424,21 @@ function categoryGroup(m: Marking, o: Operation, href: Href, suggestion: Suggest
 
 /**
  * Where the expense counts. Back to the week means dropping the mark, so it is offered only to an expense that
- * counts in the week unless moved: not to a payment of a regular expense or of an extra purchase.
+ * counts in the week unless moved: not to a payment of a regular expense or of an extra purchase. An income counts
+ * among the incomes or not at all.
  */
 export function envelopeOptions(m: Pick<Marking, 'marks' | 'purchases'>, o: Operation): MarkingChoice[] {
+  if (o.kind === 'income') {
+    return [
+      { choice: 'counted', label: INCOME_CHOICE.counted, current: !o.ignored },
+      { choice: 'ignored', label: INCOME_CHOICE.ignored, current: o.ignored },
+    ];
+  }
   const current = envelopeOf(m, o);
   const unmoved = envelopeOf({ marks: new Map(), purchases: m.purchases }, o);
   return ENVELOPES.filter((e) => e !== 'week' || unmoved === 'week').map((e) => ({ choice: e, label: ENVELOPE_CHOICE[e], current: e === current }));
 }
 
 function envelopeGroup(m: Marking, o: Operation, href: Href): Html {
-  return choiceGroup({ label: 'Бюджет', choices: envelopeOptions(m, o).map((c) => ({ ...c, action: href(`/spending/${o.id}/${c.choice}`) })) });
+  return choiceGroup({ label: o.kind === 'income' ? 'Учёт' : 'Бюджет', choices: envelopeOptions(m, o).map((c) => ({ ...c, action: href(`/spending/${o.id}/${c.choice}`) })) });
 }

@@ -14,6 +14,8 @@ const data: EntityCollections = {
     transaction({ id: 'rent', outcome: 40_000, payee: 'Александр А.' }),
     transaction({ id: 'kiosk', outcome: 300, payee: 'Киоск' }),
     transaction({ id: 'gone', outcome: 100, deleted: true }),
+    transaction({ id: 'refund', income: 12_389, comment: 'ВОЗМЕЩЕНИЕ КОМАНДИРОВОЧНЫХ РАСХОДОВ' }),
+    transaction({ id: 'move', income: 1_000, outcome: 1_000, incomeAccount: 'cash' }),
   ],
 };
 const form = (fields: Record<string, string> = {}) => new URLSearchParams(fields);
@@ -79,6 +81,39 @@ describe('submitMarking', () => {
     assert.deepEqual(submitMarking(settings, data, '/spending/kiosk/description', form({ description: ' ' })), { status: 'saved' });
     assert.deepEqual([...settings.spendingDescriptions()], []);
     assert.deepEqual(submitMarking(settings, data, '/spending/gone/description', form({ description: 'Нет' })), { status: 'missing' });
+  });
+
+  it('puts an income into an income category, counts it or not, and gives it a description', () => {
+    using settings = new Settings(':memory:');
+    const cashback = settings.addOwnCategory('Кэшбэк', 'income');
+
+    assert.deepEqual(submitMarking(settings, data, `/spending/refund/tag-${cashback.id}`, form()), { status: 'saved' });
+    assert.deepEqual(submitMarking(settings, data, '/spending/refund/tag-salary', form()), { status: 'saved' });
+    assert.deepEqual([...settings.categorizations()], [['refund', { tag: 'salary' }]]);
+    submitMarking(settings, data, '/spending/refund/uncategorize', form());
+    assert.deepEqual([...settings.categorizations()], []);
+
+    assert.deepEqual(submitMarking(settings, data, '/spending/refund/ignored', form()), { status: 'saved' });
+    assert.deepEqual([...settings.spendingMarks()], [['refund', 'ignored']]);
+    assert.deepEqual(submitMarking(settings, data, '/spending/refund/counted', form()), { status: 'saved' });
+    assert.deepEqual([...settings.spendingMarks()], []);
+
+    submitMarking(settings, data, '/spending/refund/description', form({ description: 'Командировка в Казань' }));
+    assert.deepEqual([...settings.spendingDescriptions()], [['refund', 'Командировка в Казань']]);
+  });
+
+  it('refuses for an income what only expenses take, and marks no transfer', () => {
+    using settings = new Settings(':memory:');
+    const rent = settings.addRegularExpense(regularInput({ title: 'Мастерская аренда', amount: 40_000, day: 10 }));
+    const kids = settings.addOwnCategory('Дети');
+
+    for (const choice of ['tag-cafe', `tag-${kids.id}`, 'week', 'extra', 'outside', 'unlink', `regular-${rent.id}`]) {
+      assert.deepEqual(submitMarking(settings, data, `/spending/refund/${choice}`, form()), { status: 'missing' }, choice);
+    }
+    assert.deepEqual(submitMarking(settings, data, '/spending/kiosk/counted', form()), { status: 'missing' }, 'an expense counts in an envelope');
+    assert.deepEqual(submitMarking(settings, data, '/spending/move/ignored', form()), { status: 'missing' });
+    assert.deepEqual([...settings.categorizations()], []);
+    assert.deepEqual([...settings.spendingMarks()], []);
   });
 
   it('refuses an unknown expense, category, regular expense, purchase or choice', () => {

@@ -14,7 +14,7 @@ const setup: CategorySetup = {
     [groceries.id, { title: 'Продукты', hidden: false }],
     [home.id, { title: 'Дом', hidden: true }],
   ]),
-  own: [{ id: 'own-1', title: 'Дети', hidden: false }],
+  own: [{ id: 'own-1', title: 'Дети', hidden: false, kind: 'expense' }],
 };
 
 describe('categories', () => {

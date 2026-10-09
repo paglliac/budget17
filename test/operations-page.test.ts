@@ -82,7 +82,6 @@ describe('operations page', () => {
     assert.ok(page.includes(`action="/spending/${lavka}/tag-cafe"`), 'ZenMoney’s category can be changed');
     assert.ok(page.includes('Продукты <small>из ZenMoney</small>'));
     assert.ok(page.includes(`href="/operations?kind=expense&amp;edit=spending-${data.transaction![2]!.id}"`), 'another expense opens with the filters kept');
-    assert.ok(!page.includes(`edit=spending-${data.transaction![1]!.id}`), 'an income does not open');
 
     const picked = { ...sorting, categorizations: new Map([[lavka, { tag: cafe.id }]]) };
     const changed = String(renderOperations(loadOperations({ ...data, tag: [food, cafe] }, picked, { today, edit: `spending-${lavka}` }), createHref()));
@@ -110,6 +109,40 @@ describe('operations page', () => {
     const again = String(renderOperations(described, createHref()));
     assert.ok(again.includes('name="description" value="На ремонт"'));
     assert.ok(again.includes('На ремонт · Снял в банкомате</small>'), 'the row shows it before the bank’s comment');
+  });
+
+  it('opens an income in place with the income categories and whether it counts, and nothing to pay', () => {
+    const salary = data.transaction![1]!.id;
+    const pay = tag({ id: 'pay', title: 'Зарплата', showIncome: true, showOutcome: false });
+    const withIncomeTags = { ...data, tag: [food, pay] };
+    const own = { ...sorting, categories: { changes: new Map(), own: [{ id: 'own-1', title: 'Кэшбэк', hidden: false, kind: 'income' as const }] } };
+    const page = String(renderOperations(loadOperations(withIncomeTags, own, { today, edit: `spending-${salary}` }), createHref()));
+
+    assert.ok(page.includes(`id="spending-${salary}"`) && page.includes('О доходе'));
+    assert.ok(page.includes(`action="/spending/${salary}/tag-pay"`) && page.includes(`action="/spending/${salary}/tag-own-1"`));
+    assert.ok(!page.includes(`action="/spending/${salary}/tag-${food.id}"`), 'no spending category');
+    assert.ok(!page.includes('Оплата'), 'an income pays nothing');
+    assert.ok(page.includes('Учёт') && page.includes('В доходах</span></span>'), 'it counts until told otherwise');
+    assert.ok(page.includes(`action="/spending/${salary}/ignored"`));
+    assert.ok(page.includes('Например, вернули долг'));
+  });
+
+  it('lists an income not counted quieter, outside the sums, and shows incomes by category when only incomes are shown', () => {
+    const salary = data.transaction![1]!.id;
+    const debt = transaction({ id: 'debt', date: '2026-10-05', income: 22_000, payee: 'Сергей В.' });
+    const withDebt = { ...data, transaction: [...data.transaction!, debt] };
+    const sorted = { ...sorting, marks: new Map([['debt', 'ignored' as const]]), categorizations: new Map([[salary, { tag: food.id }]]) };
+    const month = loadOperations(withDebt, sorted, { today });
+    const page = String(renderOperations(month, createHref())).replaceAll('\u00a0', ' ');
+
+    assert.ok(page.includes('5 операций: потрачено 1 500 ₽, получено 50 000 ₽.'), 'the debt is not counted');
+    assert.ok(page.includes('class="operation-item muted" id="spending-debt"') && page.includes('не учитывается, Т-Банк'));
+    assert.equal(month.categoriesTitle, 'Расходы по категориям');
+
+    const incomes = loadOperations(withDebt, sorted, { today, kind: 'income' });
+    assert.equal(incomes.categoriesTitle, 'Доходы по категориям');
+    assert.deepEqual(incomes.categories.map((c) => [c.title, c.amount]), [['Продукты', 50_000]], 'the income not counted is left out');
+    assert.ok(String(renderOperations(incomes, createHref())).includes('Доходы по категориям'));
   });
 
   it('ignores an unknown kind and a month in the future', () => {

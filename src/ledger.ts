@@ -1,5 +1,5 @@
 import { mainCurrency, mainCurrencyConverter } from './balances.ts';
-import { categoryFinder, NO_SETUP, type CategorySetup } from './categories.ts';
+import { categoryFinder, NO_SETUP, type CategoryKind, type CategorySetup } from './categories.ts';
 import type { Categorization } from './categorization.ts';
 import { operationAmount, operationKind, type Category, type OperationKind } from './operations.ts';
 import type { RegularExpense } from './regular.ts';
@@ -40,11 +40,14 @@ export interface Operation {
   toAccount: string | null;
   /** The bank has not settled it yet. */
   hold: boolean;
-  /** The user said not to count this expense at all; such expenses are listed only when asked for. */
+  /** The user said not to count this expense or income at all; such operations are listed only when asked for. */
   ignored: boolean;
 }
 
-/** How the user sorted expenses, the regular expenses and purchases they may pay, and how they set up categories. */
+/**
+ * How the user sorted expenses and incomes, the regular expenses and purchases expenses may pay, and how they set up
+ * categories.
+ */
 export interface Sorting {
   categorizations: ReadonlyMap<string, Categorization>;
   regular: ReadonlyArray<Pick<RegularExpense, 'id' | 'title'>>;
@@ -53,9 +56,9 @@ export interface Sorting {
   purchases?: ReadonlyArray<Pick<Purchase, 'id' | 'title'>>;
   /** ZenMoney's categories as they are without it. */
   categories?: CategorySetup;
-  /** Where the user said expenses count; those not counted at all are left out. */
+  /** Where the user said expenses count; those not counted at all, incomes among them, are left out. */
   marks?: ReadonlyMap<string, Envelope>;
-  /** What the user wrote about expenses, by ZenMoney transaction id. */
+  /** What the user wrote about expenses and incomes, by ZenMoney transaction id. */
   descriptions?: ReadonlyMap<string, string>;
 }
 
@@ -68,8 +71,9 @@ const UNTITLED: Record<OperationKind, string> = { expense: 'Расход', incom
 
 /**
  * Operations dated from `from` to `to` inclusive, newest first. Deleted ones are left out, and so are transfers
- * between accounts of one bank: they only move money from one pocket to another. Expenses the user said not to count
- * at all are left out too, unless `withIgnored` asks for them, as the list of operations does to let them be found.
+ * between accounts of one bank: they only move money from one pocket to another. Expenses and incomes the user said
+ * not to count at all are left out too, unless `withIgnored` asks for them, as the list of operations does to let them
+ * be found.
  */
 export function listOperations(
   data: Pick<EntityCollections, 'instrument' | 'user' | 'account' | 'tag' | 'merchant' | 'transaction'>,
@@ -94,7 +98,7 @@ export function listOperations(
     if (t.deleted || t.date < range.from || t.date > range.to) continue;
     const kind = operationKind(t);
     if (kind === null) continue;
-    const ignored = kind === 'expense' && sorting?.marks?.get(t.id) === 'ignored';
+    const ignored = kind !== 'transfer' && sorting?.marks?.get(t.id) === 'ignored';
     if (ignored && !options.withIgnored) continue;
     const bank = banks.get(t.outcomeAccount);
     if (kind === 'transfer' && bank != null && bank === banks.get(t.incomeAccount)) continue;
@@ -108,7 +112,7 @@ export function listOperations(
         : { amount, instrument: instruments.get(instrument) };
     const account = accounts.get(isIncome ? t.incomeAccount : t.outcomeAccount) ?? 'Счёт';
     const toAccount = kind === 'transfer' ? (accounts.get(t.incomeAccount) ?? 'Счёт') : null;
-    const sorted = kind === 'expense' ? sorting?.categorizations.get(t.id) : undefined;
+    const sorted = kind !== 'transfer' ? sorting?.categorizations.get(t.id) : undefined;
     const paid = sorted && 'regular' in sorted ? regular.get(sorted.regular) : undefined;
     const purchaseId = kind === 'expense' ? sorting?.purchasePayments?.get(t.id) : undefined;
     const bought = purchaseId === undefined ? undefined : purchases.get(purchaseId);
@@ -190,11 +194,11 @@ export interface CategorySpending {
   amount: number;
 }
 
-/** Expenses by top-level category, largest first; those without one go together as Без категории. */
-export function spendingByCategory(operations: Operation[]): CategorySpending[] {
+/** Expenses, or incomes, by top-level category, largest first; those without one go together as Без категории. */
+export function byCategory(operations: Operation[], kind: CategoryKind = 'expense'): CategorySpending[] {
   const categories = new Map<TagId | null, CategorySpending>();
   for (const o of operations) {
-    if (o.kind !== 'expense') continue;
+    if (o.kind !== kind) continue;
     const id = o.category?.id ?? null;
     let category = categories.get(id);
     if (!category) {

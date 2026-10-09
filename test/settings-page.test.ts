@@ -10,17 +10,19 @@ import { account, RUB, tag, transaction, user } from './fixtures.ts';
 const today = '2026-10-06';
 const groceries = tag({ id: 'groceries', title: 'Groceries' });
 const cafe = tag({ id: 'cafe', title: 'Eating out' });
-const correction = tag({ id: 'correction', title: 'Correction' });
+const correction = tag({ id: 'correction', title: 'Correction', showIncome: true });
+const salary = tag({ id: 'salary', title: 'Salary', showIncome: true, showOutcome: false });
 const data: EntityCollections = {
   instrument: [RUB],
   user: [user()],
   account: [account({ id: 'card' })],
-  tag: [groceries, cafe, correction],
+  tag: [groceries, cafe, correction, salary],
   transaction: [
     transaction({ date: '2026-10-01', outcome: 300, tag: [cafe.id] }),
     transaction({ date: '2026-10-02', outcome: 300, tag: [cafe.id] }),
     transaction({ id: 'kids', date: '2026-10-03', outcome: 300 }),
     transaction({ date: '2026-10-04', outcome: 300, tag: [groceries.id] }),
+    transaction({ date: '2026-10-05', income: 100_000, tag: [salary.id] }),
   ],
 };
 
@@ -51,11 +53,12 @@ describe('settings page', () => {
     const page = render(settings);
 
     assert.ok(page.includes('3 категории из ZenMoney и 1 своя, 1 скрыта.'));
-    const rows = [...page.slice(page.indexOf('aria-label="Категории"')).matchAll(/<b>([^<]*)<\/b><small>([^<]*)<\/small>/g)].map((m) => `${m[1]}: ${m[2]}`);
+    const rows = [...page.slice(page.indexOf('aria-label="Категории расходов"')).matchAll(/<b>([^<]*)<\/b><small>([^<]*)<\/small>/g)].map((m) => `${m[1]}: ${m[2]}`);
     assert.deepEqual(rows, [
       'Eating out: из ZenMoney · 2 траты за три месяца',
       'Продукты: в ZenMoney «Groceries» · 1 трата за три месяца',
       'Дети: своя · 1 трата за три месяца',
+      'Salary: из ZenMoney · 1 доход за три месяца',
       'Correction: из ZenMoney · за три месяца трат нет',
     ]);
     assert.ok(page.indexOf('Скрытые') < page.indexOf('Correction'));
@@ -73,6 +76,44 @@ describe('settings page', () => {
 
     const own = render(settings, { edit: kids.id });
     assert.ok(own.includes(`formaction="/categories/${kids.id}/delete"`));
+  });
+});
+
+describe('settings page incomes', () => {
+  it('lists income categories apart, with how many incomes went into each, and a form for a new one', () => {
+    using settings = new Settings(':memory:');
+    settings.addOwnCategory('Кэшбэк', 'income');
+    const page = render(settings);
+
+    const incomes = page.slice(page.indexOf('aria-label="Категории доходов"'));
+    const rows = [...incomes.matchAll(/<b>([^<]*)<\/b><small>([^<]*)<\/small>/g)].map((m) => `${m[1]}: ${m[2]}`);
+    assert.deepEqual(rows, ['Salary: из ZenMoney · 1 доход за три месяца', 'Correction: из ZenMoney · за три месяца доходов нет', 'Кэшбэк: своя · за три месяца доходов нет']);
+    assert.ok(incomes.includes('id="income-category-new"') && incomes.includes('name="kind" value="income"'));
+    assert.ok(page.includes('У доходов свои категории, их 3.'));
+    assert.ok(!page.slice(0, page.indexOf('aria-label="Категории доходов"')).includes('Кэшбэк'), 'not among the spending ones');
+  });
+
+  it('opens a category shared by expenses and incomes in the list it was opened from', () => {
+    using settings = new Settings(':memory:');
+    const page = render(settings, { edit: 'income-correction' });
+
+    assert.ok(page.includes('id="income-category-correction"') && page.includes('action="/categories/correction"'));
+    assert.equal(page.match(/action="\/categories\/correction"/g)?.length, 1, 'the spending one stays a row');
+    assert.ok(page.includes('href="/settings?edit=correction"'));
+  });
+
+  it('adds an own income category and shows its error in the income list', () => {
+    using settings = new Settings(':memory:');
+    const form = (fields: Record<string, string>) => new URLSearchParams(fields);
+
+    assert.deepEqual(submitSettings(settings, data, '/categories', form({ title: 'Кэшбэк', kind: 'income' })), { status: 'saved' });
+    assert.deepEqual(settings.categorySetup().own, [{ id: 'own-1', title: 'Кэшбэк', hidden: false, kind: 'income' }]);
+    assert.deepEqual(submitSettings(settings, data, '/categories/salary/hide', form({ kind: 'income' })), { status: 'saved' });
+
+    const result = submitSettings(settings, data, '/categories', form({ title: '', kind: 'income' }));
+    assert.ok(result.status === 'invalid');
+    const page = render(settings, { form: result.form });
+    assert.ok(page.indexOf('Укажите название') > page.indexOf('aria-label="Категории доходов"'));
   });
 });
 
@@ -136,7 +177,7 @@ describe('submitSettings', () => {
         ['groceries', { title: 'Продукты', hidden: false }],
         ['correction', { title: null, hidden: true }],
       ]),
-      own: [{ id: 'own-1', title: 'Савва', hidden: false }],
+      own: [{ id: 'own-1', title: 'Савва', hidden: false, kind: 'expense' }],
     });
 
     submitSettings(settings, data, '/categories/groceries', form({ title: 'Groceries' }));
@@ -151,7 +192,7 @@ describe('submitSettings', () => {
     using settings = new Settings(':memory:');
     settings.addOwnCategory('Дети');
 
-    assert.deepEqual(submitSettings(settings, data, '/categories', form({ title: ' ' })), { status: 'invalid', form: { id: null, title: ' ', error: 'Укажите название' } });
+    assert.deepEqual(submitSettings(settings, data, '/categories', form({ title: ' ' })), { status: 'invalid', form: { id: null, kind: 'expense', title: ' ', error: 'Укажите название' } });
     assert.equal(submitSettings(settings, data, '/categories/own-1', form({ title: '' })).status, 'invalid');
     assert.deepEqual(submitSettings(settings, data, '/categories/nope', form({ title: 'Нет' })), { status: 'missing' });
     assert.deepEqual(submitSettings(settings, data, '/categories/groceries/delete', form()), { status: 'missing' });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { filterOperations, listOperations, PURCHASE_CATEGORY, REGULAR_CATEGORY, spendingByCategory } from '../src/ledger.ts';
+import { filterOperations, listOperations, PURCHASE_CATEGORY, REGULAR_CATEGORY, byCategory } from '../src/ledger.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { account, RUB, tag, transaction, USD, user } from './fixtures.ts';
 
@@ -150,7 +150,7 @@ describe('listOperations with banks and the user’s sorting', () => {
     assert.deepEqual(operations.map((o) => o.payee).sort(), ['Кирилл А.', 'Основной → Наличные', 'Основной → Сбер']);
   });
 
-  it('gives an expense the category the user picked over ZenMoney’s, or Регулярные траты for a regular payment', () => {
+  it('gives an expense or an income the category the user picked over ZenMoney’s, or Регулярные траты for a regular payment', () => {
     const sorting = {
       categorizations: new Map([
         ['picked', { tag: food.id }],
@@ -186,7 +186,7 @@ describe('listOperations with banks and the user’s sorting', () => {
         ['Александр А.', REGULAR_CATEGORY.title, 'Мастерская аренда'],
         ['Мастерская аренда', REGULAR_CATEGORY.title, 'Мастерская аренда'],
         ['Без привязки', null, null],
-        ['Зарплата', null, null],
+        ['Зарплата', 'Продукты', null],
       ],
     );
   });
@@ -206,7 +206,7 @@ describe('listOperations with banks and the user’s sorting', () => {
       purchases: [{ id: 4, title: 'Ботинки Савве' }],
       categories: {
         changes: new Map([[transport.id, { title: 'Машина и проезд', hidden: true }]]),
-        own: [{ id: 'own-1', title: 'Дети', hidden: false }],
+        own: [{ id: 'own-1', title: 'Дети', hidden: false, kind: 'expense' as const }],
       },
     };
     const operations = listOperations(
@@ -236,19 +236,31 @@ describe('listOperations with banks and the user’s sorting', () => {
     );
   });
 
-  it('leaves out expenses the user said not to count at all, unless asked for them, and keeps how the bank named the payee', () => {
+  it('leaves out expenses and incomes the user said not to count at all, unless asked for them, and keeps how the bank named the payee', () => {
     const transactions = {
       ...data,
       transaction: [
-        transaction({ id: 'cash', created: 2, outcome: 120_000 }),
+        transaction({ id: 'cash', created: 3, outcome: 120_000 }),
+        transaction({ id: 'debt', created: 2, income: 22_000, payee: 'Сергей В.' }),
         transaction({ id: 'shop', created: 1, outcome: 473, payee: 'Пятёрочка', originalPayee: 'PYATEROCHKA 9076' }),
         transaction({ id: 'same', created: 0, outcome: 100, payee: 'Lenta', originalPayee: 'LENTA' }),
       ],
     };
-    const sorting = { categorizations: new Map(), regular: [], marks: new Map([['cash', 'ignored' as const], ['shop', 'outside' as const]]) };
+    const sorting = {
+      categorizations: new Map(),
+      regular: [],
+      marks: new Map([
+        ['cash', 'ignored' as const],
+        ['debt', 'ignored' as const],
+        ['shop', 'outside' as const],
+      ]),
+    };
 
     assert.deepEqual(listOperations(transactions, october, sorting).map((o) => [o.id, o.originalPayee]), [['shop', 'PYATEROCHKA 9076'], ['same', null]]);
-    assert.deepEqual(listOperations(transactions, october, sorting, { withIgnored: true }).map((o) => [o.id, o.ignored]), [['cash', true], ['shop', false], ['same', false]]);
+    assert.deepEqual(
+      listOperations(transactions, october, sorting, { withIgnored: true }).map((o) => [o.id, o.ignored]),
+      [['cash', true], ['debt', true], ['shop', false], ['same', false]],
+    );
   });
 
   it('sums expenses by category, largest first', () => {
@@ -267,7 +279,7 @@ describe('listOperations with banks and the user’s sorting', () => {
     );
 
     assert.deepEqual(
-      spendingByCategory(operations).map((c) => [c.title, c.amount]),
+      byCategory(operations).map((c) => [c.title, c.amount]),
       [
         ['Без категории', 400],
         ['Транспорт', 350],

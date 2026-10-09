@@ -13,8 +13,8 @@ enum OperationsFilter: Hashable {
     }
 }
 
-/// Operations of a month by day, filtered by kind, category and text, as on the web page; an expense opens to be
-/// marked. «Ждут разбора» shows the expenses that came without a category instead, with suggestions to accept, and
+/// Operations of a month by day, filtered by kind, category and text, as on the web page; an expense or an income opens
+/// to be marked. «Ждут разбора» shows the expenses that came without a category instead, with suggestions to accept, and
 /// what was sorted.
 struct OperationsView: View {
     @Binding var filter: OperationsFilter
@@ -62,7 +62,7 @@ struct OperationsView: View {
                 .overlay(alignment: .top) { TopFade(height: geometry.safeAreaInsets.top) }
             }
             .sheet(isPresented: $showCategories) {
-                CategorySpendingSheet(categories: s.categories, symbol: s.symbol, selected: s.category) { picked in
+                CategorySpendingSheet(title: s.categoriesTitle, categories: s.categories, symbol: s.symbol, selected: s.category) { picked in
                     category = picked
                 }
             }
@@ -255,8 +255,9 @@ struct PendingList: View {
     }
 }
 
-/// The month's spending by category with each one's share; a category filters the operations.
+/// The month's spending, or incomes, by category with each one's share; a category filters the operations.
 struct CategorySpendingSheet: View {
+    let title: String
     let categories: [OperationsScreen.CategorySpending]
     let symbol: String
     let selected: String?
@@ -264,7 +265,7 @@ struct CategorySpendingSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        LilacForm(title: "Расходы по категориям") {
+        LilacForm(title: title) {
             if selected != nil {
                 LilacAddRow(label: "Все категории") {
                     pick(nil)

@@ -44,7 +44,7 @@ import {
   type MarkingChoice,
   type SavedMarking,
 } from './pages/marking.ts';
-import { loadOperations, operationCategory, operationLine } from './pages/operations.ts';
+import { loadOperations, netOf, operationCategory, operationLine } from './pages/operations.ts';
 import { loadRegular, regularLine, regularTotalNote, STATUS_TONE, timeline, type Placed } from './pages/regular.ts';
 import { categoryDetails, loadBudgetSetup, loadSettingsPage } from './pages/settings.ts';
 import { loadUncategorized, suggestedChoice, suggestionName } from './pages/uncategorized.ts';
@@ -305,16 +305,17 @@ export function monthScreen(data: EntityCollections, saved: SavedBudget, options
 /**
  * An expense opened to be marked: when and from where it was paid with whatever else the bank said, then the choices
  * as the pages offer them, each with an icon for the app's tiles. Each choice posts to /api/spending/:id/:choice.
- * Null when there is no such expense.
+ * An income opens the same way, with nothing to pay, the income categories, and counted or not. Null when there is no
+ * such expense or income.
  */
 export function spendingScreen(data: EntityCollections, saved: SavedMarking, options: { today: DateString; id: string }) {
   const expenses = allExpenses(data, saved);
-  // Expenses that do not count are marked too, from the operations, so they are looked up among all of them.
-  const o = listOperations(data, { from: '0000-01-01', to: '9999-12-31' }, saved, { withIgnored: true }).find((e) => e.id === options.id && e.kind === 'expense');
+  // Operations that do not count are marked too, from the operations, so they are looked up among all of them.
+  const o = listOperations(data, { from: '0000-01-01', to: '9999-12-31' }, saved, { withIgnored: true }).find((e) => e.id === options.id && e.kind !== 'transfer');
   if (!o) return null;
   const marking = loadMarking(data, saved, expenses, options.today);
   const suggestion = o.category === null ? marking.suggest(o) : null;
-  const payments = paymentOptions(marking, o, suggestion);
+  const payments = o.kind === 'expense' ? paymentOptions(marking, o, suggestion) : { choices: [], others: [] };
   const categories = categoryOptions(marking, o, suggestion);
   const colored = (c: MarkingChoice): MarkingChoice => (c.color ? { ...c, color: colorOf(c.color) } : c);
   const regular = new Map(saved.regular.map((e) => [`regular-${e.id}`, e]));
@@ -325,8 +326,11 @@ export function spendingScreen(data: EntityCollections, saved: SavedMarking, opt
     return e ? entryIcon(e.icon, e.title) : categoryIcon(purchases.get(choice)?.title ?? '');
   };
   const time = timeOn(o.date, o.created);
+  const hints = o.kind === 'income' ? INCOME_HINTS : ENVELOPE_HINTS;
   return {
     id: o.id,
+    /** expense or income: an income pays nothing and has income categories. */
+    kind: o.kind,
     title: markingTitle(o),
     amount: o.amount,
     symbol: marking.symbol,
@@ -350,27 +354,33 @@ export function spendingScreen(data: EntityCollections, saved: SavedMarking, opt
     categories: { choices: categories.choices.map((c) => ({ ...colored(c), icon: categoryIcon(c.label) })), empty: categories.empty },
     /** What the suggestion is, when there is one; its choice is marked as suggested. */
     hint: suggestion ? `Похоже на ${suggestionName(suggestion)}` : null,
-    envelopes: envelopeOptions(marking, o).map((c) => ({ ...c, detail: ENVELOPE_HINTS[c.choice as Envelope] })),
+    envelopes: envelopeOptions(marking, o).map((c) => ({ ...c, detail: hints[c.choice] })),
     undo: undoChoices(marking, o),
   };
 }
 
 /** What each place an expense counts in means, under its name on the app's marking sheet. */
-const ENVELOPE_HINTS: Record<Envelope, string> = {
+const ENVELOPE_HINTS: Record<string, string> = {
   week: 'Учесть в текущей неделе',
   extra: 'Из дополнительных месяца',
   outside: 'Не учитывать в недельном бюджете',
   ignored: 'Например, перевод или снятые наличные',
 };
 
+/** The same for an income: counted among the incomes and savings of its month, or not at all. */
+const INCOME_HINTS: Record<string, string> = {
+  counted: 'В полученном и накоплениях месяца',
+  ignored: 'Например, вернули долг или командировочные',
+};
+
 /**
  * What an expense is in the app's list of operations, as a chip under its amount: waiting for a category, paying a
  * regular expense, in the extras, outside the budget or not counted. An ordinary expense of the week has none, and
- * neither have incomes and transfers.
+ * neither have transfers and incomes, unless an income is not counted.
  */
 function operationChip(m: Pick<SavedMarking, 'marks' | 'purchases'>, o: Operation): { label: string; tone: Tone } | null {
-  if (o.kind !== 'expense') return null;
   if (o.ignored) return { label: 'Не учитывается', tone: 'gray' };
+  if (o.kind !== 'expense') return null;
   if (o.category === null) return { label: 'Ждёт разбора', tone: 'red' };
   if (o.regular) return { label: 'Регулярный', tone: 'violet' };
   const envelope = envelopeOf(m, o);
@@ -379,7 +389,7 @@ function operationChip(m: Pick<SavedMarking, 'marks' | 'purchases'>, o: Operatio
   return null;
 }
 
-/** Operations of a month by day, filtered as on the page, and the month's spending by category. */
+/** Operations of a month by day, filtered as on the page, and the month's spending, or incomes, by category. */
 export function operationsScreen(
   data: EntityCollections,
   saved: SavedMarking,
@@ -409,7 +419,7 @@ export function operationsScreen(
     totals: { expense: sum('expense'), income: sum('income'), count: d.operations.length },
     days: byDay(d.operations, (o) => o.date, options.today).map((day) => ({
       ...day,
-      net: day.items.reduce((s, o) => s + (o.kind === 'income' ? o.amount : o.kind === 'expense' && !o.ignored ? -o.amount : 0), 0),
+      net: day.items.reduce((s, o) => s + netOf(o), 0),
       items: day.items.map((o) => ({
         ...row({
           id: o.id,
@@ -423,7 +433,7 @@ export function operationsScreen(
         comment: writtenAbout(o),
         hold: o.hold,
         original: o.original ? { amount: o.original.amount, symbol: o.original.instrument.symbol } : null,
-        spending: o.kind === 'expense' ? o.id : null,
+        spending: o.kind !== 'transfer' ? o.id : null,
         chip: operationChip(saved, o),
       })),
     })),
@@ -432,13 +442,15 @@ export function operationsScreen(
     empty: filtered
       ? 'Ничего не нашлось. Попробуйте другой запрос или уберите фильтры.'
       : `В ${monthName(d.month, 'prepositional')} операций нет. Новые появятся после синхронизации ZenMoney.`,
+    /** What the categories are: Расходы по категориям, or Доходы по категориям when only incomes are shown. */
+    categoriesTitle: d.categoriesTitle,
     categories: d.categories.map((c) => ({
       id: c.id ?? 'none',
       title: c.title,
       icon: categoryIcon(c.title),
       color: colorOf(categoryColor(c.id, c.color)),
       amount: c.amount,
-      share: d.expense > 0 ? c.amount / d.expense : 0,
+      share: d.categoryTotal > 0 ? c.amount / d.categoryTotal : 0,
     })),
   };
 }
@@ -662,22 +674,29 @@ export function budgetSettingsScreen(data: EntityCollections, saved: Pick<SavedM
   };
 }
 
-/** Categories in the order marking offers them, the hidden ones apart. */
+/**
+ * Categories in the order marking offers them, the hidden ones apart, and the income categories the same way. A new
+ * income category posts to /api/categories with kind income.
+ */
 export function categoriesScreen(data: EntityCollections, saved: SavedMarking, options: { today: DateString }) {
   const d = loadSettingsPage(data, saved, options);
-  const item = ({ category: c, count }: (typeof d.categories)[number]) => ({
+  const item = ({ category: c, kind, count }: (typeof d.categories)[number]) => ({
     ...row({
-      id: `category-${c.id}`,
+      id: `${kind === 'income' ? 'income-' : ''}category-${c.id}`,
       title: c.title,
-      details: categoryDetails(c, count),
+      details: categoryDetails(c, count, kind),
       icon: categoryIcon(c.title),
       color: c.hidden ? toneColor('gray') : categoryColor(c.id, c.color),
       muted: c.hidden,
     }),
-    category: { id: c.id, name: c.name, zenmoneyTitle: c.zenmoneyTitle, hidden: c.hidden },
+    category: { id: c.id, name: c.name, zenmoneyTitle: c.zenmoneyTitle, hidden: c.hidden, kind },
   });
   return {
     shown: d.categories.filter((c) => !c.category.hidden).map(item),
     hidden: d.categories.filter((c) => c.category.hidden).map(item),
+    income: {
+      shown: d.incomeCategories.filter((c) => !c.category.hidden).map(item),
+      hidden: d.incomeCategories.filter((c) => c.category.hidden).map(item),
+    },
   };
 }

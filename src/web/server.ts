@@ -198,7 +198,7 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     using settings = new Settings(SETTINGS_PATH);
     const result = submitMarking(settings, loadCollections(demo, today), path, body);
     if (result.status === 'saved') return { status: 'saved', next: backTo(request) };
-    if (result.status === 'missing') return { status: 'missing', message: 'Такой траты, категории, регулярной траты или покупки нет' };
+    if (result.status === 'missing') return { status: 'missing', message: 'Такой траты, дохода, категории, регулярной траты или покупки нет' };
     // The page's field allows no more than the server takes, so only a hand-made form gets here.
     return { status: 'invalid', errors: { description: result.error }, page: () => `<p>${escape(result.error)}</p>` };
   }

@@ -1,7 +1,7 @@
 // Expenses are sorted in the app: into a category when ZenMoney has none for them, or as the payment of a regular
-// expense or of a purchase planned in a week. What the user picks is kept by src/settings.ts and applied by
-// listOperations; this module suggests a pick for each expense from the picks before it and from the amounts and days
-// of regular expenses, and lists what an expense may have paid.
+// expense or of a purchase planned in a week; incomes only into a category. What the user picks is kept by
+// src/settings.ts and applied by listOperations; this module suggests a pick for each expense or income from the picks
+// before it and from the amounts and days of regular expenses, and lists what an expense may have paid.
 
 import { daysBetween } from './dates.ts';
 import { isUntitled, type Operation } from './ledger.ts';
@@ -24,7 +24,8 @@ const PURCHASE_WINDOW = 14;
 
 /**
  * Builds a function that suggests where an expense goes. `history` is expenses with their categories and regular
- * expenses, such as all of them from listOperations. The suggestion is, in this order:
+ * expenses, such as all of them from listOperations; for incomes it is incomes, without regular expenses. The
+ * suggestion is, in this order:
  * - the regular expense the same payee was paid for the same amount before;
  * - a regular expense of the same amount due within PAYMENT_WINDOW days;
  * - the category the payee gets most often;
@@ -119,10 +120,16 @@ export function paymentChoices(
   return choices.sort((a, b) => a.rank - b.rank || distance(a.choice.left) - distance(b.choice.left) || a.days - b.days).map((c) => c.choice);
 }
 
-/** The payee without case, digits and punctuation, so that Lenta 089 and Lenta 139 are one shop; null when there is none. */
+/**
+ * The payee without case, digits and punctuation, so that Lenta 089 and Lenta 139 are one shop. Without a payee the
+ * bank's comment stands for it, since operations such as interest or cashback come with only a comment: Проценты на
+ * остаток. An operation without a payee is called by its kind, or by what it was put into once sorted. Null when there
+ * is neither payee nor comment.
+ */
 function payeeKey(o: Operation): string | null {
-  if (isUntitled(o)) return null;
-  return o.payee.toLocaleLowerCase('ru').replace(/[^\p{L}]+/gu, ' ').trim() || null;
+  const named = !isUntitled(o) && ![o.category?.title, o.regular?.title, o.purchase?.title].includes(o.payee);
+  const name = named ? o.payee : o.comment;
+  return name?.toLocaleLowerCase('ru').replace(/[^\p{L}]+/gu, ' ').trim() || null;
 }
 
 function sameAmount(a: number, b: number): boolean {

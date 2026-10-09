@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { OWN_CATEGORY_PREFIX, type CategorySetup, type OwnCategory } from './categories.ts';
+import { OWN_CATEGORY_PREFIX, type CategoryKind, type CategorySetup, type OwnCategory } from './categories.ts';
 import type { Categorization } from './categorization.ts';
 import { isIncomeModel, type Income, type IncomeInput } from './income.ts';
 import type { RegularExpense, RegularExpenseInput } from './regular.ts';
@@ -49,7 +49,7 @@ const SCHEMA = `
     envelope TEXT NOT NULL CHECK (envelope IN ('extra', 'outside'))
   ) STRICT;
 
-  -- ZenMoney expenses that came without a category, put into one or linked to the regular expense they paid.
+  -- ZenMoney expenses put into a category or linked to the regular expense they paid, and incomes put into a category.
   CREATE TABLE IF NOT EXISTS categorization (
     transaction_id TEXT PRIMARY KEY,
     tag_id TEXT,
@@ -64,12 +64,13 @@ const SCHEMA = `
     purchase_id INTEGER NOT NULL
   ) STRICT;
 
-  -- ZenMoney spending the user said not to count at all, such as cash taken out that is only lying in a drawer.
+  -- ZenMoney spending the user said not to count at all, such as cash taken out that is only lying in a drawer, and
+  -- incomes not to count, such as a debt paid back.
   CREATE TABLE IF NOT EXISTS ignored_spending (
     transaction_id TEXT PRIMARY KEY
   ) STRICT;
 
-  -- What the user wrote about ZenMoney expenses in the app, such as whom a present was for.
+  -- What the user wrote about ZenMoney expenses and incomes in the app, such as whom a present was for.
   CREATE TABLE IF NOT EXISTS spending_description (
     transaction_id TEXT PRIMARY KEY,
     description TEXT NOT NULL
@@ -82,7 +83,8 @@ const SCHEMA = `
     hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))
   ) STRICT;
 
-  -- Categories the user added in the app; expenses are put into one as own-<id>. Ids are never reused.
+  -- Categories the user added in the app, for expenses or for incomes (kind); operations are put into one as
+  -- own-<id>. Ids are never reused.
   CREATE TABLE IF NOT EXISTS own_category (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -109,6 +111,7 @@ const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> 
   ['regular_expense', 'end_date', 'TEXT'],
   ['regular_expense', 'icon', 'TEXT'],
   ['purchase', 'kind', "TEXT NOT NULL DEFAULT 'flexible' CHECK (kind IN ('required', 'flexible'))"],
+  ['own_category', 'kind', "TEXT NOT NULL DEFAULT 'expense' CHECK (kind IN ('expense', 'income'))"],
 ];
 
 /**
@@ -341,7 +344,10 @@ export class Settings {
     });
   }
 
-  /** Envelopes of spending moved out of where it counts by default, or not counted at all, by ZenMoney transaction id. */
+  /**
+   * Envelopes of spending moved out of where it counts by default, or not counted at all, by ZenMoney transaction id;
+   * an income not counted is 'ignored' too.
+   */
   spendingMarks(): Map<string, Envelope> {
     const marks = this.#db
       .prepare('SELECT transaction_id, envelope FROM spending_mark')
@@ -364,7 +370,7 @@ export class Settings {
     });
   }
 
-  /** Where the user put expenses: a category or the regular expense they paid, by ZenMoney transaction id. */
+  /** Where the user put expenses and incomes: a category or the regular expense they paid, by ZenMoney transaction id. */
   categorizations(): Map<string, Categorization> {
     return new Map(
       this.#db
@@ -420,7 +426,7 @@ export class Settings {
     });
   }
 
-  /** What the user wrote about expenses, by ZenMoney transaction id. */
+  /** What the user wrote about expenses and incomes, by ZenMoney transaction id. */
   spendingDescriptions(): Map<string, string> {
     return new Map(
       this.#db
@@ -452,16 +458,23 @@ export class Settings {
         .map((row) => [String(row.tag_id), { title: row.title === null ? null : String(row.title), hidden: row.hidden === 1 }] as const),
     );
     const own = this.#db
-      .prepare('SELECT id, title, hidden FROM own_category')
+      .prepare('SELECT id, title, hidden, kind FROM own_category')
       .all()
-      .map((row): OwnCategory => ({ id: `${OWN_CATEGORY_PREFIX}${Number(row.id)}`, title: String(row.title), hidden: row.hidden === 1 }))
+      .map(
+        (row): OwnCategory => ({
+          id: `${OWN_CATEGORY_PREFIX}${Number(row.id)}`,
+          title: String(row.title),
+          hidden: row.hidden === 1,
+          kind: row.kind === 'income' ? 'income' : 'expense',
+        }),
+      )
       .sort((a, b) => a.title.localeCompare(b.title, 'ru'));
     return { changes, own };
   }
 
-  addOwnCategory(title: string): OwnCategory {
-    const { lastInsertRowid } = this.#db.prepare('INSERT INTO own_category (title) VALUES (?)').run(title);
-    return { id: `${OWN_CATEGORY_PREFIX}${Number(lastInsertRowid)}`, title, hidden: false };
+  addOwnCategory(title: string, kind: CategoryKind = 'expense'): OwnCategory {
+    const { lastInsertRowid } = this.#db.prepare('INSERT INTO own_category (title, kind) VALUES (?, ?)').run(title, kind);
+    return { id: `${OWN_CATEGORY_PREFIX}${Number(lastInsertRowid)}`, title, hidden: false, kind };
   }
 
   /**
@@ -489,7 +502,7 @@ export class Settings {
     return true;
   }
 
-  /** Deletes one of the user's own categories; the expenses put into it are left without a category again. */
+  /** Deletes one of the user's own categories; the operations put into it are left without a category again. */
   deleteOwnCategory(id: string): boolean {
     const own = ownId(id);
     if (own === null) return false;

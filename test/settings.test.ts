@@ -194,8 +194,8 @@ describe('Settings', () => {
         ['correction', { title: null, hidden: true }],
       ]),
       own: [
-        { id: 'own-2', title: 'Бассейн', hidden: false },
-        { id: 'own-1', title: 'Дети', hidden: false },
+        { id: 'own-2', title: 'Бассейн', hidden: false, kind: 'expense' },
+        { id: 'own-1', title: 'Дети', hidden: false, kind: 'expense' },
       ],
     });
 
@@ -204,7 +204,7 @@ describe('Settings', () => {
     assert.equal(settings.renameCategory(kids.id, null), false, 'an own category needs a title');
     assert.equal(settings.hideCategory(kids.id, true), true);
     assert.deepEqual(settings.categorySetup().changes.get('groceries'), { title: null, hidden: false });
-    assert.deepEqual(settings.categorySetup().own.find((c) => c.id === kids.id), { id: kids.id, title: 'Савва', hidden: true });
+    assert.deepEqual(settings.categorySetup().own.find((c) => c.id === kids.id), { id: kids.id, title: 'Савва', hidden: true, kind: 'expense' });
 
     settings.categorize('tx-1', { tag: kids.id });
     settings.categorize('tx-2', { tag: 'groceries' });
@@ -313,6 +313,30 @@ describe('Settings', () => {
       assert.deepEqual([...settings.purchasePayments()], [['tx-1', 1]]);
       assert.equal(settings.categorySetup().changes.get('cafe')?.title, 'Кафе');
       assert.deepEqual([...settings.spendingDescriptions()], [['tx-1', 'Кофе с Машей']]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('adds the kind of own categories to a file made before it, keeping them for expenses', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
+    try {
+      const path = join(dir, 'settings.db');
+      {
+        using db = new DatabaseSync(path);
+        db.exec(`CREATE TABLE own_category (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))
+        ) STRICT`);
+        db.exec(`INSERT INTO own_category (title) VALUES ('Подписки')`);
+      }
+      using settings = new Settings(path);
+      settings.addOwnCategory('Кэшбэк', 'income');
+      assert.deepEqual(settings.categorySetup().own, [
+        { id: 'own-2', title: 'Кэшбэк', hidden: false, kind: 'income' },
+        { id: 'own-1', title: 'Подписки', hidden: false, kind: 'expense' },
+      ]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

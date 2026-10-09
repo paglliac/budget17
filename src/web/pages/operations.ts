@@ -1,13 +1,14 @@
-// Operations of a month by day, filtered by kind, category and text, with spending by category on the side.
-// Filters live in the URL, so any view can be linked to, e.g. from a category on the overview. Categories picked in
-// the app win over ZenMoney's, and payments of regular expenses go under Регулярные траты. An expense opens in place
-// by ?edit=spending-<ZenMoney id> to be marked as on every page (see marking.ts). Expenses the user said not to count
-// at all are listed only here, quieter, so they can be found and counted again; no sum takes them in.
+// Operations of a month by day, filtered by kind, category and text, with spending by category on the side, or
+// incomes by category when only incomes are shown. Filters live in the URL, so any view can be linked to, e.g. from a
+// category on the overview. Categories picked in the app win over ZenMoney's, and payments of regular expenses go
+// under Регулярные траты. An expense or an income opens in place by ?edit=spending-<ZenMoney id> to be marked as on
+// every page (see marking.ts). Expenses and incomes the user said not to count at all are listed only here, quieter,
+// so they can be found and counted again; no sum takes them in.
 
 import { mainCurrency } from '../../balances.ts';
 import { categoryFinder } from '../../categories.ts';
 import { dateOf, daysInMonth, monthOf, type MonthString } from '../../dates.ts';
-import { filterOperations, listOperations, spendingByCategory, type CategorySpending, type Operation, type OperationFilter } from '../../ledger.ts';
+import { byCategory, filterOperations, listOperations, type CategorySpending, type Operation, type OperationFilter } from '../../ledger.ts';
 import type { OperationKind } from '../../operations.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
@@ -31,10 +32,13 @@ export interface OperationsData {
   operations: Operation[];
   /** How many operations of each kind pass the other filters. */
   counts: Record<OperationKind | 'all', number>;
-  /** Spending of the month by category, for the side panel. */
+  /** Spending of the month by category for the side panel, or incomes when only incomes are shown. */
   categories: CategorySpending[];
-  expense: number;
-  /** For an expense opened to mark it. */
+  /** What the side panel lists: Расходы по категориям or Доходы по категориям. */
+  categoriesTitle: string;
+  /** All that the side panel lists. */
+  categoryTotal: number;
+  /** For an expense or an income opened to mark it. */
   marking: Marking;
   /** What is open for marking: spending-<ZenMoney id>. */
   edit: string | null;
@@ -54,7 +58,8 @@ export function loadOperations(
   const kind = KINDS.find((k) => k === options.kind);
   const filter: OperationFilter = { kind, category: options.category || undefined, query: options.query?.trim() || undefined };
   const withoutKind = filterOperations(all, { ...filter, kind: undefined });
-  const categories = spendingByCategory(all.filter((o) => !o.ignored));
+  const incomes = kind === 'income';
+  const categories = byCategory(all.filter((o) => !o.ignored), incomes ? 'income' : 'expense');
   // Регулярные траты are not a ZenMoney category, so the title is looked up among the month's categories first.
   const category = categories.find((c) => c.id !== null && c.id === filter.category);
   const tags = new Map((data.tag ?? []).map((t) => [t.id, t]));
@@ -73,7 +78,8 @@ export function loadOperations(
       transfer: withoutKind.filter((o) => o.kind === 'transfer').length,
     },
     categories,
-    expense: categories.reduce((sum, c) => sum + c.amount, 0),
+    categoriesTitle: incomes ? 'Доходы по категориям' : 'Расходы по категориям',
+    categoryTotal: categories.reduce((sum, c) => sum + c.amount, 0),
     marking: loadMarking(data, sorting, allExpenses(data, sorting), options.today),
     edit: options.edit ?? null,
     symbol: mainCurrency(data).symbol,
@@ -126,10 +132,10 @@ export function renderOperations(d: OperationsData, href: Href): Html {
       feed(d, href, to),
     ],
     side: [
-      topBar({ crumbs: [{ label: 'Расходы по категориям' }] }),
+      topBar({ crumbs: [{ label: d.categoriesTitle }] }),
       d.categories.length
         ? categoryList({
-            label: 'Расходы по категориям',
+            label: d.categoriesTitle,
             symbol: d.symbol,
             items: d.categories.map((c) => {
               const id = c.id ?? 'none';
@@ -139,13 +145,13 @@ export function renderOperations(d: OperationsData, href: Href): Html {
                 icon: categoryIcon(c.title),
                 color: categoryColor(c.id, c.color),
                 amount: c.amount,
-                share: d.expense > 0 ? c.amount / d.expense : 0,
+                share: d.categoryTotal > 0 ? c.amount / d.categoryTotal : 0,
                 href: to({ category: active ? null : id }),
                 active,
               };
             }),
           })
-        : emptyState({ text: `В ${monthName(d.month, 'prepositional')} трат нет.` }),
+        : emptyState({ text: `В ${monthName(d.month, 'prepositional')} ${d.filter.kind === 'income' ? 'доходов' : 'трат'} нет.` }),
     ],
   });
 
@@ -156,7 +162,7 @@ export function operationsSentence(d: Pick<OperationsData, 'operations' | 'symbo
   const count = d.operations.length;
   if (count === 0) return 'Под эти условия операций нет.';
   const expense = d.operations.filter((o) => o.kind === 'expense' && !o.ignored).reduce((s, o) => s + o.amount, 0);
-  const income = d.operations.filter((o) => o.kind === 'income').reduce((s, o) => s + o.amount, 0);
+  const income = d.operations.filter((o) => o.kind === 'income' && !o.ignored).reduce((s, o) => s + o.amount, 0);
   const parts = [expense > 0 ? `потрачено ${money(expense, d.symbol)}` : '', income > 0 ? `получено ${money(income, d.symbol)}` : ''].filter(Boolean);
   const head = `${count} ${plural(count, ['операция', 'операции', 'операций'])}`;
   // The symbol may end with a dot of its own, as «руб.» does.
@@ -182,13 +188,19 @@ function feed(d: OperationsData, href: Href, to: (changes: { edit?: string | nul
       date,
       today: d.today,
       net: {
-        amount: operations.reduce((s, o) => s + (o.kind === 'income' ? o.amount : o.kind === 'expense' && !o.ignored ? -o.amount : 0), 0),
+        amount: operations.reduce((s, o) => s + netOf(o), 0),
         symbol: d.symbol,
       },
         rows: operations.map((o) => row(d, o, href, to)),
       }),
     ),
   });
+}
+
+/** What an operation adds to its day: an income, less an expense; a transfer or what does not count adds nothing. */
+export function netOf(o: Operation): number {
+  if (o.ignored || o.kind === 'transfer') return 0;
+  return o.kind === 'income' ? o.amount : -o.amount;
 }
 
 /** What an operation's row says under the payee: what it went for and from where, and its icon and colour. */
@@ -207,13 +219,14 @@ export function operationCategory(o: Operation): string {
   return o.regular?.title ?? o.purchase?.title ?? o.category?.title ?? (o.kind === 'income' ? 'Доход' : o.kind === 'transfer' ? 'Перевод' : 'Без категории');
 }
 
-/** An operation; an expense opens in place to be marked. */
+/** An operation; an expense or an income opens in place to be marked. */
 function row(d: OperationsData, o: Operation, href: Href, to: (changes: { edit?: string | null }) => string): Html {
   const key = `spending-${o.id}`;
-  const open = o.kind === 'expense' && d.edit === key;
+  const markable = o.kind !== 'transfer';
+  const open = markable && d.edit === key;
   const line = operationLine(o);
   return operationRow({
-    id: o.kind === 'expense' ? key : undefined,
+    id: markable ? key : undefined,
     title: o.payee,
     details: line.details,
     icon: line.icon,
@@ -225,7 +238,7 @@ function row(d: OperationsData, o: Operation, href: Href, to: (changes: { edit?:
     comment: writtenAbout(o) ?? undefined,
     hold: o.hold,
     muted: o.ignored,
-    href: o.kind === 'expense' ? to({ edit: open ? null : key }) : undefined,
+    href: markable ? to({ edit: open ? null : key }) : undefined,
     panel: open ? markingPanel(d.marking, o, href) : undefined,
     actions: open ? markingActions(d.marking, o, href) : undefined,
   });

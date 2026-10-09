@@ -79,6 +79,22 @@ describe('suggester', () => {
     assert.equal(name(suggest(expense('Расход', 40_000, '2026-10-09'))), 'Мастерская аренда', 'amount and day still count');
   });
 
+  it('takes the bank’s comment for the payee of an operation without one, such as interest on an income', () => {
+    const interest: Category = { id: 'interest', title: 'Проценты', color: null };
+    const income = (comment: string | null, date: string, sorted: Partial<Pick<Operation, 'category'>> = {}): Operation => ({
+      ...expense('Доход', 59, date, sorted),
+      kind: 'income',
+      comment,
+    });
+    // Once sorted, an operation without a payee is called by its category, as listOperations names it.
+    const sorted = { ...income('Проценты на остаток', '2026-09-04', { category: interest }), payee: 'Проценты' };
+    const suggest = suggester([sorted], []);
+
+    assert.equal(name(suggest(income('Проценты на остаток', '2026-10-04'))), 'Проценты');
+    assert.equal(suggest(income('Зачисление кэшбэка', '2026-10-04')), null);
+    assert.equal(suggest(income(null, '2026-10-04')), null);
+  });
+
   it('suggests no regular expense outside its dates', () => {
     const suggest = suggester([], [regular({ id: 9, title: 'Машина', amount: 91_000, day: 5, start: '2026-11-01' })]);
 

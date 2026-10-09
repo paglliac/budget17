@@ -1,15 +1,18 @@
-// The categories expenses are put into: ZenMoney's spending categories with the titles the user gave them in the
-// app, and the user's own. A hidden category is not offered when sorting expenses, but the expenses already in it
-// keep it. ZenMoney itself is never changed: what the user sets up is kept by src/settings.ts and applied here and in
-// listOperations. Categories are offered most popular first.
+// The categories operations are put into: ZenMoney's spending categories for expenses and its income categories for
+// incomes, with the titles the user gave them in the app, and the user's own of either kind. A hidden category is not
+// offered when sorting, but the operations already in it keep it. ZenMoney itself is never changed: what the user sets
+// up is kept by src/settings.ts and applied here and in listOperations. Categories are offered most popular first.
 
 import { addDays } from './dates.ts';
 import type { Operation } from './ledger.ts';
-import { categoryOf, topCategory, type Category } from './operations.ts';
+import { categoryOf, topCategory, type Category, type OperationKind } from './operations.ts';
 import type { DateString, Tag, TagId } from './zenmoney/types.ts';
 
 /** Ids of the user's own categories start with it, so they never clash with ZenMoney's. */
 export const OWN_CATEGORY_PREFIX = 'own-';
+
+/** What a category sorts: expenses or incomes. */
+export type CategoryKind = Exclude<OperationKind, 'transfer'>;
 
 /** A category the user added in the app. */
 export interface OwnCategory {
@@ -17,6 +20,7 @@ export interface OwnCategory {
   id: TagId;
   title: string;
   hidden: boolean;
+  kind: CategoryKind;
 }
 
 /** How the user set up categories in the app. */
@@ -29,7 +33,7 @@ export interface CategorySetup {
 /** ZenMoney's categories as they are. */
 export const NO_SETUP: CategorySetup = { changes: new Map(), own: [] };
 
-/** A category to sort expenses into. */
+/** A category to sort expenses or incomes into. */
 export interface CategoryEntry extends Category {
   /** Its own title, without its parent's: the one the user gave it, or ZenMoney's. */
   name: string;
@@ -38,18 +42,18 @@ export interface CategoryEntry extends Category {
   hidden: boolean;
 }
 
-/** How far back expenses count towards how popular a category is. */
+/** How far back operations count towards how popular a category is. */
 export const POPULAR_DAYS = 90;
 
 /**
- * ZenMoney's spending categories by title, a subcategory titled with its parent (Дом / Ремонт), then the user's own
- * by title.
+ * ZenMoney's spending categories, or its income categories for `kind` income, by title, a subcategory titled with its
+ * parent (Дом / Ремонт), then the user's own of that kind by title.
  */
-export function categoryCatalog(tags: readonly Tag[], setup: CategorySetup): CategoryEntry[] {
+export function categoryCatalog(tags: readonly Tag[], setup: CategorySetup, kind: CategoryKind = 'expense'): CategoryEntry[] {
   const byId = new Map(tags.map((t) => [t.id, t]));
   const name = (tag: Tag) => setup.changes.get(tag.id)?.title ?? tag.title;
   const zenmoney = tags
-    .filter((t) => t.showOutcome)
+    .filter((t) => (kind === 'income' ? t.showIncome : t.showOutcome))
     .map((t): CategoryEntry => {
       const parent = t.parent ? byId.get(t.parent) : undefined;
       return {
@@ -60,13 +64,15 @@ export function categoryCatalog(tags: readonly Tag[], setup: CategorySetup): Cat
         hidden: setup.changes.get(t.id)?.hidden ?? false,
       };
     });
-  const own = setup.own.map((c): CategoryEntry => ({ id: c.id, title: c.title, color: null, name: c.title, zenmoneyTitle: null, hidden: c.hidden }));
+  const own = setup.own
+    .filter((c) => c.kind === kind)
+    .map((c): CategoryEntry => ({ id: c.id, title: c.title, color: null, name: c.title, zenmoneyTitle: null, hidden: c.hidden }));
   const byTitle = (a: CategoryEntry, b: CategoryEntry) => a.title.localeCompare(b.title, 'ru');
   return [...zenmoney.sort(byTitle), ...own.sort(byTitle)];
 }
 
 /**
- * Finds a category by id with the title the user gave it: a ZenMoney one as its top-level category, since expenses
+ * Finds a category by id with the title the user gave it: a ZenMoney one as its top-level category, since operations
  * are counted by those, or one of the user's own.
  */
 export function categoryFinder(tags: ReadonlyMap<TagId, Tag>, setup: CategorySetup): (id: TagId) => Category | undefined {
@@ -80,18 +86,18 @@ export function categoryFinder(tags: ReadonlyMap<TagId, Tag>, setup: CategorySet
 }
 
 /**
- * The categories by how many expenses went into them over the last POPULAR_DAYS days, then over all time; those
- * with as many keep their order.
+ * The categories by how many operations went into them over the last POPULAR_DAYS days, then over all time; those
+ * with as many keep their order. `operations` are the expenses for spending categories, the incomes for income ones.
  */
 export function byPopularity<T extends Pick<Category, 'id'>>(
   categories: readonly T[],
-  expenses: ReadonlyArray<Pick<Operation, 'date' | 'category'>>,
+  operations: ReadonlyArray<Pick<Operation, 'date' | 'category'>>,
   today: DateString,
 ): T[] {
   const since = addDays(today, -POPULAR_DAYS);
   const recent = new Map<TagId, number>();
   const ever = new Map<TagId, number>();
-  for (const o of expenses) {
+  for (const o of operations) {
     if (!o.category) continue;
     ever.set(o.category.id, (ever.get(o.category.id) ?? 0) + 1);
     if (o.date >= since && o.date <= today) recent.set(o.category.id, (recent.get(o.category.id) ?? 0) + 1);
@@ -100,8 +106,8 @@ export function byPopularity<T extends Pick<Category, 'id'>>(
   return [...categories].sort((a, b) => count(recent, b) - count(recent, a) || count(ever, b) - count(ever, a));
 }
 
-/** How many expenses went into the category over the last POPULAR_DAYS days. */
-export function recentCount(category: Pick<Category, 'id'>, expenses: ReadonlyArray<Pick<Operation, 'date' | 'category'>>, today: DateString): number {
+/** How many of `operations` went into the category over the last POPULAR_DAYS days. */
+export function recentCount(category: Pick<Category, 'id'>, operations: ReadonlyArray<Pick<Operation, 'date' | 'category'>>, today: DateString): number {
   const since = addDays(today, -POPULAR_DAYS);
-  return expenses.filter((o) => o.category?.id === category.id && o.date >= since && o.date <= today).length;
+  return operations.filter((o) => o.category?.id === category.id && o.date >= since && o.date <= today).length;
 }

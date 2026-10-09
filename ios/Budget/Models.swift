@@ -279,6 +279,8 @@ struct Choice: Decodable, Hashable, Identifiable {
 
 struct SpendingScreen: Decodable, Hashable {
     let id: String
+    /// expense, or income: an income pays nothing, so it is sorted only into a category.
+    let kind: String
     let title: String
     let amount: Double
     let symbol: String
@@ -289,6 +291,7 @@ struct SpendingScreen: Decodable, Hashable {
     let description: String?
     /// What else the bank said, such as its comment or that it has not settled the expense yet.
     let notes: [String]
+    var isIncome: Bool { kind == "income" }
     let payments: Payments
     let categories: Categories
     /// What is suggested, such as Похоже на «Продукты».
@@ -318,7 +321,7 @@ struct OperationRow: Decodable, Hashable, Identifiable {
     let comment: String?
     let hold: Bool
     let original: Original?
-    /// Set for an expense, which opens to be marked.
+    /// Set for an expense or an income, which opens to be marked.
     let spending: String?
     /// What an expense is when it is not an ordinary one of the week, such as Ждёт разбора.
     let chip: Chip?
@@ -368,6 +371,8 @@ struct OperationsScreen: Decodable {
     let totals: Totals
     let days: [OperationDay]
     let empty: String
+    /// Расходы по категориям, or Доходы по категориям when only incomes are shown.
+    let categoriesTitle: String
     let categories: [CategorySpending]
     /// Expenses of the month that wait for a category.
     let pending: Int
@@ -531,6 +536,8 @@ struct CategoryItem: Decodable, Hashable, Identifiable {
         /// nil for one of the user's own.
         let zenmoneyTitle: String?
         let hidden: Bool
+        /// expense or income: what the category sorts.
+        let kind: String
     }
 
     init(from decoder: Decoder) throws {
@@ -542,6 +549,13 @@ struct CategoryItem: Decodable, Hashable, Identifiable {
 struct CategoriesScreen: Decodable {
     let shown: [CategoryItem]
     let hidden: [CategoryItem]
+    /// The income categories the same way.
+    let income: Group
+
+    struct Group: Decodable {
+        let shown: [CategoryItem]
+        let hidden: [CategoryItem]
+    }
 }
 
 /// The day a week begins on, which posts to /api/budget/week-start/:day.

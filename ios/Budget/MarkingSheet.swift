@@ -4,8 +4,9 @@ import SwiftUI
 /// suggested. Then what it was for — a category, or the payment of a regular expense or a purchase it made — alone on a
 /// card; a tap on it unfolds all of them as tiles and cards to pick another, and a pick folds them back. While nothing
 /// is picked they are unfolded. Under it what the user wrote about the expense, and at the bottom where it counts: the
-/// place picked alone on a large card, which unfolds the others the same way. Opened from the expenses that wait for a category, it steps through them: «1 из 4». Choices post to
-/// /api/spending/:id/:choice, the description to /api/spending/:id/description when its field is left.
+/// place picked alone on a large card, which unfolds the others the same way. Opened from the expenses that wait for a category, it steps through them: «1 из 4». An income
+/// opens the same way, only it pays nothing, so it takes just a category, and it counts among the incomes or not at all.
+/// Choices post to /api/spending/:id/:choice, the description to /api/spending/:id/description when its field is left.
 struct MarkingSheet: View {
     enum Mode: Hashable { case category, payment }
 
@@ -158,6 +159,7 @@ struct MarkingSheet: View {
     }
 
     private func shownMode(_ s: SpendingScreen) -> Mode {
+        if s.isIncome { return .category }
         if let mode { return mode }
         let paid = s.payments.choices.contains { $0.isCurrent || $0.isSuggested }
         return paid && s.categories.choices.allSatisfy { !$0.isCurrent } ? .payment : .category
@@ -209,17 +211,23 @@ struct MarkingSheet: View {
 
     // MARK: - Parts
 
+    /// The icon and colour of what is picked: the payment, the category, or for neither an arrow coming in for an income
+    /// and a grey tag for an expense.
+    private func look(_ s: SpendingScreen) -> (icon: String, color: Color) {
+        if let payment = currentPayment(s) { return (payment.icon, Palette.color("violet")) }
+        if let category = currentCategory(s) { return (category.icon ?? "tag", Palette.color(category.color ?? "gray")) }
+        return s.isIncome ? ("arrowDownLeft", Palette.color("green")) : ("tag", Palette.color("gray"))
+    }
+
     /// The expense in the middle: what it is for on a large disc, the exact amount, whom it went to, when and from where,
     /// what else the bank said and what is suggested.
     private func header(_ s: SpendingScreen) -> some View {
-        let payment = currentPayment(s)
-        let category = currentCategory(s)
-        let color = Palette.color(payment != nil ? "violet" : (category?.color ?? "gray"))
+        let (icon, color) = look(s)
         return VStack(spacing: 6) {
             ZStack {
                 Circle().fill(Lilac.surface).frame(width: 108, height: 108).shadow(color: .black.opacity(0.07), radius: 16, y: 6)
                 Circle().fill(color.opacity(0.15)).frame(width: 60, height: 60)
-                Image(systemName: Icons.symbol(payment?.icon ?? category?.icon ?? "tag")).font(.system(size: 24, weight: .semibold)).foregroundStyle(color)
+                Image(systemName: Icons.symbol(icon)).font(.system(size: 24, weight: .semibold)).foregroundStyle(color)
             }
             .padding(.bottom, 10)
             Text(Money.exact(s.amount, s.symbol)).font(.system(size: 38, weight: .bold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
@@ -233,18 +241,21 @@ struct MarkingSheet: View {
         .padding(.top, 4)
     }
 
-    /// What the expense was for, alone on a card that unfolds the categories and payments under it to pick another.
+    /// What the expense was for, alone on a card that unfolds the categories and payments under it to pick another; an
+    /// income unfolds only the categories.
     private func choice(_ s: SpendingScreen) -> some View {
         let open = isPicking(s)
         return VStack(alignment: .leading, spacing: 14) {
             picked(s, open: open)
             if open {
                 VStack(alignment: .leading, spacing: 14) {
-                    LilacSegmented(
-                        items: [Segment(value: Mode.category, label: "Категория"), Segment(value: Mode.payment, label: "Платёж")],
-                        selection: Binding(get: { shownMode(s) }, set: { mode = $0 }),
-                        width: nil
-                    )
+                    if !s.isIncome {
+                        LilacSegmented(
+                            items: [Segment(value: Mode.category, label: "Категория"), Segment(value: Mode.payment, label: "Платёж")],
+                            selection: Binding(get: { shownMode(s) }, set: { mode = $0 }),
+                            width: nil
+                        )
+                    }
                     Group {
                         switch shownMode(s) {
                         case .category: categories(s)
@@ -265,14 +276,16 @@ struct MarkingSheet: View {
         let category = currentCategory(s)
         let undo = payment != nil ? "unlink" : "uncategorize"
         let canUndo = applying == nil && s.undo.contains { $0.choice == undo }
-        let title = payment?.label ?? category?.label ?? "Не размечена"
-        let subtitle = payment != nil ? "оплатила платёж" : category != nil ? (category?.detail == "из ZenMoney" ? "категория из ZenMoney" : "категория") : "выберите категорию или платёж"
-        let color = Palette.color(payment != nil ? "violet" : (category?.color ?? "gray"))
+        let title = payment?.label ?? category?.label ?? (s.isIncome ? "Без категории" : "Не размечена")
+        let subtitle = payment != nil ? "оплатила платёж"
+            : category != nil ? (category?.detail == "из ZenMoney" ? "категория из ZenMoney" : "категория")
+            : s.isIncome ? "выберите категорию" : "выберите категорию или платёж"
+        let (icon, color) = look(s)
         let toggle = { withAnimation(.snappy) { picking = !open } }
         return HStack(spacing: 10) {
             Button(action: toggle) {
                 HStack(spacing: 12) {
-                    Image(systemName: Icons.symbol(payment?.icon ?? category?.icon ?? "tag"))
+                    Image(systemName: Icons.symbol(icon))
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(color)
                         .frame(width: 42, height: 42)
@@ -490,7 +503,7 @@ struct MarkingSheet: View {
         }
     }
 
-    private static let envelopeIcons = ["week": "calendar", "extra": "bag", "outside": "arrow.uturn.right", "ignored": "eye.slash"]
+    private static let envelopeIcons = ["week": "calendar", "extra": "bag", "outside": "arrow.uturn.right", "ignored": "eye.slash", "counted": "arrow.down.left"]
 }
 
 /// A category as a tile: its icon on a halo of its colour and its name; the picked one is lilac with a tick, the

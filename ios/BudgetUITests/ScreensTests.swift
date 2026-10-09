@@ -105,6 +105,26 @@ final class ScreensTests: XCTestCase {
         app.buttons["filter-Ждут разбора"].tap()
         sleep(2)
         shot("operations-pending")
+        app.buttons["filter-Доходы"].tap()
+        sleep(2)
+        shot("operations-income")
+        let income = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'spending-'")).firstMatch
+        if income.waitForExistence(timeout: 5) {
+            income.tap()
+            if sheet("marking").waitForExistence(timeout: 10) {
+                shot("income-sheet")
+                app.buttons["picked"].tap()
+                shot("income-sheet-folded")
+                app.buttons["Готово"].tap()
+            } else {
+                XCTFail("the income opens")
+            }
+        }
+        app.buttons["categories"].tap()
+        if sheet("categories-sheet").waitForExistence(timeout: 5) {
+            shot("categories-income")
+            app.buttons["Готово"].tap()
+        }
         app.buttons["filter-Все"].tap()
 
         tab("План")

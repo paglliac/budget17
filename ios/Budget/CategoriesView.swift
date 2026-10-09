@@ -1,10 +1,17 @@
 import SwiftUI
 
-/// Categories for marking in the order marking offers them; ZenMoney's can be renamed or hidden, the user's own
-/// added and deleted. ZenMoney itself never changes.
+/// Categories for marking in the order marking offers them, then the income ones; ZenMoney's can be renamed or hidden,
+/// the user's own added and deleted. ZenMoney itself never changes.
 struct CategoriesPanel: View {
     @State private var editing: CategoryItem?
-    @State private var adding = false
+    @State private var adding: NewCategory?
+
+    /// A category being added, for expenses or incomes.
+    private struct NewCategory: Identifiable {
+        /// expense or income.
+        let kind: String
+        var id: String { kind }
+    }
 
     var body: some View {
         Screen(path: "categories") { (s: CategoriesScreen) in
@@ -19,14 +26,18 @@ struct CategoriesPanel: View {
                     }
                 }
                 rows(s.shown).padding(.top, 10)
-                LilacAddRow(label: "Добавить категорию") { adding = true }
-                if !s.hidden.isEmpty {
+                LilacAddRow(label: "Добавить категорию") { adding = NewCategory(kind: "expense") }
+                LilacHeading("Доходы")
+                rows(s.income.shown)
+                LilacAddRow(label: "Добавить категорию дохода") { adding = NewCategory(kind: "income") }
+                let hidden = s.hidden + s.income.hidden
+                if !hidden.isEmpty {
                     LilacHeading("Скрытые")
-                    rows(s.hidden)
+                    rows(hidden)
                 }
             }
-            .sheet(item: $editing) { item in CategorySheet(item: item) }
-            .sheet(isPresented: $adding) { CategorySheet(item: nil) }
+            .sheet(item: $editing) { item in CategorySheet(item: item, kind: item.category.kind) }
+            .sheet(item: $adding) { new in CategorySheet(item: nil, kind: new.kind) }
         }
     }
 
@@ -41,9 +52,11 @@ struct CategoriesPanel: View {
     }
 }
 
-/// A category to add, or one to rename, hide or show, and delete when it is the user's own.
+/// A category to add, for expenses or incomes, or one to rename, hide or show, and delete when it is the user's own.
 struct CategorySheet: View {
     let item: CategoryItem?
+    /// expense or income.
+    let kind: String
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
@@ -52,18 +65,18 @@ struct CategorySheet: View {
     var body: some View {
         let category = item?.category
         LilacForm(
-            title: item == nil ? "Новая категория" : "Категория",
+            title: item == nil ? (kind == "income" ? "Новая категория дохода" : "Новая категория") : "Категория",
             destructive: category.flatMap { c in c.zenmoneyTitle == nil ? (label: "Удалить", action: { sender.send(session, "categories/\(c.id)/delete", [:]) { dismiss() } }) : nil },
             primary: item == nil ? "Добавить" : "Сохранить",
             busy: sender.busy,
-            save: { sender.send(session, item.map { "categories/\($0.category.id)" } ?? "categories", ["title": title]) { dismiss() } }
+            save: { sender.send(session, item.map { "categories/\($0.category.id)" } ?? "categories", ["title": title, "kind": kind]) { dismiss() } }
         ) {
-            LilacTextField(label: "Название", text: $title, placeholder: category?.zenmoneyTitle ?? "Например, дети", error: sender.errors["title"])
+            LilacTextField(label: "Название", text: $title, placeholder: category?.zenmoneyTitle ?? (kind == "income" ? "Например, кэшбэк" : "Например, дети"), error: sender.errors["title"])
             if let original = category?.zenmoneyTitle {
                 Text("В ZenMoney она называется «\(original)»; пустое поле вернёт это название.")
                     .font(.footnote).foregroundStyle(Lilac.muted).padding(.top, 6)
             } else if category != nil {
-                Text("Траты удалённой категории останутся без категории.").font(.footnote).foregroundStyle(Lilac.muted).padding(.top, 6)
+                Text("\(kind == "income" ? "Доходы" : "Траты") удалённой категории останутся без категории.").font(.footnote).foregroundStyle(Lilac.muted).padding(.top, 6)
             }
             if let category {
                 LilacInlineAction(label: category.hidden ? "Показать при разметке" : "Скрыть при разметке") {
