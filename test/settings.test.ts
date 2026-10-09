@@ -215,6 +215,53 @@ describe('Settings', () => {
     assert.equal(settings.addOwnCategory('Дети').id, 'own-3', 'ids are not reused');
   });
 
+  it('splits categories into subcategories, sends shops and expenses into them, and forgets them with the subcategory', () => {
+    using settings = new Settings(':memory:');
+    const lenta = settings.addSubcategory('groceries', 'Лента');
+    const market = settings.addSubcategory('groceries', 'Рынок');
+    assert.deepEqual(settings.addSubcategory('groceries', 'лента'), lenta, 'one title a category');
+    assert.notEqual(settings.addSubcategory('cafe', 'Лента').id, lenta.id, 'another category has its own');
+
+    settings.putShop('groceries', 'lenta', lenta.id);
+    settings.putShop('groceries', 'lenta', market.id);
+    settings.putSpending('tx-1', market.id);
+    settings.putSpending('tx-2', null);
+    settings.putSpending('tx-3', lenta.id);
+    settings.putSpending('tx-3', undefined);
+    const setup = settings.subcategorySetup();
+    assert.deepEqual(setup.subcategories.filter((s) => s.category === 'groceries').map((s) => s.title), ['Лента', 'Рынок']);
+    assert.deepEqual([...setup.shops.get('groceries')!], [['lenta', market.id]], 'a shop goes into one subcategory of a category');
+    assert.deepEqual([...setup.spending], [['tx-1', market.id], ['tx-2', null]]);
+
+    assert.equal(settings.renameSubcategory(market.id, 'Рынок и фермеры'), true);
+    assert.equal(settings.deleteSubcategory(market.id), true);
+    assert.equal(settings.deleteSubcategory(market.id), false);
+    const after = settings.subcategorySetup();
+    assert.equal(after.shops.get('groceries'), undefined, 'its shops are left without one');
+    assert.deepEqual([...after.spending], [['tx-2', null]]);
+    settings.putShop('groceries', 'lenta', lenta.id);
+    settings.putShop('groceries', 'lenta', null);
+    assert.equal(settings.subcategorySetup().shops.get('groceries'), undefined);
+  });
+
+  it('deletes the subcategories of an own category with it', () => {
+    using settings = new Settings(':memory:');
+    const kids = settings.addOwnCategory('Дети');
+    const toys = settings.addSubcategory(kids.id, 'Игрушки');
+    settings.putShop(kids.id, 'detskiimir', toys.id);
+    settings.putSpending('tx-1', toys.id);
+    settings.deleteOwnCategory(kids.id);
+    const setup = settings.subcategorySetup();
+    assert.deepEqual([setup.subcategories, [...setup.shops], [...setup.spending]], [[], [], []]);
+  });
+
+  it('remembers the hints turned down', () => {
+    using settings = new Settings(':memory:');
+    settings.dismissHints(['hide:gifts', 'spending:tx-1']);
+    settings.dismissHints(['spending:tx-1']);
+    assert.deepEqual([...settings.dismissedHints()], ['hide:gifts', 'spending:tx-1']);
+  });
+
   it('keeps expenses in a file between runs', () => {
     const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
     try {
@@ -337,6 +384,31 @@ describe('Settings', () => {
         { id: 'own-2', title: 'Кэшбэк', hidden: false, kind: 'income' },
         { id: 'own-1', title: 'Подписки', hidden: false, kind: 'expense' },
       ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('adds subcategories and turned down hints to a file made before them, keeping its categories', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
+    try {
+      const path = join(dir, 'settings.db');
+      {
+        using db = new DatabaseSync(path);
+        db.exec(`CREATE TABLE category_change (
+          tag_id TEXT PRIMARY KEY,
+          title TEXT,
+          hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))
+        ) STRICT`);
+        db.exec(`INSERT INTO category_change (tag_id, title) VALUES ('groceries', 'Продукты')`);
+      }
+      using settings = new Settings(path);
+      const lenta = settings.addSubcategory('groceries', 'Лента');
+      settings.putShop('groceries', 'lenta', lenta.id);
+      settings.dismissHints(['hide:gifts']);
+      assert.deepEqual([...settings.categorySetup().changes], [['groceries', { title: 'Продукты', hidden: false }]]);
+      assert.deepEqual([...settings.subcategorySetup().shops.get('groceries')!], [['lenta', lenta.id]]);
+      assert.deepEqual([...settings.dismissedHints()], ['hide:gifts']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

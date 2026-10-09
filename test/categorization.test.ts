@@ -26,6 +26,12 @@ function paid(payee: string, amount: number, date: string, e: { id: number; titl
 const name = (s: Suggestion | null) => (s === null ? null : 'category' in s ? s.category.title : s.regular.title);
 
 describe('suggester', () => {
+  it('suggests the category of a shop whichever alphabet and shop number the bank wrote it with', () => {
+    const suggest = suggester([expense('Lenta 178', 2_000, '2026-09-20', { category: groceries })], []);
+
+    assert.equal(name(suggest(expense('Лента-0089', 1_000, '2026-10-01'))), 'Продукты');
+  });
+
   it('suggests a regular expense of the same amount due within ten days', () => {
     const suggest = suggester([], [workshop, oldCar]);
 

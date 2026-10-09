@@ -5,6 +5,7 @@
 
 import { daysBetween } from './dates.ts';
 import { isUntitled, type Operation } from './ledger.ts';
+import { shopKey } from './payees.ts';
 import type { Category } from './operations.ts';
 import { nearestPayment, paidBy, type RegularExpense } from './regular.ts';
 import { monthOfWeek, purchaseStatus, weekOf, type Purchase, type WeekStart } from './week.ts';
@@ -121,15 +122,15 @@ export function paymentChoices(
 }
 
 /**
- * The payee without case, digits and punctuation, so that Lenta 089 and Lenta 139 are one shop. Without a payee the
- * bank's comment stands for it, since operations such as interest or cashback come with only a comment: Проценты на
- * остаток. An operation without a payee is called by its kind, or by what it was put into once sorted. Null when there
- * is neither payee nor comment.
+ * The payee by shopKey, so that Lenta 089, Lenta 139 and Лента-0089 are one shop. Without a payee the bank's comment
+ * stands for it, since operations such as interest or cashback come with only a comment: Проценты на остаток. An
+ * operation without a payee is called by its kind, or by what it was put into once sorted. Null when there is neither
+ * payee nor comment.
  */
 function payeeKey(o: Operation): string | null {
   const named = !isUntitled(o) && ![o.category?.title, o.regular?.title, o.purchase?.title].includes(o.payee);
   const name = named ? o.payee : o.comment;
-  return name?.toLocaleLowerCase('ru').replace(/[^\p{L}]+/gu, ' ').trim() || null;
+  return name ? shopKey(name) || null : null;
 }
 
 function sameAmount(a: number, b: number): boolean {

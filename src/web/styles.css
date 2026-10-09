@@ -46,6 +46,9 @@ a { color: inherit; text-decoration: none; }
 .panel { background: var(--panel); border-radius: var(--radius-panel); }
 .panel-main { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 30px; padding: 14px 22px 26px; }
 .panel-side { display: flex; flex-direction: column; gap: 16px; padding: 14px; }
+/* screenOnly: the breakpoint is where the side panel goes under the main one */
+.screen-only.wide { display: contents; }
+.screen-only.narrow { display: none; }
 
 /* rail */
 .rail { display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 6px; }
@@ -446,8 +449,40 @@ a.insight:hover { border-color: color-mix(in srgb, var(--violet) 30%, white); }
 .insight-text small { display: block; margin-top: 3px; font-size: 12px; color: var(--muted); }
 .insight-go { color: var(--soft); }
 
+/* suggestionList */
+.suggestions { display: grid; gap: 8px; list-style: none; }
+.suggestion { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px 14px; padding: 14px; border: 1px solid var(--line); border-radius: 16px; }
+.suggestion-source { display: flex !important; align-items: center; gap: 5px; color: var(--violet) !important; }
+.suggestion-actions { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px; }
+.suggestion-actions form { display: contents; }
+
+/* categoryMap: the widget gives each tile its place in percent of its box as --x, --y, --w and --h */
+.cmap { position: relative; aspect-ratio: 16 / 10; }
+.cmap-group { position: absolute; left: var(--x); top: var(--y); width: var(--w); height: var(--h); display: flex; flex-direction: column; padding: 2px; border: 2px solid var(--panel); border-radius: 14px; background: color-mix(in srgb, var(--color) 22%, white); overflow: hidden; }
+.cmap-group.hatched { background: repeating-linear-gradient(135deg, #F1F1EE 0 8px, #E8E8E4 8px 16px); }
+.cmap-group.active { box-shadow: inset 0 0 0 2px var(--ink); }
+.cmap-head { position: relative; display: grid; gap: 1px; min-width: 0; padding: 8px 22px 6px 10px; border-radius: 10px; color: var(--ink); }
+.cmap-head.fill { flex: 1; }
+a.cmap-head:hover { background: rgb(255 255 255 / .35); }
+.cmap-head b, .cmap-item b { overflow: hidden; font-size: 12px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+.cmap-head small { font-size: 11px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cmap-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--violet); box-shadow: 0 0 0 3px color-mix(in srgb, var(--violet) 22%, transparent); }
+.cmap-items { position: relative; flex: 1; }
+.cmap-item { position: absolute; left: var(--x); top: var(--y); width: var(--w); height: var(--h); display: grid; align-content: start; gap: 1px; min-width: 0; padding: 6px 8px; border: 1.5px solid color-mix(in srgb, var(--color) 22%, white); border-radius: 10px; background: rgb(255 255 255 / .55); overflow: hidden; color: var(--ink); }
+.cmap-group.hatched .cmap-item { border-color: #E8E8E4; background: rgb(255 255 255 / .7); }
+a.cmap-item:hover { background: rgb(255 255 255 / .85); }
+.cmap-item.active { box-shadow: inset 0 0 0 2px var(--ink); }
+.cmap-item b { font-weight: 400; font-size: 11px; }
+.cmap-item small { overflow: hidden; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
+.cmap-item.hinted, .cmap-group.hatched .cmap-item.hinted { border-color: color-mix(in srgb, var(--violet) 55%, white); background: color-mix(in srgb, var(--violet) 8%, white); }
+.cmap-group.tiny .cmap-head, .cmap-item.tiny { padding: 3px 5px; }
+.cmap-group.tiny .cmap-head > :not(.cmap-dot), .cmap-item.tiny > * { visibility: hidden; }
+.cmap-panel { display: none; }
+
 @media (max-width: 1240px) {
   .shell-columns.has-side { grid-template-columns: minmax(0, 1fr); }
+  .screen-only.wide { display: none; }
+  .screen-only.narrow { display: contents; }
 }
 @media (max-width: 820px) {
   body { padding: 12px; }
@@ -462,4 +497,12 @@ a.insight:hover { border-color: color-mix(in srgb, var(--violet) 30%, white); }
   .amount:has(.amount-bar) { grid-template-columns: auto minmax(70px, 1fr) minmax(40px, .8fr) auto; }
   .amount:has(.amount-go) { grid-template-columns: auto minmax(0, 1fr) auto auto; }
   .amount-note { display: none; }
+  .cmap { display: grid; gap: 6px; aspect-ratio: auto; }
+  .cmap-group, .cmap-item { position: static; width: auto; height: auto; }
+  .cmap-group.tiny .cmap-head { padding: 8px 22px 6px 10px; }
+  .cmap-group.tiny .cmap-head > :not(.cmap-dot), .cmap-item.tiny > * { visibility: visible; }
+  .cmap-head { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 8px; }
+  .cmap-items { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 4px 4px; }
+  .cmap-item, .cmap-item.tiny { display: flex; align-items: baseline; gap: 6px; max-width: 100%; padding: 5px 8px; }
+  .cmap-panel { display: flex; flex-direction: column; gap: 16px; padding: 10px 0 18px; }
 }

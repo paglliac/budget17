@@ -1,12 +1,12 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { OWN_CATEGORY_PREFIX, type CategoryKind, type CategorySetup, type OwnCategory } from './categories.ts';
+import { OWN_CATEGORY_PREFIX, type CategoryKind, type CategorySetup, type OwnCategory, type Subcategory, type SubcategorySetup } from './categories.ts';
 import type { Categorization } from './categorization.ts';
 import { isIncomeModel, type Income, type IncomeInput } from './income.ts';
 import type { RegularExpense, RegularExpenseInput } from './regular.ts';
 import { alignWeek, type Envelope, type Purchase, type PurchaseInput, type WeekStart, type Wish, type WishInput } from './week.ts';
-import type { DateString } from './zenmoney/types.ts';
+import type { DateString, TagId } from './zenmoney/types.ts';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS regular_expense (
@@ -89,6 +89,34 @@ const SCHEMA = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))
+  ) STRICT;
+
+  -- Parts of a category the user made in the app, such as Продукты › Лента; ZenMoney has none. Ids are never reused.
+  CREATE TABLE IF NOT EXISTS subcategory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tag_id TEXT NOT NULL,
+    title TEXT NOT NULL
+  ) STRICT;
+
+  -- A shop whose expenses in a category go into one of its subcategories by themselves, the new ones too; payee is
+  -- the shop's key (shopKey in categorization.ts), so that every shop of a chain is one.
+  CREATE TABLE IF NOT EXISTS payee_subcategory (
+    tag_id TEXT NOT NULL,
+    payee TEXT NOT NULL,
+    subcategory_id INTEGER NOT NULL,
+    PRIMARY KEY (tag_id, payee)
+  ) STRICT;
+
+  -- ZenMoney expenses put into a subcategory one by one, such as transfers to people; a null subcategory keeps an
+  -- expense out of the one its shop goes into.
+  CREATE TABLE IF NOT EXISTS spending_subcategory (
+    transaction_id TEXT PRIMARY KEY,
+    subcategory_id INTEGER
+  ) STRICT;
+
+  -- Suggestions of the month review the user turned down: hide:<category id> or spending:<ZenMoney transaction id>.
+  CREATE TABLE IF NOT EXISTS dismissed_hint (
+    hint TEXT PRIMARY KEY
   ) STRICT;
 
   -- Single values the user picked, such as week_start, the day a week begins on (0 for Monday), or self_payee, the
@@ -502,13 +530,105 @@ export class Settings {
     return true;
   }
 
-  /** Deletes one of the user's own categories; the operations put into it are left without a category again. */
+  /**
+   * Deletes one of the user's own categories with its subcategories; the operations put into it are left without a
+   * category again.
+   */
   deleteOwnCategory(id: string): boolean {
     const own = ownId(id);
     if (own === null) return false;
     return this.#transaction(() => {
       this.#db.prepare('DELETE FROM categorization WHERE tag_id = ?').run(id);
+      for (const sub of this.subcategorySetup().subcategories.filter((s) => s.category === id)) this.#deleteSubcategory(sub.id);
       return Number(this.#db.prepare('DELETE FROM own_category WHERE id = ?').run(own).changes) > 0;
+    });
+  }
+
+  /** The subcategories by title, the shops that go into them, and the expenses put into one by hand. */
+  subcategorySetup(): SubcategorySetup {
+    const subcategories = this.#db
+      .prepare('SELECT id, tag_id, title FROM subcategory')
+      .all()
+      .map((row): Subcategory => ({ id: Number(row.id), category: String(row.tag_id), title: String(row.title) }))
+      .sort((a, b) => a.title.localeCompare(b.title, 'ru'));
+    const shops = new Map<TagId, Map<string, number>>();
+    for (const row of this.#db.prepare('SELECT tag_id, payee, subcategory_id FROM payee_subcategory').all()) {
+      const category = String(row.tag_id);
+      shops.set(category, (shops.get(category) ?? new Map()).set(String(row.payee), Number(row.subcategory_id)));
+    }
+    const spending = new Map(
+      this.#db
+        .prepare('SELECT transaction_id, subcategory_id FROM spending_subcategory')
+        .all()
+        .map((row) => [String(row.transaction_id), row.subcategory_id === null ? null : Number(row.subcategory_id)] as const),
+    );
+    return { subcategories, shops, spending };
+  }
+
+  /** Adds a subcategory to a category, or gives the one it has with that title in any case. */
+  addSubcategory(category: TagId, title: string): Subcategory {
+    const same = this.subcategorySetup().subcategories.find(
+      (s) => s.category === category && s.title.toLocaleLowerCase('ru') === title.toLocaleLowerCase('ru'),
+    );
+    if (same) return same;
+    const { lastInsertRowid } = this.#db.prepare('INSERT INTO subcategory (tag_id, title) VALUES (?, ?)').run(category, title);
+    return { id: Number(lastInsertRowid), category, title };
+  }
+
+  /** False when there is no such subcategory. */
+  renameSubcategory(id: number, title: string): boolean {
+    return Number(this.#db.prepare('UPDATE subcategory SET title = ? WHERE id = ?').run(title, id).changes) > 0;
+  }
+
+  /** False when there is no such subcategory. The shops and expenses put into it are left without one again. */
+  deleteSubcategory(id: number): boolean {
+    return this.#transaction(() => this.#deleteSubcategory(id));
+  }
+
+  #deleteSubcategory(id: number): boolean {
+    this.#db.prepare('DELETE FROM payee_subcategory WHERE subcategory_id = ?').run(id);
+    this.#db.prepare('DELETE FROM spending_subcategory WHERE subcategory_id = ?').run(id);
+    return Number(this.#db.prepare('DELETE FROM subcategory WHERE id = ?').run(id).changes) > 0;
+  }
+
+  /** Sends a shop's expenses in a category into a subcategory; null leaves them without one again. */
+  putShop(category: TagId, shop: string, subcategory: number | null): void {
+    if (subcategory === null) {
+      this.#db.prepare('DELETE FROM payee_subcategory WHERE tag_id = ? AND payee = ?').run(category, shop);
+      return;
+    }
+    this.#db
+      .prepare(
+        'INSERT INTO payee_subcategory (tag_id, payee, subcategory_id) VALUES (?, ?, ?) ON CONFLICT (tag_id, payee) DO UPDATE SET subcategory_id = excluded.subcategory_id',
+      )
+      .run(category, shop, subcategory);
+  }
+
+  /**
+   * Puts an expense into a subcategory whatever its shop's is; null keeps it out of any, and undefined forgets what it
+   * had, so that it goes with its shop again.
+   */
+  putSpending(transactionId: string, subcategory: number | null | undefined): void {
+    if (subcategory === undefined) {
+      this.#db.prepare('DELETE FROM spending_subcategory WHERE transaction_id = ?').run(transactionId);
+      return;
+    }
+    this.#db
+      .prepare(
+        'INSERT INTO spending_subcategory (transaction_id, subcategory_id) VALUES (?, ?) ON CONFLICT (transaction_id) DO UPDATE SET subcategory_id = excluded.subcategory_id',
+      )
+      .run(transactionId, subcategory);
+  }
+
+  /** Suggestions the user turned down, as the month review names them. */
+  dismissedHints(): Set<string> {
+    return new Set(this.#db.prepare('SELECT hint FROM dismissed_hint ORDER BY hint').all().map((row) => String(row.hint)));
+  }
+
+  dismissHints(hints: readonly string[]): void {
+    const insert = this.#db.prepare('INSERT OR IGNORE INTO dismissed_hint (hint) VALUES (?)');
+    this.#transaction(() => {
+      for (const hint of hints) insert.run(hint);
     });
   }
 

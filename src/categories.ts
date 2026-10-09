@@ -6,6 +6,7 @@
 import { addDays } from './dates.ts';
 import type { Operation } from './ledger.ts';
 import { categoryOf, topCategory, type Category, type OperationKind } from './operations.ts';
+import { shopKey } from './payees.ts';
 import type { DateString, Tag, TagId } from './zenmoney/types.ts';
 
 /** Ids of the user's own categories start with it, so they never clash with ZenMoney's. */
@@ -40,6 +41,42 @@ export interface CategoryEntry extends Category {
   /** Its title in ZenMoney, without its parent's; null for the user's own categories. */
   zenmoneyTitle: string | null;
   hidden: boolean;
+}
+
+/** A part of a category the user made in the app, such as Продукты › Лента; ZenMoney has no parts of its own. */
+export interface Subcategory {
+  id: number;
+  /** The category it is a part of. */
+  category: TagId;
+  title: string;
+}
+
+/** How the user split categories into subcategories. */
+export interface SubcategorySetup {
+  /** By title. */
+  subcategories: readonly Subcategory[];
+  /** The subcategory a shop's expenses go into, by category and the shop's key (shopKey). */
+  shops: ReadonlyMap<TagId, ReadonlyMap<string, number>>;
+  /** The subcategory an expense was put into by hand, by ZenMoney transaction id; null keeps it out of its shop's. */
+  spending: ReadonlyMap<string, number | null>;
+}
+
+export const NO_SUBCATEGORIES: SubcategorySetup = { subcategories: [], shops: new Map(), spending: new Map() };
+
+/**
+ * The subcategory of an expense's category it went into: the one it was put into by hand, or else its shop's. A
+ * transfer to a person has no shop, so it goes only where it was put by hand (`shop` false). Null when it is in none,
+ * or in one of a category it is no longer in.
+ */
+export function subcategoryOf(
+  o: Pick<Operation, 'id' | 'payee' | 'category'>,
+  setup: SubcategorySetup,
+  options: { shop: boolean },
+): Subcategory | null {
+  if (!o.category) return null;
+  const byHand = setup.spending.get(o.id);
+  const id = byHand !== undefined ? byHand : options.shop ? setup.shops.get(o.category.id)?.get(shopKey(o.payee)) : undefined;
+  return setup.subcategories.find((s) => s.id === id && s.category === o.category!.id) ?? null;
 }
 
 /** How far back operations count towards how popular a category is. */

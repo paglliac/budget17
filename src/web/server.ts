@@ -36,7 +36,7 @@ import { isAccessToken, isAuthorized, sessionCookie } from './auth.ts';
 import { demoCollections } from './demo.ts';
 import { escape } from './html.ts';
 import { createHref, userName } from './pages/chrome.ts';
-import { loadReview, renderReview, renderReviewCheck } from './pages/review.ts';
+import { loadReview, renderReview, renderReviewCheck, submitReview } from './pages/review.ts';
 import { budgetOf, loadDashboard, renderDashboard, submitDashboard, type DashboardForm, type SavedBudget } from './pages/dashboard.ts';
 import { loadIncome, renderIncome, submitIncome } from './pages/income.ts';
 import { renderLogin } from './pages/login.ts';
@@ -102,6 +102,8 @@ function savedMarking(settings: Settings): SavedMarking {
     categories: settings.categorySetup(),
     weekStart: settings.weekStart(),
     selfPayee: settings.selfPayee(),
+    subcategories: settings.subcategorySetup(),
+    dismissedHints: settings.dismissedHints(),
   };
 }
 
@@ -193,6 +195,15 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     if (result.status === 'missing') return { status: 'missing', message: 'Такой записи нет' };
     const back = new URL(backTo(request), 'http://localhost');
     return { status: 'invalid', errors: result.form.errors, page: () => dashboardPage(back.searchParams, context, result.form) };
+  }
+  if (path.startsWith('/review/')) {
+    // Choices post empty forms to URLs that carry what was chosen, so the query and the fields read alike.
+    const form = new URLSearchParams([...new URL(request.url ?? '/', 'http://localhost').searchParams, ...body]);
+    using settings = new Settings(SETTINGS_PATH);
+    const result = submitReview(settings, loadCollections(demo, today), path, form);
+    if (result.status === 'saved') return { status: 'saved', next: backTo(request) };
+    if (result.status === 'missing') return { status: 'missing', message: 'Такой траты, категории, подкатегории или подсказки нет' };
+    return { status: 'invalid', errors: { title: result.error }, page: () => `<p>${escape(result.error)}</p>` };
   }
   if (path.startsWith('/spending/')) {
     using settings = new Settings(SETTINGS_PATH);
@@ -367,6 +378,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
         ask: params.get('ask'),
         kind: params.get('kind'),
         edit: params.get('edit'),
+        tile: params.get('tile'),
       });
       send(response, 200, 'text/html', (url.pathname === '/review' ? renderReview(review, href) : renderReviewCheck(review, href)).toString());
       return;

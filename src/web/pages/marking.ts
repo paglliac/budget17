@@ -8,7 +8,7 @@
 
 import { mainCurrency } from '../../balances.ts';
 import { MAX_DESCRIPTION, parseDescription } from '../../input.ts';
-import { byPopularity, categoryCatalog, type CategoryEntry, type CategorySetup } from '../../categories.ts';
+import { byPopularity, categoryCatalog, type CategoryEntry, type CategorySetup, type SubcategorySetup } from '../../categories.ts';
 import { paymentChoices, suggester, type Categorization, type PaymentChoice, type Suggestion } from '../../categorization.ts';
 import { addDays } from '../../dates.ts';
 import { listOperations, PURCHASE_CATEGORY, REGULAR_CATEGORY, type Operation } from '../../ledger.ts';
@@ -38,6 +38,10 @@ export interface SavedMarking {
   weekStart: WeekStart;
   /** The user's own name as banks write it in transfers to their accounts in other banks, when they gave it. */
   selfPayee?: string | null;
+  /** How the user split categories; none when not given. */
+  subcategories?: SubcategorySetup;
+  /** Suggestions of the month review the user turned down. */
+  dismissedHints?: ReadonlySet<string>;
 }
 
 /** What marking an expense or an income needs besides it. */

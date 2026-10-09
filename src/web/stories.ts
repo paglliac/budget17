@@ -28,12 +28,12 @@ import {
   shareBar,
 } from './widgets/basics.ts';
 import { monthCalendar } from './widgets/calendar.ts';
-import { assistantAnswer, assistantHero, insightList } from './widgets/assistant.ts';
+import { assistantAnswer, assistantHero, insightList, suggestionList } from './widgets/assistant.ts';
 import { categoryTile, figureCard, panelCard, paymentCard, statCard } from './widgets/cards.ts';
-import { flowChart, weekBars } from './widgets/charts.ts';
+import { categoryMap, flowChart, weekBars } from './widgets/charts.ts';
 import { entryDivider, entryForm, entryList, entryRow } from './widgets/entries.ts';
 import { amountList, categoryList, dayGroup, operationRow } from './widgets/operations.ts';
-import { appShell, grid, rail, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
+import { appShell, grid, rail, screenOnly, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
 
 export interface Story {
   name: string;
@@ -196,6 +196,14 @@ export const WIDGET_DOCS: WidgetDoc[] = [
   doc(stack, { group: 'Каркас', description: 'Блоки друг под другом с ровным отступом, например дни в ленте.' }, [
     { name: 'Три блока', width: 360, props: { gap: 12, items: [emptyState({ text: 'Первый' }), emptyState({ text: 'Второй' }), emptyState({ text: 'Третий' })] } },
   ]),
+  doc(
+    screenOnly,
+    { group: 'Каркас', description: 'Только для широкого экрана, где боковая панель стоит рядом с основной, или только для узкого, где она уходит вниз. Сториборд широкий, поэтому узкая история пустая.' },
+    [
+      { name: 'Широкий экран', width: 360, props: { screen: 'wide', items: [emptyState({ text: 'Видно на широком экране' })] } },
+      { name: 'Узкий экран', width: 360, props: { screen: 'narrow', items: [emptyState({ text: 'Видно на узком экране' })] } },
+    ],
+  ),
   doc(grid, { group: 'Каркас', description: 'Равные колонки, не больше заданного числа; переносятся, когда колонке становится тесно.' }, [
     {
       name: 'Три колонки',
@@ -443,6 +451,54 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       },
     },
   ]),
+  doc(
+    categoryMap,
+    {
+      group: 'Графики',
+      description:
+        'Части целого плитками по сумме: группы своим цветом, внутри — их части; неразобранная группа заштрихована, открытая обведена, у группы с подсказкой точка в углу, у части — сиреневая рамка. На узком экране группы идут одна под другой.',
+    },
+    [
+      {
+        name: 'Из чего недели',
+        props: {
+          label: 'Траты недель по категориям',
+          symbol: '₽',
+          groups: [
+            {
+              label: 'Продукты',
+              amount: 132_798,
+              color: '#4FAE7F',
+              href: '#',
+              items: [
+                { label: 'Лента', amount: 45_701, href: '#' },
+                { label: 'Рынок', amount: 32_600, href: '#' },
+                { label: 'Без подкатегории', amount: 54_497, href: '#' },
+              ],
+            },
+            {
+              label: 'Переводы людям',
+              amount: 123_158,
+              color: 'var(--gray)',
+              hatched: true,
+              href: '#',
+              active: true,
+              hinted: true,
+              items: [
+                { label: 'Татьяна А.', amount: 79_250, href: '#' },
+                { label: 'Дарья Ч.', amount: 10_000, href: '#', hinted: true },
+                { label: 'Николай А.', amount: 10_000, href: '#' },
+                { label: 'Ещё 6', amount: 23_908, href: '#' },
+              ],
+            },
+            { label: 'Автомобиль', amount: 33_469, color: 'var(--orange)', href: '#', items: [{ label: 'Т-Страхование', amount: 13_518 }, { label: 'GAZPROMNEFT AZS', amount: 7_496 }] },
+            { label: 'Кафе и рестораны', amount: 31_649, color: 'var(--blue)', href: '#', items: [] },
+            { label: 'Подписки', amount: 200, color: 'var(--pink)', href: '#', items: [] },
+          ],
+        },
+      },
+    ],
+  ),
   doc(weekBars, { group: 'Графики', description: 'Траты недель столбиками, лимит недели — пунктир поперёк, выше него столбик темнее; будущая неделя пустая.' }, [
     {
       name: 'Месяц с перерасходом',
@@ -609,6 +665,43 @@ export const WIDGET_DOCS: WidgetDoc[] = [
     },
     { name: 'Без ссылок', width: 440, props: { question: 'На чём сэкономить', paragraphs: ['Ни одна категория заметно не выросла.'], closeHref: '#' } },
   ]),
+  doc(
+    suggestionList,
+    { group: 'Ассистент', description: 'Подсказки, по которым можно действовать: иконка в круге, жирная строка, пояснение, откуда подсказка, и кнопки; первая — главная.' },
+    [
+      {
+        name: 'Подсказки разбора',
+        width: 440,
+        props: {
+          label: 'Подсказки',
+          items: [
+            {
+              icon: 'card',
+              tone: 'violet',
+              title: 'Переводы себе с некруглой суммой → «Шоппинг › Ozon и WB»',
+              text: '6 переводов на 12 633 ₽. Так выглядит оплата покупок на Ozon и WB, а какой из двух банков — по данным не видно.',
+              source: 'по прошлым переводам',
+              actions: [
+                { label: 'Перенести', action: '#' },
+                { label: 'Не надо', action: '#' },
+              ],
+            },
+            {
+              icon: 'x',
+              tone: 'gray',
+              title: 'Скрыть «Корректировку»',
+              text: 'Трат в ней не было ни разу.',
+              source: 'правило',
+              actions: [
+                { label: 'Скрыть', action: '#' },
+                { label: 'Не надо', action: '#' },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+  ),
   doc(insightList, { group: 'Ассистент', description: 'Что нашёл ассистент: иконка в круге, жирная строка, тихое пояснение и ссылка дальше.' }, [
     {
       name: 'Выводы',

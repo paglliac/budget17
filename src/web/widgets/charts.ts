@@ -1,7 +1,7 @@
-// Charts: where money flowed, and amounts over time against their limits.
+// Charts: where money flowed, what a whole was made of, and amounts over time against their limits.
 
 import { num } from '../format.ts';
-import { html, type Html } from '../html.ts';
+import { html, type Content, type Html } from '../html.ts';
 
 let flows = 0;
 
@@ -51,6 +51,136 @@ function share(part: number, whole: number): string {
   if (whole <= 0) return '';
   const ratio = part / whole;
   return ratio > 0 && ratio < 0.01 ? '<1%' : `${Math.round(ratio * 100)}%`;
+}
+
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Splits a rectangle into one per value, each as close to a square as it can be; values largest first. */
+function squarify(values: number[], rect: Rect): Rect[] {
+  const sum = (row: number[]) => row.reduce((s, a) => s + a, 0);
+  const total = sum(values);
+  if (total <= 0) return values.map(() => ({ ...rect, w: 0, h: 0 }));
+  const areas = values.map((v) => (v / total) * rect.w * rect.h);
+  /** How far from a square the longest-sided rectangle of a row along `side` is. */
+  const worst = (row: number[], side: number) => Math.max((side * side * Math.max(...row)) / (sum(row) * sum(row)), (sum(row) * sum(row)) / (side * side * Math.min(...row)));
+  const out: Rect[] = [];
+  let free = { ...rect };
+  let i = 0;
+  while (i < areas.length) {
+    const side = Math.min(free.w, free.h);
+    const row = [areas[i]!];
+    let j = i + 1;
+    while (j < areas.length && worst([...row, areas[j]!], side) <= worst(row, side)) row.push(areas[j++]!);
+    if (free.w >= free.h) {
+      const w = sum(row) / free.h;
+      let y = free.y;
+      for (const a of row) {
+        out.push({ x: free.x, y, w, h: a / w });
+        y += a / w;
+      }
+      free = { x: free.x + w, y: free.y, w: free.w - w, h: free.h };
+    } else {
+      const h = sum(row) / free.w;
+      let x = free.x;
+      for (const a of row) {
+        out.push({ x, y: free.y, w: a / h, h });
+        x += a / h;
+      }
+      free = { x: free.x, y: free.y + h, w: free.w, h: free.h - h };
+    }
+    i = j;
+  }
+  return out;
+}
+
+/** Where a tile lies in its box, in percent, as the custom properties the styles place it by. */
+function place(r: Rect, box: Rect): string {
+  const p = (v: number, of: number) => `${((v / of) * 100).toFixed(2)}%`;
+  return `--x:${p(r.x, box.w)};--y:${p(r.y, box.h)};--w:${p(r.w, box.w)};--h:${p(r.h, box.h)}`;
+}
+
+/**
+ * The least a tile needs for its words, in units of a map 160 wide and 100 high: on a page a unit is 4–5 px. A group
+ * smaller than that shows neither its words nor its items, an item no words; both name themselves on hover.
+ */
+const GROUP_WORDS = { w: 16, h: 10, area: 260 };
+const ITEM_WORDS = { w: 9, h: 8, area: 0 };
+/** How high a group's own words are, over its items. */
+const GROUP_HEAD = 10;
+
+function tooSmall(r: Rect, words: { w: number; h: number; area: number }): boolean {
+  return r.w < words.w || r.h < words.h || r.w * r.h < words.area;
+}
+
+/**
+ * Parts of a whole as nested tiles sized by amount: groups, such as categories, largest first, each tinted with its
+ * colour and holding its items, such as subcategories or shops, in the order given (largest first lays them out best). A `hatched` group is one nobody has sorted yet. Groups and
+ * items link to more with `href`; the open one is outlined. A `hinted` tile has a suggestion about it: a group gets a
+ * dot in its corner, an item a violet outline, since most items are too small for a dot beside their words. Tiles too
+ * small for words show them on hover. On a narrow screen the groups go one under another with their items in a row,
+ * and a group's `panel`, what is open of it, comes right under it; on a wide screen the page shows that elsewhere.
+ */
+export function categoryMap(options: {
+  label: string;
+  symbol: string;
+  groups: Array<{
+    label: string;
+    amount: number;
+    color: string;
+    hatched?: boolean;
+    href?: string;
+    active?: boolean;
+    hinted?: boolean;
+    items: Array<{ label: string; amount: number; href?: string; active?: boolean; hinted?: boolean }>;
+    panel?: Content;
+  }>;
+}): Html {
+  const box = { x: 0, y: 0, w: 160, h: 100 };
+  const groups = options.groups.filter((g) => g.amount > 0).sort((a, b) => b.amount - a.amount);
+  const rects = squarify(
+    groups.map((g) => g.amount),
+    box,
+  );
+  const tile = (href: string | undefined, classes: string, style: string, title: string, inner: Html) =>
+    href ? html`<a class="${classes}" href="${href}" style="${style}" title="${title}">${inner}</a>` : html`<div class="${classes}" style="${style}" title="${title}">${inner}</div>`;
+  return html`<div class="cmap" role="group" aria-label="${options.label}">${groups.map((g, gi) => {
+    const r = rects[gi]!;
+    const tiny = tooSmall(r, GROUP_WORDS);
+    const items = g.items.filter((i) => i.amount > 0);
+    // The group's own words take the top of its tile; items share the rest.
+    const inner = { x: 0, y: 0, w: r.w, h: Math.max(0, r.h - GROUP_HEAD) };
+    const showItems = items.length > 1 && !tiny && inner.h >= ITEM_WORDS.h;
+    const itemRects = squarify(
+      items.map((i) => i.amount),
+      inner,
+    );
+    const title = `${g.label}: ${num(g.amount)} ${options.symbol}${g.hinted ? ' · есть подсказка' : ''}`;
+    // Links do not nest, so the group links by its head, which covers the whole tile when no items show.
+    const head = tile(
+      g.href,
+      `cmap-head${showItems ? '' : ' fill'}`,
+      '',
+      title,
+      html`<b>${g.label}</b><small>${num(g.amount)} ${options.symbol}</small>${g.hinted ? html`<i class="cmap-dot" aria-label="Есть подсказка"></i>` : null}`,
+    );
+    const body = showItems
+      ? html`<span class="cmap-items">${items.map((item, ii) => {
+          const ir = itemRects[ii]!;
+          const classes = `cmap-item${item.active ? ' active' : ''}${tooSmall(ir, ITEM_WORDS) ? ' tiny' : ''}${item.hinted ? ' hinted' : ''}`;
+          const itemTitle = `${item.label}: ${num(item.amount)} ${options.symbol}${item.hinted ? ' · есть подсказка' : ''}`;
+          return tile(item.href, classes, place(ir, inner), itemTitle, html`<b>${item.label}</b><small>${num(item.amount)}</small>`);
+        })}</span>`
+      : null;
+    const classes = `cmap-group${g.hatched ? ' hatched' : ''}${g.active ? ' active' : ''}${tiny ? ' tiny' : ''}`;
+    return html`<div class="${classes}" style="${place(r, box)};--color:${g.color}">${head}${body}</div>${
+      g.panel ? html`<div class="cmap-panel">${g.panel}</div>` : null
+    }`;
+  })}</div>`;
 }
 
 /**

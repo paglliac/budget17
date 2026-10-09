@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { byPopularity, categoryCatalog, categoryFinder, NO_SETUP, recentCount, type CategorySetup } from '../src/categories.ts';
+import { byPopularity, categoryCatalog, categoryFinder, NO_SETUP, recentCount, subcategoryOf, type CategorySetup, type SubcategorySetup } from '../src/categories.ts';
 import type { Category } from '../src/operations.ts';
 import { tag } from './fixtures.ts';
 
@@ -53,5 +53,27 @@ describe('categories', () => {
     assert.deepEqual(byPopularity([a!, c!, d!, b!], expenses, today).map((x) => x.id), ['b', 'a', 'c', 'd']);
     assert.equal(recentCount(b!, expenses, today), 2);
     assert.equal(recentCount(c!, expenses, today), 0, '1 July is more than 90 days ago');
+  });
+
+  it('puts an expense into its shop’s subcategory, or the one it was put into by hand', () => {
+    const lenta = { id: 1, category: groceries.id, title: 'Лента' };
+    const market = { id: 2, category: groceries.id, title: 'Рынок' };
+    const split: SubcategorySetup = {
+      subcategories: [lenta, market],
+      shops: new Map([[groceries.id, new Map([['lenta', lenta.id]])]]),
+      spending: new Map<string, number | null>([
+        ['by-hand', market.id],
+        ['kept-out', null],
+      ]),
+    };
+    const food = { id: groceries.id, title: 'Продукты', color: null };
+    const expense = (id: string, payee: string, category: Category | null = food) => ({ id, payee, category });
+
+    assert.equal(subcategoryOf(expense('a', 'Лента-0089'), split, { shop: true }), lenta, 'any shop of the chain');
+    assert.equal(subcategoryOf(expense('a', 'Лента-0089'), split, { shop: false }), null, 'a transfer goes only where it was put');
+    assert.equal(subcategoryOf(expense('by-hand', 'Lenta 178'), split, { shop: true }), market);
+    assert.equal(subcategoryOf(expense('kept-out', 'Lenta 178'), split, { shop: true }), null);
+    assert.equal(subcategoryOf(expense('a', 'Lenta 178', { id: 'cafe', title: 'Кафе', color: null }), split, { shop: true }), null, 'in another category');
+    assert.equal(subcategoryOf(expense('by-hand', 'Арсен Г.', null), split, { shop: false }), null, 'no longer in its category');
   });
 });

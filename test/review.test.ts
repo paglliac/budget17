@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { NO_SETUP } from '../src/categories.ts';
-import { findings, kindOf, ordinaryPerWeek, reviewMonth, transferHint, weekThatHolds } from '../src/review.ts';
+import { categoryCatalog, NO_SETUP, NO_SUBCATEGORIES, type SubcategorySetup } from '../src/categories.ts';
+import { findings, kindOf, ordinaryPerWeek, reviewHints, reviewMonth, transferHint, weekParts, weekThatHolds } from '../src/review.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { budgetOf, type SavedBudget } from '../src/web/pages/dashboard.ts';
 import { listOperations } from '../src/ledger.ts';
@@ -157,5 +157,130 @@ describe('weekThatHolds', () => {
   it('rounds up to 5 000, never under the usual week', () => {
     assert.equal(weekThatHolds(54_694), 55_000);
     assert.equal(weekThatHolds(30_000), 45_000);
+  });
+});
+
+describe('weekParts', () => {
+  const lenta = transaction({ id: 'lenta-latin', date: '2026-09-09', outcome: 4_000, tag: [food.id], payee: 'Lenta-0089' });
+  const market = transaction({ id: 'market', date: '2026-09-16', outcome: 5_000, tag: [food.id], payee: 'Арсен Г.' });
+
+  it('splits the weeks into categories and the kinds to check, largest first, each in pieces by shop or by amount', () => {
+    const parts = weekParts(review(data([lenta])), { subcategories: NO_SUBCATEGORIES, regular: saved().regular, selfPayee: 'Иван И.' });
+
+    assert.deepEqual(
+      parts.map((p) => [p.category?.title ?? p.kind, p.amount]),
+      [
+        ['person', 70_000],
+        ['self', 33_047],
+        ['Продукты', 14_000],
+        ['untitled', 500],
+      ],
+    );
+    assert.deepEqual(
+      parts[1]!.pieces.map((p) => [p.key, p.amount]),
+      [
+        ['regular-Кредит', 30_500],
+        ['marketplace', 2_547],
+      ],
+    );
+    const groceries = parts[2]!.pieces;
+    assert.deepEqual(groceries.map((p) => [p.key, p.by === 'shop' && p.name, p.amount]), [['shop-lenta', 'Лента', 14_000]], 'Lenta-0089 and Лента are one shop');
+  });
+
+  it('pieces a split category by subcategory, the rest without one last', () => {
+    const subcategories: SubcategorySetup = {
+      subcategories: [{ id: 1, category: food.id, title: 'Супермаркеты' }],
+      shops: new Map([[food.id, new Map([['lenta', 1]])]]),
+      spending: new Map(),
+    };
+    const parts = weekParts(review(data([lenta, market])), { subcategories, regular: [], selfPayee: 'Иван И.' });
+    const groceries = parts.find((p) => p.category?.id === food.id)!;
+
+    assert.deepEqual(
+      groceries.pieces.map((p) => [p.key, p.amount]),
+      [
+        ['sub-1', 14_000],
+        ['sub-none', 5_000],
+      ],
+    );
+  });
+});
+
+describe('reviewHints', () => {
+  const cafe = tag({ id: 'cafe', title: 'Кафе' });
+  const shopping = tag({ id: 'shopping', title: 'Шоппинг' });
+  const gifts = tag({ id: 'gifts', title: 'Подарки' });
+  const tags = [food, cafe, shopping, gifts];
+
+  function hints(extra: ReturnType<typeof transaction>[], options: { subcategories?: SubcategorySetup; dismissed?: string[]; sorted?: ReturnType<typeof saved> } = {}) {
+    const collections = { ...data(extra), tag: tags };
+    const sorted = options.sorted ?? saved();
+    const all = listOperations(collections, { from: '2000-01-01', to: '2100-01-01' }, sorted);
+    return reviewHints(review(collections, sorted), {
+      history: all.filter((o) => o.kind === 'expense'),
+      incomes: all.filter((o) => o.kind === 'income'),
+      categories: categoryCatalog(tags, NO_SETUP),
+      incomeCategories: categoryCatalog(tags, NO_SETUP, 'income'),
+      subcategories: options.subcategories ?? NO_SUBCATEGORIES,
+      regular: sorted.regular,
+      selfPayee: sorted.selfPayee ?? null,
+      today,
+      dismissed: new Set(options.dismissed ?? []),
+    });
+  }
+  const used = [transaction({ date: '2026-09-20', outcome: 700, tag: [cafe.id], payee: 'Кофейня' }), transaction({ date: '2026-08-20', outcome: 900, tag: [shopping.id], payee: 'DNS' }), transaction({ date: '2026-08-01', outcome: 1_500, tag: [gifts.id], payee: 'Цветы' })];
+  const toTatiana = (date: string, category: string) => transaction({ date, outcome: 3_000, tag: [category], payee: 'Татьяна А.' });
+
+  it('hints a transfer to a person into the category at least two of three of its payee’s earlier expenses went', () => {
+    const found = hints([...used, toTatiana('2026-08-02', food.id), toTatiana('2026-07-02', food.id), toTatiana('2026-06-02', cafe.id)]);
+    const usual = found.find((h) => h.kind === 'usual');
+
+    assert.equal(usual?.kind === 'usual' && usual.category.title, 'Продукты');
+    assert.deepEqual(usual?.kind === 'usual' && [usual.expenses.map((o) => o.id), usual.times, usual.of, usual.last.date], [['person'], 2, 3, '2026-08-02']);
+    const split = hints([...used, toTatiana('2026-08-02', food.id), toTatiana('2026-07-02', food.id), toTatiana('2026-06-02', cafe.id), toTatiana('2026-05-02', cafe.id)]);
+    assert.ok(!split.some((h) => h.kind === 'usual'), 'two of four is no rule');
+    assert.ok(!hints([...used, toTatiana('2026-08-02', food.id)], { dismissed: ['spending:person'] }).some((h) => h.kind === 'usual'), 'turned down');
+  });
+
+  it('hints a transfer in a split category into the subcategory its payee’s earlier ones there went into', () => {
+    const market = { id: 1, category: food.id, title: 'Рынок' };
+    const subcategories: SubcategorySetup = { subcategories: [market], shops: new Map(), spending: new Map([['august-market', market.id]]) };
+    const found = hints(
+      [
+        ...used,
+        transaction({ id: 'market', date: '2026-09-16', outcome: 5_000, tag: [food.id], payee: 'Арсен Г.' }),
+        transaction({ id: 'august-market', date: '2026-08-16', outcome: 4_000, tag: [food.id], payee: 'Арсен Г.' }),
+      ],
+      { subcategories },
+    );
+    const usual = found.find((h) => h.kind === 'usual');
+
+    assert.deepEqual(usual?.kind === 'usual' && [usual.expenses.map((o) => o.id), usual.category.id, usual.subcategory], [['market'], food.id, market]);
+  });
+
+  it('hints transfers to oneself that look like purchases on Ozon or WB where such went before, into a new subcategory unless one is there', () => {
+    const earlier = transaction({ date: '2026-08-05', outcome: 1_234, tag: [shopping.id], payee: 'Иван И.' });
+    const found = hints([...used, earlier]).find((h) => h.kind === 'marketplace');
+
+    assert.deepEqual(found?.kind === 'marketplace' && [found.expenses.map((o) => o.id), found.category.id, found.subcategory], [['self'], shopping.id, { title: 'Ozon и WB' }]);
+    const ozon = { id: 7, category: shopping.id, title: 'Ozon и WB' };
+    const named = hints([...used, earlier], { subcategories: { subcategories: [ozon], shops: new Map(), spending: new Map() } }).find((h) => h.kind === 'marketplace');
+    assert.equal(named?.kind === 'marketplace' && named.subcategory, ozon);
+    assert.ok(!hints(used).some((h) => h.kind === 'marketplace'), 'nothing to go by');
+  });
+
+  it('hints hiding a category nothing went into for three months, unless it is turned down', () => {
+    const own = saved();
+    own.categories = { changes: new Map(), own: [{ id: 'own-1', title: 'Путешествия', hidden: false, kind: 'expense' }] };
+    const found = hints(used.slice(0, 2), { sorted: own }).filter((h) => h.kind === 'hide');
+
+    assert.deepEqual(
+      found.map((h) => h.kind === 'hide' && [h.category.title, h.last]),
+      [['Подарки', null]],
+      'a ZenMoney category never used; an own one may wait for its first expense',
+    );
+    const old = hints([...used.slice(0, 2), transaction({ date: '2026-05-01', outcome: 1_500, tag: [gifts.id], payee: 'Цветы' })]).filter((h) => h.kind === 'hide');
+    assert.deepEqual(old.map((h) => h.kind === 'hide' && [h.category.title, h.last]), [['Подарки', '2026-05-01']]);
+    assert.deepEqual(hints(used.slice(0, 2), { dismissed: ['hide:gifts'] }).filter((h) => h.kind === 'hide'), []);
   });
 });

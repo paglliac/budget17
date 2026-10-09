@@ -93,6 +93,14 @@ export function toolbar(options: { items: Content[] }): Html {
 }
 
 /** Blocks one under another with an even gap, such as days in a feed. */
+/**
+ * Content for one kind of screen only: `wide` while the side panel stands beside the main one, `narrow` once it goes
+ * under it. Something that opens on the side, far down on a narrow screen, can open in place there instead.
+ */
+export function screenOnly(options: { screen: 'wide' | 'narrow'; items: Content[] }): Html {
+  return html`<div class="screen-only ${options.screen}">${options.items}</div>`;
+}
+
 export function stack(options: { items: Content[]; gap?: number }): Html {
   return html`<div class="stack" style="--stack-gap:${options.gap ?? 16}px">${options.items}</div>`;
 }

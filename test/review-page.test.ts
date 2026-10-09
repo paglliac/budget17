@@ -4,7 +4,8 @@ import { NO_SETUP } from '../src/categories.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { createHref } from '../src/web/pages/chrome.ts';
 import type { SavedBudget } from '../src/web/pages/dashboard.ts';
-import { loadReview, renderReview, renderReviewCheck } from '../src/web/pages/review.ts';
+import { loadReview, renderReview, renderReviewCheck, submitReview } from '../src/web/pages/review.ts';
+import { Settings } from '../src/settings.ts';
 import { account, regular, RUB, tag, transaction, user } from './fixtures.ts';
 
 const today = '2026-10-09';
@@ -61,12 +62,55 @@ describe('month review page', () => {
     assert.ok(html.includes('title="Разбор месяца" aria-label="Разбор месяца" aria-current="page"'));
   });
 
-  it('sends what to check to its own page, a kind at a time', () => {
+  it('maps what the weeks were made of, what to check hatched, each part opening on the side', () => {
     const html = page({ today });
 
+    assert.ok(html.includes('Из чего недели'));
+    assert.ok(html.includes('не разобрано 103 547 ₽, 41%'));
+    assert.ok(html.includes('class="cmap-group hatched'));
+    assert.ok(html.includes('href="/review?month=2026-09&amp;tile=category-food"'));
+    assert.ok(html.includes('href="/review?month=2026-09&amp;tile=check-self%3Amarketplace"'));
+    assert.ok(!html.includes('Обычные траты в неделю'), 'the map took the place of the categories a week');
+  });
+
+  it('opens a shop on the side with subcategories to put it into and categories to move its expenses to', () => {
+    const lenta = { id: 3, category: food.id, title: 'Лента' };
+    const sorted = saved({ subcategories: { subcategories: [lenta], shops: new Map(), spending: new Map() } });
+    const html = page({ today, tile: 'category-food:shop-lenta' }, sorted);
+
+    assert.ok(html.includes('Продукты › Лента'));
+    assert.ok(html.includes('action="/review/subcategory?category=food&amp;shop=%D0%9B%D0%B5%D0%BD%D1%82%D0%B0&amp;subcategory=3"'));
+    assert.ok(html.includes('Все траты Лента из «Продукты» пойдут в подкатегорию сами, и новые тоже.'));
+    assert.ok(!html.includes('action="/review/move?spending=groceries&amp;category=food"'), 'its own category is the current one');
+    assert.ok(html.includes('← К выводам'));
+  });
+
+  it('opens what the map folds into Ещё N on its own, without the pieces shown', () => {
+    const shops = ['Лента', 'Магнит', 'Пятёрочка', 'Перекрёсток', 'Ашан', 'ВкусВилл', 'Самокат', 'Чижик'].map((payee, i) =>
+      transaction({ id: `shop-${i}`, date: '2026-09-15', outcome: 8_000 - i * 500, tag: [food.id], payee }),
+    );
+    const many = { ...data, transaction: [...data.transaction!, ...shops] };
+    const html = plain(renderReview(loadReview(many, saved(), { today }), createHref()));
+    assert.ok(html.includes('href="/review?month=2026-09&amp;tile=category-food%3Amore"'));
+
+    const rest = plain(renderReview(loadReview(many, saved(), { today, tile: 'category-food:more' }), createHref()));
+    assert.ok(rest.includes('Продукты › Ещё 2'), 'Лента of the fixture and of these are one shop');
+    const listed = /<ul class="amounts" aria-label="Получатели">(.*?)<\/ul>/s.exec(rest)?.[1] ?? '';
+    assert.ok(listed.includes('tile=category-food%3Ashop-chizhik'), 'a folded shop opens on its own');
+    assert.ok(listed.includes('tile=category-food%3Ashop-samokat'));
+    assert.ok(!listed.includes('shop-magnit'), 'a shop on the map is not listed');
+  });
+
+  it('opens what to check on the side with where to put it, and the page to mark it one by one', () => {
+    const html = page({ today, tile: 'check-person' });
+
+    assert.ok(html.includes('Татьяна А.'));
     assert.ok(html.includes('href="/review/check?month=2026-09&amp;kind=person"'));
-    assert.ok(html.includes('href="/review/check?month=2026-09&amp;kind=self"'));
-    assert.ok(html.includes('href="/review/check?month=2026-09&amp;kind=untitled"'));
+    const piece = page({ today, tile: 'check-person:shop-tatiana' });
+    assert.ok(piece.includes('action="/review/move?spending=person&amp;category=food"'));
+    assert.ok(piece.includes('href="/review?month=2026-09&amp;tile=spending-person"'));
+    assert.ok(page({ today, tile: 'check-person:gone' }).includes('Татьяна А.'), 'a piece that is gone opens its part');
+    assert.ok(page({ today, tile: 'category-gone' }).includes('Здесь больше ничего нет'));
   });
 
   it('says what the assistant found and answers its questions', () => {
@@ -117,5 +161,50 @@ describe('what to check page', () => {
     const html = check({ today, kind: 'person', edit: 'spending-person' });
     assert.ok(html.includes('id="spending-person"'));
     assert.ok(html.includes('action="/spending/person/'));
+  });
+});
+
+describe('review forms', () => {
+  const form = (fields: Record<string, string>) => new URLSearchParams(fields);
+
+  it('moves only the expenses asked into a category and its subcategory, leaving payments of regular expenses be', () => {
+    using settings = new Settings(':memory:');
+    settings.categorize('school', { regular: 1 });
+    assert.deepEqual(submitReview(settings, data, '/review/move', form({ spending: 'person,school,nothing', category: food.id, title: 'Рынок' })), { status: 'saved' });
+
+    const market = settings.subcategorySetup().subcategories[0]!;
+    assert.equal(market.title, 'Рынок');
+    assert.deepEqual([...settings.categorizations()], [['school', { regular: 1 }], ['person', { tag: food.id }]]);
+    assert.deepEqual([...settings.subcategorySetup().spending], [['person', market.id]]);
+    assert.deepEqual(submitReview(settings, data, '/review/move', form({ spending: 'person', category: 'nothing' })), { status: 'missing' });
+  });
+
+  it('puts a shop into a subcategory for good, and transfers one by one', () => {
+    using settings = new Settings(':memory:');
+    const lenta = settings.addSubcategory(food.id, 'Лента');
+    assert.deepEqual(submitReview(settings, data, '/review/subcategory', form({ category: food.id, shop: 'Лента-0089', subcategory: String(lenta.id) })), { status: 'saved' });
+    assert.deepEqual([...settings.subcategorySetup().shops.get(food.id)!], [['lenta', lenta.id]]);
+    submitReview(settings, data, '/review/subcategory', form({ category: food.id, shop: 'Лента', subcategory: 'none' }));
+    assert.equal(settings.subcategorySetup().shops.get(food.id), undefined);
+
+    submitReview(settings, data, '/review/subcategory', form({ category: food.id, spending: 'person', title: 'Рынок' }));
+    assert.deepEqual([...settings.subcategorySetup().spending.values()], [settings.subcategorySetup().subcategories.find((s) => s.title === 'Рынок')!.id]);
+    assert.deepEqual(submitReview(settings, data, '/review/subcategory', form({ category: food.id, spending: 'person', title: ' ' })), { status: 'invalid', error: 'Укажите название' });
+    assert.deepEqual(submitReview(settings, data, '/review/subcategory', form({ category: food.id, spending: 'person', subcategory: '99' })), { status: 'missing' });
+  });
+
+  it('renames and deletes a subcategory, hides a category and turns hints down', () => {
+    using settings = new Settings(':memory:');
+    const lenta = settings.addSubcategory(food.id, 'Лента');
+    assert.deepEqual(submitReview(settings, data, `/review/subcategories/${lenta.id}`, form({ title: 'Супермаркеты' })), { status: 'saved' });
+    assert.equal(settings.subcategorySetup().subcategories[0]?.title, 'Супермаркеты');
+    assert.deepEqual(submitReview(settings, data, `/review/subcategories/${lenta.id}/delete`, form({})), { status: 'saved' });
+    assert.deepEqual(settings.subcategorySetup().subcategories, []);
+
+    assert.deepEqual(submitReview(settings, data, `/review/hide/${food.id}`, form({})), { status: 'saved' });
+    assert.equal(settings.categorySetup().changes.get(food.id)?.hidden, true);
+    assert.deepEqual(submitReview(settings, data, '/review/hide/nothing', form({})), { status: 'missing' });
+    assert.deepEqual(submitReview(settings, data, '/review/dismiss', form({ hints: 'spending:person,hide:food,whatever' })), { status: 'saved' });
+    assert.deepEqual([...settings.dismissedHints()], ['hide:food', 'spending:person']);
   });
 });

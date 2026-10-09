@@ -1,47 +1,61 @@
 // The month review, /review: what happened with a month's money and what to fix, the month just gone unless
-// ?month= asks for another. The main column holds income, spending and what is left, where the income went, the weeks
-// against their limits, ordinary spending a week by category against the months before, what to check, and the
-// regular payments. The side is the assistant: what it found and its answers to four questions (?ask=), worked out by
-// rules from the review for now (see src/review.ts). What to check opens on its own page, /review/check?kind=, one
-// kind at a time by day; an expense opens in place there by ?edit=spending-<ZenMoney id> to be marked as on every page
-// (see marking.ts), and leaves the list once it is explained.
+// ?month= asks for another. The main column holds income, spending and what is left, where the income went, what the
+// weeks were made of as a map of tiles, the weeks against their limits, and the regular payments. The side is the
+// assistant: what it found, its answers to four questions (?ask=) and its hints, worked out by rules from the review
+// for now (see src/review.ts). A tile of the map opens on the side instead (?tile=): what it holds, the hints about
+// it, and where to put its expenses — into another category, or a subcategory, a shop's for good and a transfer's
+// one by one; those post to /review/… (see submitReview). What to check also opens on its own page,
+// /review/check?kind=, one kind at a time by day; an expense opens in place there by ?edit=spending-<ZenMoney id> to be
+// marked as on every page (see marking.ts), and leaves the list once it is explained.
 
 import { mainCurrency } from '../../balances.ts';
+import { categoryCatalog, NO_SUBCATEGORIES, subcategoryOf, type Subcategory, type SubcategorySetup } from '../../categories.ts';
 import { addDays, monthOf, shiftMonth } from '../../dates.ts';
+import { parseTitle } from '../../input.ts';
 import { listOperations, type Operation } from '../../ledger.ts';
+import { operationKind } from '../../operations.ts';
+import { shopKey, shopName } from '../../payees.ts';
 import type { RegularExpense } from '../../regular.ts';
 import {
   findings,
+  hintKeys,
   isToCheck,
+  isTransfer,
   ordinaryPerWeek,
+  reviewHints,
   reviewMonth,
   TO_CHECK,
   transferHint,
+  weekParts,
   weekThatHolds,
   worstWeek,
-  type CategoryWeekly,
   type Finding,
+  type Hint,
   type MonthReview,
   type ReviewedExpense,
   type ToCheck,
+  type WeekPart,
+  type WeekPiece,
 } from '../../review.ts';
+import type { Settings } from '../../settings.ts';
 import { MONTH_LIMIT, WEEK_LIMIT, weeksOfMonth, type WeekSummary } from '../../week.ts';
-import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
+import type { DateString, EntityCollections, TagId } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
-import { capitalize, dayMonth, money, monthName, percent, plural } from '../format.ts';
+import { capitalize, dayMonth, dayMonthYear, money, monthName, percent, plural } from '../format.ts';
 import type { Html } from '../html.ts';
 import { categoryIcon, type IconName } from '../icons.ts';
 import { categoryColor, toneColor, type Tone } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
-import { assistantAnswer, assistantHero, insightList } from '../widgets/assistant.ts';
-import { emptyState, listHeading, pageIntro, segmentedLinks } from '../widgets/basics.ts';
+import { assistantAnswer, assistantHero, insightList, suggestionList } from '../widgets/assistant.ts';
+import { choiceGroup, emptyState, field, footnote, inlineForm, listHeading, pageIntro, section, segmentedLinks } from '../widgets/basics.ts';
 import { figureCard, panelCard } from '../widgets/cards.ts';
-import { flowChart, weekBars } from '../widgets/charts.ts';
+import { categoryMap, flowChart, weekBars } from '../widgets/charts.ts';
+import { entryForm, entryList } from '../widgets/entries.ts';
 import { amountList, dayGroup, operationRow } from '../widgets/operations.ts';
-import { appShell, grid, stack, toolbar, topBar } from '../widgets/shell.ts';
+import { appShell, grid, screenOnly, stack, toolbar, topBar } from '../widgets/shell.ts';
 import { appRail, monthTabs, parseMonth, userName, type Href } from './chrome.ts';
 import { budgetOf, type SavedBudget } from './dashboard.ts';
-import { allExpenses, envelopeMark, loadMarking, markingActions, markingPanel, markingTitle, type Marking } from './marking.ts';
+import { allExpenses, allIncomes, envelopeMark, loadMarking, markingActions, markingPanel, markingTitle, type Marking } from './marking.ts';
 
 /** Questions to the assistant, as its chips offer them. */
 type Question = 'overspend' | 'check' | 'optimize' | 'plan';
@@ -73,12 +87,19 @@ export interface ReviewData {
   edit: string | null;
   symbol: string;
   userName: string | null;
+  /** What the weeks were made of, largest first. */
+  parts: WeekPart[];
+  hints: Hint[];
+  subcategories: SubcategorySetup;
+  selfPayee: string | null;
+  /** On /review: the part of the map open on the side, its piece or one expense (see partId and opened). */
+  tile: string | null;
 }
 
 export function loadReview(
   data: EntityCollections,
   saved: SavedBudget,
-  options: { today: DateString; month?: string | null; ask?: string | null; kind?: string | null; edit?: string | null },
+  options: { today: DateString; month?: string | null; ask?: string | null; kind?: string | null; edit?: string | null; tile?: string | null },
 ): ReviewData {
   const { today } = options;
   const month = options.month ? parseMonth(options.month, monthOf(today)) : shiftMonth(monthOf(today), -1);
@@ -89,6 +110,10 @@ export function loadReview(
   const incomes = listOperations(data, { from: weeks[0]!, to: addDays(weeks.at(-1)!, 6) }, saved).filter((o) => o.kind === 'income');
   const review = reviewMonth(budget, incomes, { month, today, selfPayee: saved.selfPayee ?? null });
   const kind = TO_CHECK.find((k) => k === options.kind) ?? TO_CHECK.find((k) => review.toCheck.some((e) => e.kind === k)) ?? 'person';
+  const history = allExpenses(data, saved);
+  const marking = loadMarking(data, saved, history, today);
+  const subcategories = saved.subcategories ?? NO_SUBCATEGORIES;
+  const selfPayee = saved.selfPayee ?? null;
   return {
     today,
     review,
@@ -96,18 +121,33 @@ export function loadReview(
     ask: QUESTIONS.find((q) => q.key === options.ask)?.key ?? null,
     kind,
     regular: saved.regular,
-    marking: loadMarking(data, saved, allExpenses(data, saved), today),
+    marking,
     edit: options.edit ?? null,
     symbol: mainCurrency(data).symbol,
     userName: userName(data),
+    parts: weekParts(review, { subcategories, regular: saved.regular, selfPayee }),
+    hints: reviewHints(review, {
+      history,
+      incomes: allIncomes(data, saved),
+      categories: categoryCatalog(data.tag ?? [], saved.categories),
+      incomeCategories: marking.incomeCategories,
+      subcategories,
+      regular: saved.regular,
+      selfPayee,
+      today,
+      dismissed: saved.dismissedHints ?? new Set(),
+    }),
+    subcategories,
+    selfPayee,
+    tile: options.tile ?? null,
   };
 }
 
 interface Page {
   d: ReviewData;
   href: Href;
-  /** This page with an expense open or closed, keeping the rest of its state. */
-  here: (changes: { edit?: string | null; ask?: string | null }) => string;
+  /** This page with an expense, an answer or a tile open or closed, keeping the rest of its state. */
+  here: (changes: { edit?: string | null; ask?: string | null; tile?: string | null }) => string;
 }
 
 /** The page of one kind of expenses to check, with one of them open. */
@@ -116,13 +156,15 @@ function checkHref(d: ReviewData, href: Href, kind: ToCheck, edit?: string): str
 }
 
 export function renderReview(d: ReviewData, href: Href): Html {
-  const here: Page['here'] = (changes) => href('/review', { month: d.review.month, ask: d.ask, ...changes });
+  const here: Page['here'] = (changes) => href('/review', { month: d.review.month, ask: d.ask, tile: d.tile, ...changes });
   const page: Page = { d, href, here };
+  const tile = d.tile ? tileSide(page) : null;
   const body = appShell({
     rail: appRail('review', d.userName, href),
     tabs: monthTabs(monthOf(d.today), d.review.month, (m) => href('/review', { month: m ?? monthOf(d.today) })),
-    main: main(page),
-    side: side(page),
+    // On a narrow screen the side goes under the main panel, so an open tile opens in place, under its part of the map.
+    main: main(page, tile),
+    side: tile ? [screenOnly({ screen: 'wide', items: tile }), screenOnly({ screen: 'narrow', items: side(page) })] : side(page),
     wideSide: true,
   });
   return pageDocument({ title: 'Бюджет: разбор месяца', body });
@@ -154,18 +196,14 @@ function sumOf(list: ReviewedExpense[]): number {
   return list.reduce((s, e) => s + e.operation.amount, 0);
 }
 
-/** How a category's week compares with its usual one: new, +39%, −49%, ×11, or nothing when about the same. */
-function versusUsual(c: CategoryWeekly): string | undefined {
-  if (c.usual === null) return 'новое';
-  const ratio = c.perWeek / c.usual;
-  if (Math.abs(ratio - 1) < 0.1) return undefined;
-  if (ratio >= 2) return `×${Math.round(ratio)}`;
-  return ratio > 1 ? `+${percent(ratio - 1)}` : `−${percent(1 - ratio)}`;
+function sum(expenses: readonly Operation[]): number {
+  return expenses.reduce((s, o) => s + o.amount, 0);
 }
 
 // ---- Main column
 
-function main(page: Page): Html[] {
+/** `tile` is what the open tile shows, if any. */
+function main(page: Page, tile: Html[] | null): Html[] {
   const { d, href, here } = page;
   const r = d.review;
   const over = r.inWeeks - r.limits;
@@ -214,6 +252,7 @@ function main(page: Page): Html[] {
         ],
       }),
     }),
+    weekMap(page, tile),
     grid({
       columns: 2,
       min: 320,
@@ -224,7 +263,7 @@ function main(page: Page): Html[] {
           symbol: d.symbol,
           note: `при плане ${money(r.limits, d.symbol)}`,
           badge: { text: money(over, d.symbol, { sign: true }), tone: over > 0 ? 'red' : 'green' },
-          href: here({ ask: 'overspend' }),
+          href: here({ ask: 'overspend', tile: null }),
           body: weekBars({
             label: 'Траты недель против их лимитов',
             bars: r.weeks.map((w, i) => ({
@@ -238,32 +277,6 @@ function main(page: Page): Html[] {
           }),
         }),
         panelCard({
-          title: 'Обычные траты в неделю',
-          amount: ordinaryPerWeek(r),
-          symbol: d.symbol,
-          note: `при плане ${money(WEEK_LIMIT, d.symbol)}`,
-          href: here({ ask: 'optimize' }),
-          body: r.categories.length
-            ? amountList({
-                label: 'Обычные траты по категориям в неделю',
-                items: r.categories.slice(0, 7).map((c) => ({
-                  label: c.title,
-                  amount: c.perWeek,
-                  color: categoryColor(c.id, c.color),
-                  share: c.perWeek / r.categories[0]!.perWeek,
-                  note: versusUsual(c),
-                })),
-              })
-            : emptyState({ text: 'Трат с категорией в неделях нет.' }),
-        }),
-        panelCard({
-          title: 'Проверить',
-          amount: sumOf(r.toCheck),
-          symbol: d.symbol,
-          note: count(r.toCheck.length, EXPENSES),
-          body: toCheckRows(page, null),
-        }),
-        panelCard({
           title: 'Регулярные платежи',
           amount: r.regular,
           symbol: d.symbol,
@@ -273,29 +286,25 @@ function main(page: Page): Html[] {
         }),
       ],
     }),
-  ];
+  ].filter((block): block is Html => block !== null);
 }
 
 /** The kinds of expenses to check, each leading to its page; the one listed there is highlighted. */
-function toCheckRows(page: Page, current: ToCheck | null, options: { counts?: boolean } = {}): Html {
+function toCheckRows(page: Page, current: ToCheck): Html {
   const { d, href } = page;
   const kinds = TO_CHECK.filter((k) => d.review.toCheck.some((e) => e.kind === k));
   if (!kinds.length) return emptyState({ text: 'Всё, что считается в неделях, размечено.' });
   return amountList({
     label: 'Траты, про которые непонятно, что это',
     symbol: d.symbol,
-    items: kinds.map((k) => {
-      const items = d.review.toCheck.filter((e) => e.kind === k);
-      return {
-        label: TO_CHECK_ROWS[k].title,
-        icon: TO_CHECK_ROWS[k].icon,
-        tone: TO_CHECK_ROWS[k].tone,
-        amount: sumOf(items),
-        note: options.counts === false ? undefined : `${items.length} шт.`,
-        href: checkHref(d, href, k),
-        active: k === current,
-      };
-    }),
+    items: kinds.map((k) => ({
+      label: TO_CHECK_ROWS[k].title,
+      icon: TO_CHECK_ROWS[k].icon,
+      tone: TO_CHECK_ROWS[k].tone,
+      amount: sumOf(d.review.toCheck.filter((e) => e.kind === k)),
+      href: checkHref(d, href, k),
+      active: k === current,
+    })),
   });
 }
 
@@ -331,6 +340,404 @@ function spendRow(page: Page, o: Operation): Html {
   });
 }
 
+// ---- What the weeks were made of
+
+/** How many pieces a part shows on the map; past them the rest go together as Ещё N. */
+const PIECES_SHOWN = 7;
+
+/** The pieces a part shows on the map, and the rest it folds into Ещё N, which opens as <part>:more. */
+function folded(part: WeekPart): { shown: WeekPiece[]; rest: WeekPiece[] } {
+  const shown = part.pieces.length > PIECES_SHOWN ? part.pieces.slice(0, PIECES_SHOWN - 1) : part.pieces;
+  return { shown, rest: part.pieces.slice(shown.length) };
+}
+
+/** A part of the map as ?tile= names it: category-<id> or check-<kind>; a piece is <part>:<piece key>. */
+function partId(part: WeekPart): string {
+  return part.category ? `category-${part.category.id}` : `check-${part.kind}`;
+}
+
+function partLabel(part: WeekPart): string {
+  return part.category?.title ?? TO_CHECK_ROWS[part.kind as ToCheck].title;
+}
+
+function pieceLabel(piece: WeekPiece): string {
+  if (piece.by === 'subcategory') return piece.subcategory?.title ?? 'Без подкатегории';
+  if (piece.by === 'shop') return piece.name;
+  if (piece.hint === 'marketplace') return 'Похоже на Ozon и WB';
+  if (piece.hint === 'round') return 'Круглые суммы';
+  return `Сумма «${piece.hint.regular}»`;
+}
+
+/** Expenses some hint would move, by id. */
+function hinted(hints: readonly Hint[]): Set<string> {
+  return new Set(hints.flatMap((h) => (h.kind === 'hide' ? [] : h.expenses.map((o) => o.id))));
+}
+
+/** `tile` is what the open tile shows, if any, to open under its part on a narrow screen. */
+function weekMap(page: Page, tile: Html[] | null): Html {
+  const { d, here } = page;
+  const open = tile ? opened(d) : null;
+  const total = d.parts.reduce((s, p) => s + p.amount, 0);
+  const unsorted = d.parts.filter((p) => !p.category).reduce((s, p) => s + p.amount, 0);
+  const moved = hinted(d.hints);
+  const hasHint = (expenses: Operation[]) => expenses.some((o) => moved.has(o.id));
+  const link = (id: string) => here({ tile: d.tile === id ? null : id });
+  return panelCard({
+    title: 'Из чего недели',
+    amount: total,
+    symbol: d.symbol,
+    note: [unsorted > 0 ? `не разобрано ${money(unsorted, d.symbol)}, ${percent(unsorted / total)}` : 'всё разобрано', moved.size ? 'точка и сиреневая рамка — есть подсказка' : '']
+      .filter(Boolean)
+      .join(' · '),
+    body: d.parts.length
+      ? categoryMap({
+          label: 'Траты недель по категориям',
+          symbol: d.symbol,
+          groups: d.parts.map((part) => {
+            const id = partId(part);
+            const { shown, rest } = folded(part);
+            const items = shown.map((piece) => ({
+              label: pieceLabel(piece),
+              amount: piece.amount,
+              href: link(`${id}:${piece.key}`),
+              active: d.tile === `${id}:${piece.key}`,
+              hinted: hasHint(piece.expenses),
+            }));
+            const folds = rest.flatMap((p) => p.expenses);
+            if (rest.length) items.push({ label: `Ещё ${rest.length}`, amount: sum(folds), href: link(`${id}:more`), active: d.tile === `${id}:more`, hinted: hasHint(folds) });
+            return {
+              label: partLabel(part),
+              amount: part.amount,
+              color: part.category ? categoryColor(part.category.id, part.category.color) : toneColor('gray'),
+              hatched: !part.category,
+              href: link(id),
+              active: d.tile === id,
+              hinted: hasHint(part.expenses),
+              items,
+              panel: open?.part === part ? tile : undefined,
+            };
+          }),
+        })
+      : emptyState({ text: 'Трат в неделях нет.' }),
+  });
+}
+
+/** What ?tile= opens: a part, a piece of it, the pieces it folds into Ещё N (`rest`), or one expense, with its part. */
+type Opened =
+  | { part: WeekPart; piece: WeekPiece | null; rest: WeekPiece[] | null; expense: null }
+  | { part: WeekPart | null; piece: null; rest: null; expense: Operation };
+
+/**
+ * The tile open on the side. A shop of a split category is no piece on the map, but opens as one from its
+ * subcategory. A piece that is gone, as its expenses went elsewhere or its subcategory was deleted, opens its part.
+ */
+function opened(d: ReviewData): Opened | null {
+  const tile = d.tile ?? '';
+  if (tile.startsWith('spending-')) {
+    const expense = d.parts.flatMap((p) => p.expenses).find((o) => `spending-${o.id}` === tile);
+    return expense ? { part: d.parts.find((p) => p.expenses.includes(expense)) ?? null, piece: null, rest: null, expense } : null;
+  }
+  const [id, key] = tile.split(/:(.*)/s);
+  const part = d.parts.find((p) => partId(p) === id);
+  if (!part) return null;
+  const piece = part.pieces.find((p) => p.key === key);
+  if (piece) return { part, piece, rest: null, expense: null };
+  const { rest } = folded(part);
+  if (key === 'more' && rest.length) return { part, piece: null, rest, expense: null };
+  const shop = key?.startsWith('shop-') ? part.expenses.filter((o) => `shop-${shopKey(o.payee)}` === key) : [];
+  if (shop.length) return { part, piece: { key: key!, by: 'shop', name: shopName(shop[0]!.payee), amount: sum(shop), expenses: shop }, rest: null, expense: null };
+  return { part, piece: null, rest: null, expense: null };
+}
+
+/** The side with a tile open: what it holds, the hints about it, and where to put its expenses. */
+function tileSide(page: Page): Html[] {
+  const { d, here } = page;
+  const back = toolbar({ items: [segmentedLinks({ label: 'Назад', items: [{ label: '← К выводам', href: here({ tile: null }) }] })] });
+  const open = opened(d);
+  if (!open) return [back, emptyState({ text: 'Здесь больше ничего нет: траты разнесены.' })];
+  const expenses = open.expense ? [open.expense] : open.piece ? open.piece.expenses : open.rest ? open.rest.flatMap((p) => p.expenses) : open.part.expenses;
+  const amount = sum(expenses);
+  const label = open.expense
+    ? `${dayMonth(open.expense.date)} · ${markingTitle(open.expense)}`
+    : open.piece
+      ? `${partLabel(open.part)} › ${pieceLabel(open.piece)}`
+      : open.rest
+        ? `${partLabel(open.part)} › Ещё ${open.rest.length}`
+        : partLabel(open.part);
+  const ids = new Set(expenses.map((o) => o.id));
+  const hints = d.hints.filter((h) => h.kind !== 'hide' && h.expenses.some((o) => ids.has(o.id)));
+  return [
+    back,
+    figureCard({
+      label,
+      amount,
+      symbol: d.symbol,
+      note: open.expense ? open.expense.account : `${count(expenses.length, EXPENSES)}, ${percent(amount / Math.max(1, d.review.inWeeks))} недель`,
+    }),
+    hints.length ? suggestionList({ label: 'Подсказки', items: hints.map((h) => hintItem(page, h)) }) : null,
+    ...(open.expense ? expenseTile(page, open.expense, open.part) : open.piece ? pieceTile(page, open.part, open.piece) : partTile(page, open.part, open.rest ?? open.part.pieces)),
+  ].filter((block): block is Html => block !== null);
+}
+
+/**
+ * A whole part, or what it folds into Ещё N: its pieces, each opening on its own; what to check also goes one by one on
+ * its page.
+ */
+function partTile(page: Page, part: WeekPart, pieces: WeekPiece[]): Html[] {
+  const { d, href, here } = page;
+  const id = partId(part);
+  const title = part.kind === 'self' ? 'По сумме' : pieces[0]?.by === 'subcategory' ? 'Подкатегории' : part.kind === 'person' ? 'Кому' : 'Получатели';
+  return [
+    section({
+      title,
+      body: amountList({
+        label: title,
+        symbol: d.symbol,
+        items: pieces.map((piece) => ({ label: pieceLabel(piece), amount: piece.amount, note: `${piece.expenses.length} шт.`, href: here({ tile: `${id}:${piece.key}` }) })),
+      }),
+    }),
+    part.category ? null : segmentedLinks({ label: 'Проверить', items: [{ label: 'Разметить по одной →', href: checkHref(d, href, part.kind as ToCheck) }] }),
+  ].filter((block): block is Html => block !== null);
+}
+
+function pieceTile(page: Page, part: WeekPart, piece: WeekPiece): Html[] {
+  const { d, here } = page;
+  const id = partId(part);
+  const spends = section({ title: 'Траты', body: expenseLinks(page, piece.expenses) });
+  if (!part.category) return [categoryChoices(page, piece.expenses, null), spends];
+  const category = part.category;
+  if (piece.by === 'subcategory') {
+    const shops = new Map<string, Operation[]>();
+    for (const o of piece.expenses) shops.set(shopKey(o.payee), [...(shops.get(shopKey(o.payee)) ?? []), o]);
+    return [
+      section({
+        title: 'Получатели',
+        body: amountList({
+          label: 'Получатели',
+          symbol: d.symbol,
+          items: [...shops].map(([key, expenses]) => ({ label: shopName(expenses[0]!.payee), amount: sum(expenses), note: `${expenses.length} шт.`, href: here({ tile: `${id}:shop-${key}` }) })),
+        }),
+      }),
+      piece.subcategory ? subcategoryForm(page, piece.subcategory) : null,
+    ].filter((block): block is Html => block !== null);
+  }
+  return [...subcategoryChoices(page, category, piece.expenses), categoryChoices(page, piece.expenses, category.id), spends];
+}
+
+/** One expense: its category and subcategory, and all of its marking where it is marked in full. */
+function expenseTile(page: Page, o: Operation, part: WeekPart | null): Html[] {
+  const { d, href } = page;
+  const kind = part && !part.category ? (part.kind as ToCheck) : null;
+  const marking = kind ? checkHref(d, href, kind, `spending-${o.id}`) : `${href('/operations', { month: monthOf(o.date), q: o.payee, edit: `spending-${o.id}` })}#spending-${o.id}`;
+  return [
+    ...(o.category ? subcategoryChoices(page, o.category, [o]) : []),
+    categoryChoices(page, [o], o.category?.id ?? null),
+    segmentedLinks({ label: 'Разметка', items: [{ label: 'Вся разметка траты →', href: marking }] }),
+  ];
+}
+
+/** Expenses, each opening on its own, newest first. */
+function expenseLinks(page: Page, expenses: Operation[]): Html {
+  const { d, here } = page;
+  return amountList({
+    label: 'Траты',
+    symbol: d.symbol,
+    items: [...expenses]
+      .sort((a, b) => b.date.localeCompare(a.date) || b.created - a.created)
+      .map((o) => ({ label: `${dayMonth(o.date)} · ${markingTitle(o)}`, amount: o.amount, href: here({ tile: `spending-${o.id}` }) })),
+  });
+}
+
+/** Where to move expenses: the categories shown when marking, the one a hint suggests marked. */
+function categoryChoices(page: Page, expenses: Operation[], current: TagId | null): Html {
+  const { d, href } = page;
+  const ids = expenses.map((o) => o.id);
+  const suggested = d.hints.find((h) => h.kind !== 'hide' && h.expenses.some((o) => ids.includes(o.id)))?.category.id;
+  return choiceGroup({
+    label: expenses.length > 1 ? `Категория этих ${count(expenses.length, ['траты', 'трат', 'трат'])}` : 'Категория',
+    choices: d.marking.categories
+      .filter((c) => !c.hidden || c.id === current)
+      .map((c) => ({
+        label: c.title,
+        color: categoryColor(c.id, c.color),
+        current: c.id === current,
+        suggested: c.id === suggested,
+        action: href('/review/move', { spending: ids.join(','), category: c.id }),
+      })),
+  });
+}
+
+/**
+ * The subcategories of a category to put expenses into. A shop's expenses go into one for good, its new ones too,
+ * so the choice is the shop's; a transfer's is only its own.
+ */
+function subcategoryChoices(page: Page, category: { id: TagId; title: string }, expenses: Operation[]): Html[] {
+  const { d, href } = page;
+  const first = expenses[0]!;
+  const shop = !isTransfer(first, d.selfPayee);
+  const target = shop ? { shop: first.payee } : { spending: expenses.map((o) => o.id).join(',') };
+  const subs = d.subcategories.subcategories.filter((s) => s.category === category.id);
+  const of = (o: Operation) => subcategoryOf(o, d.subcategories, { shop }) ?? null;
+  const current = expenses.every((o) => of(o)?.id === of(first)?.id) ? (of(first)?.id ?? null) : undefined;
+  const ids = new Set(expenses.map((o) => o.id));
+  const usual = d.hints.find((h) => h.kind === 'usual' && h.expenses.some((o) => ids.has(o.id)));
+  const suggested = usual?.kind === 'usual' ? usual.subcategory?.id : undefined;
+  const action = (subcategory: string) => href('/review/subcategory', { category: category.id, ...target, subcategory });
+  return [
+    choiceGroup({
+      label: 'Подкатегория',
+      choices: [
+        ...subs.map((s) => ({ label: s.title, current: s.id === current, suggested: s.id === suggested, action: action(String(s.id)) })),
+        { label: 'Без подкатегории', current: current === null, action: action('none') },
+      ],
+    }),
+    inlineForm({ label: 'Новая подкатегория', action: href('/review/subcategory', { category: category.id, ...target }), name: 'title', placeholder: 'Например, Лента', maxLength: 80, submitLabel: 'Добавить' }),
+    footnote({
+      text: shop
+        ? `Все траты ${shopName(first.payee)} из «${category.title}» пойдут в подкатегорию сами, и новые тоже.`
+        : 'У перевода подкатегория своя у каждой траты: следующие переводы получат её подсказкой.',
+    }),
+  ];
+}
+
+/** A subcategory's title to change, or to delete it, its expenses left without one. */
+function subcategoryForm(page: Page, sub: Subcategory): Html {
+  const { href } = page;
+  return entryList({
+    label: 'Подкатегория',
+    items: [
+      entryForm({
+        action: href(`/review/subcategories/${sub.id}`),
+        submitLabel: 'Сохранить',
+        icon: 'layers',
+        color: toneColor('violet'),
+        fields: field({ label: 'Название подкатегории', name: 'title', value: sub.title, maxLength: 80, required: true }),
+        deleteAction: href(`/review/subcategories/${sub.id}/delete`),
+      }),
+    ],
+  });
+}
+
+function hintItem(page: Page, h: Hint): { icon: IconName; tone: Tone; title: string; text: string; source: string; actions: Array<{ label: string; action: string }> } {
+  const { d, href } = page;
+  const s = d.symbol;
+  const dismiss = { label: 'Не надо', action: href('/review/dismiss', { hints: hintKeys(h).join(',') }) };
+  if (h.kind === 'hide')
+    return {
+      icon: 'x',
+      tone: 'gray',
+      title: `Скрыть «${h.category.title}»`,
+      text: h.last ? `За три месяца трат в ней нет, последняя — ${dayMonthYear(h.last, d.today)}.` : 'Трат в ней не было ни разу.',
+      source: 'правило',
+      actions: [{ label: 'Скрыть', action: href(`/review/hide/${h.category.id}`) }, dismiss],
+    };
+  const spending = h.expenses.map((o) => o.id).join(',');
+  const amount = stop(`${count(h.expenses.length, h.kind === 'marketplace' ? TRANSFERS : EXPENSES)} на ${money(sum(h.expenses), s)}`);
+  const into = (sub: { title: string } | null) => `«${h.category.title}${sub ? ` › ${sub.title}` : ''}»`;
+  if (h.kind === 'marketplace') {
+    const sub = h.subcategory;
+    return {
+      icon: 'card',
+      tone: 'violet',
+      title: `Переводы себе с некруглой суммой → ${into(sub)}`,
+      text: `${amount} Так выглядит оплата покупок на Ozon и WB, а какой из двух банков — по данным не видно.`,
+      source: 'по прошлым переводам',
+      actions: [{ label: 'Перенести', action: href('/review/move', { spending, category: h.category.id, ...('id' in sub ? { subcategory: String(sub.id) } : { title: sub.title }) }) }, dismiss],
+    };
+  }
+  const name = shopName(h.expenses[0]!.payee);
+  const times = h.times === 1 ? 'Так размечена трата' : `Так размечены ${h.times}${h.times < h.of ? ` из ${h.of}` : ''} ${plural(h.times, EXPENSES)}, последняя —`;
+  return {
+    icon: 'repeat',
+    tone: 'green',
+    title: `${name} → ${into(h.subcategory)}`,
+    text: `${amount} ${stop(`${times} ${dayMonthYear(h.last.date, d.today)} на ${money(h.last.amount, s)}`)}`,
+    source: 'по прошлым тратам',
+    actions: [{ label: 'Перенести', action: href('/review/move', { spending, category: h.category.id, subcategory: h.subcategory ? String(h.subcategory.id) : null }) }, dismiss],
+  };
+}
+
+// ---- Forms
+
+export type ReviewSubmission = { status: 'saved' } | { status: 'missing' } | { status: 'invalid'; error: string };
+
+/**
+ * Applies a form posted to /review/…, with what it carries in `form`, the query of its URL and its fields alike:
+ * - move — the expenses in `spending` (ids, by commas) go into `category`, only they, and into its `subcategory` (an id)
+ *   or a new one titled `title`;
+ * - subcategory — the expenses of `category` of the shop `shop` (as the bank names it, any of its shops) or those in
+ *   `spending` go into `subcategory`, none with none, or into a new one titled `title`;
+ * - subcategories/:id — renames a subcategory to `title`; subcategories/:id/delete deletes it;
+ * - hide/:category — hides a category from marking;
+ * - dismiss — turns down the hints in `hints` (as hintKeys names them, by commas).
+ * Payments of regular expenses keep where they are. The category, subcategory and expenses must exist.
+ */
+export function submitReview(settings: Settings, data: EntityCollections, path: string, form: URLSearchParams): ReviewSubmission {
+  const catalog = categoryCatalog(data.tag ?? [], settings.categorySetup());
+  const category = catalog.find((c) => c.id === form.get('category'));
+  const sorted = settings.categorizations();
+  const existing = new Set((data.transaction ?? []).filter((t) => !t.deleted && operationKind(t) === 'expense').map((t) => t.id));
+  const spending = (form.get('spending') ?? '')
+    .split(',')
+    .filter((id) => existing.has(id))
+    .filter((id) => !(sorted.get(id) && 'regular' in sorted.get(id)!));
+  /** The subcategory of `category` the form names, a new one by its title, or null for none; undefined when wrong. */
+  const subcategory = (): Subcategory | null | undefined => {
+    if (!category) return undefined;
+    const title = form.get('title');
+    if (title !== null) {
+      const parsed = parseTitle(title);
+      return 'error' in parsed ? undefined : settings.addSubcategory(category.id, parsed.value);
+    }
+    const id = form.get('subcategory');
+    if (id === null || id === 'none') return null;
+    return settings.subcategorySetup().subcategories.find((s) => String(s.id) === id && s.category === category.id);
+  };
+
+  if (path === '/review/move') {
+    if (!category || !spending.length) return { status: 'missing' };
+    const sub = form.has('subcategory') || form.has('title') ? subcategory() : null;
+    if (sub === undefined) return { status: 'missing' };
+    for (const id of spending) {
+      settings.categorize(id, { tag: category.id });
+      if (sub) settings.putSpending(id, sub.id);
+    }
+    return { status: 'saved' };
+  }
+  if (path === '/review/subcategory') {
+    const shop = shopKey(form.get('shop') ?? '');
+    if (!category || (!shop && !spending.length)) return { status: 'missing' };
+    const title = form.get('title');
+    const parsed = title === null ? null : parseTitle(title);
+    if (parsed && 'error' in parsed) return { status: 'invalid', error: parsed.error };
+    const sub = subcategory();
+    if (sub === undefined) return { status: 'missing' };
+    if (shop) settings.putShop(category.id, shop, sub?.id ?? null);
+    else for (const id of spending) settings.putSpending(id, sub?.id ?? null);
+    return { status: 'saved' };
+  }
+  const [, id, action] = /^\/review\/subcategories\/(\d+)(?:\/(delete))?$/.exec(path) ?? [];
+  if (id) {
+    if (action === 'delete') return settings.deleteSubcategory(Number(id)) ? { status: 'saved' } : { status: 'missing' };
+    const title = parseTitle(form.get('title') ?? '');
+    if ('error' in title) return { status: 'invalid', error: title.error };
+    return settings.renameSubcategory(Number(id), title.value) ? { status: 'saved' } : { status: 'missing' };
+  }
+  const [, hide] = /^\/review\/hide\/([\w-]+)$/.exec(path) ?? [];
+  if (hide) {
+    if (!catalog.some((c) => c.id === hide)) return { status: 'missing' };
+    settings.hideCategory(hide, true);
+    return { status: 'saved' };
+  }
+  if (path === '/review/dismiss') {
+    const hints = (form.get('hints') ?? '').split(',').filter((h) => /^(hide|spending):[\w-]+$/.test(h));
+    if (!hints.length) return { status: 'missing' };
+    settings.dismissHints(hints);
+    return { status: 'saved' };
+  }
+  return { status: 'missing' };
+}
+
 // ---- The assistant
 
 function side(page: Page): Html[] {
@@ -345,6 +752,8 @@ function side(page: Page): Html[] {
     d.ask ? answer(page, d.ask) : null,
     items.length ? listHeading({ title: 'Главные выводы', count: items.length }) : null,
     items.length ? insightList({ label: 'Главные выводы', items }) : null,
+    d.hints.length ? listHeading({ title: 'Подсказки', count: d.hints.length }) : null,
+    d.hints.length ? suggestionList({ label: 'Подсказки', items: d.hints.map((h) => hintItem(page, h)) }) : null,
   ].filter((block): block is Html => block !== null);
 }
 
@@ -535,7 +944,7 @@ export function renderReviewCheck(d: ReviewData, href: Href): Html {
         symbol: d.symbol,
         note: `${count(r.toCheck.length, EXPENSES)} в неделях ${monthName(r.month, 'genitive')}, про которые непонятно, что это`,
       }),
-      toCheckRows(page, d.kind, { counts: false }),
+      toCheckRows(page, d.kind),
     ],
   });
   return pageDocument({ title: 'Бюджет: что проверить', body });
