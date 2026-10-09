@@ -7,6 +7,8 @@
 //   with «Не так», and asks what it could not tell; the side stays the rule assistant.
 // - C «Письмо»: the main column opens with Claude's letter about the month, its questions and hints inside; the side only
 //   answers the four questions.
+// «Пересмотреть» asks Claude to look again after the user changed the marking or wrote about expenses: until the session
+// rewrites the answer with a later madeAt, the card says it is looking again; the server log says what was asked.
 // What is accepted, turned down or answered lives in memory (`state`) and is laid over the saved marking before the review
 // is worked out, so settings.db stays as it is.
 
@@ -72,6 +74,8 @@ const state = {
   accepted: new Set<string>(),
   declined: new Set<string>(),
   answers: new Map<string, number>(),
+  /** When the user asked Claude to look again, until an answer made later comes. */
+  rerun: null as Date | null,
 };
 
 /** A form of the prototype, /review/ai/<accept|decline|undo|answer|reset>; false when there is no such form. */
@@ -94,10 +98,18 @@ export function submitAi(path: string, form: URLSearchParams): boolean {
     case '/review/ai/answer':
       state.answers.set(id, Number(form.get('option') ?? 0));
       return true;
+    case '/review/ai/rerun':
+      state.rerun = new Date();
+      console.log(
+        `PROTOTYPE: Claude asked to look again at ${state.rerun.toISOString()}`,
+        JSON.stringify({ accepted: [...state.accepted], declined: [...state.declined], answers: Object.fromEntries(state.answers) }),
+      );
+      return true;
     case '/review/ai/reset':
       state.accepted.clear();
       state.declined.clear();
       state.answers.clear();
+      state.rerun = null;
       return true;
   }
   return false;
@@ -192,6 +204,7 @@ export function loadAiReview(
   options: Parameters<typeof loadReview>[2] & { variant: VariantKey; list?: string | null },
 ): AiReview {
   const ai = readAi();
+  if (state.rerun && new Date(ai.madeAt) >= state.rerun) state.rerun = null;
   const d = loadReview(data, overlay(data, saved, ai, options.variant, options), options);
   const ids = new Map<string, string[]>([...ai.marking, ...ai.questions].map((x) => [x.id, resolve(data, x.expenses)]));
   // What still waits for a word from the user is outlined on the map.
@@ -284,10 +297,13 @@ function aiAnswer(r: AiReview, here: Page['here']): Html | null {
   return assistantAnswer({ question: QUESTIONS.find((q) => q.key === ask)!.label, paragraphs: r.ai.answers[ask], closeHref: here({ ask: null }) });
 }
 
-function hero(r: AiReview, here: Page['here'], text: string): Html {
+function hero(r: AiReview, here: Page['here'], text: string, href?: Href): Html {
+  const asked = state.rerun;
+  const at = (t: Date) => `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
   return assistantHero({
     title: `Claude разобрал ${monthName(r.d.review.month)}`,
-    text,
+    text: asked ? `Пересматриваю с ${at(asked)}: учту разметку, ваши комментарии и ответы.` : text,
+    action: href && !asked ? { label: 'Пересмотреть', icon: 'refresh', action: href('/review/ai/rerun') } : undefined,
     chips: QUESTIONS.map((q) => ({ label: q.label, icon: q.icon, href: here({ ask: r.d.ask === q.key ? null : q.key }), active: r.d.ask === q.key })),
   });
 }
@@ -369,7 +385,7 @@ function sideA(r: AiReview, page: Page): Html[] {
     spare: { label: 'Лишние траты', count: r.ai.avoidable.length, body: () => insightList({ label: 'Можно было не тратить', items: avoidableItems(r) }) },
   };
   return [
-    hero(r, here, `${madeAt(r)} · ${count(r.ai.findings.length, ['вывод', 'вывода', 'выводов'])}, ${count(pending(r), ['подсказка', 'подсказки', 'подсказок'])}`),
+    hero(r, here, `${madeAt(r)} · ${count(r.ai.findings.length, ['вывод', 'вывода', 'выводов'])}, ${count(pending(r), ['подсказка', 'подсказки', 'подсказок'])}`, href),
     aiAnswer(r, here),
     segmentedLinks({ label: 'Что нашёл Claude', items: LISTS.map((l) => ({ label: lists[l].label, count: lists[l].count, href: tab(l), active: l === r.list })) }),
     lists[r.list].body(),
