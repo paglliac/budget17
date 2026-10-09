@@ -1,8 +1,9 @@
 // PROTOTYPE (throwaway, ticket «Разбор месяца: что показать»): the month review drawn by the user's picture.
 // The main column says what happened with the month's money: income, spent and left, where it went, the weeks against
 // their limits, ordinary spending a week by category, what to check and the regular payments. The side is the
-// assistant, faked by rules for now: findings and answers to four questions. Nothing is stored but the marks made on
-// expenses, which open in place as everywhere (marking.ts).
+// assistant, faked by rules for now: findings and answers to four questions. What to check opens on its own page,
+// /review/check, a group at a time. Nothing is stored but the marks made on expenses, which open in place as
+// everywhere (marking.ts).
 
 import { summarizeBalances } from '../../balances.ts';
 import { addDays, monthOf, shiftMonth, type MonthString } from '../../dates.ts';
@@ -15,10 +16,11 @@ import { capitalize, dayMonth, money, monthName, percent, plural } from '../form
 import type { Html } from '../html.ts';
 import { categoryIcon, type IconName } from '../icons.ts';
 import { categoryColor, toneColor, type Tone } from '../tones.ts';
-import { pageIntro } from '../widgets/basics.ts';
-import { operationList, operationRow } from '../widgets/operations.ts';
+import { balanceTotal } from '../widgets/accounts.ts';
+import { emptyState, pageIntro, segmentedLinks } from '../widgets/basics.ts';
+import { dayGroup, operationRow } from '../widgets/operations.ts';
 import { assistantAnswer, assistantHero, figureCard, flowChart, insightList, listHeading, metricList, panelCard, weekBars } from '../widgets/review.ts';
-import { appShell, grid, topBar } from '../widgets/shell.ts';
+import { appShell, grid, stack, toolbar, topBar } from '../widgets/shell.ts';
 import { appRail, monthTabs, parseMonth, userName, type Href } from './chrome.ts';
 import { budgetOf, type SavedBudget } from './dashboard.ts';
 import { allExpenses, envelopeMark, loadMarking, markingActions, markingDetails, markingPanel, markingTitle, type Marking } from './marking.ts';
@@ -172,12 +174,18 @@ interface Page {
   href: Href;
   /** This page with the given changes to its state. */
   to: (changes?: { month?: string | null; ask?: string | null; group?: string | null; edit?: string | null }) => string;
+  /** The page of a group of expenses to check, with one of them open. */
+  check: (group: Doubtful, edit?: string | null) => string;
+}
+
+function checkLink(d: ReviewData, href: Href): Page['check'] {
+  return (group, edit) => `${href('/review/check', { month: d.month, group, edit })}${edit ? `#${edit}` : ''}`;
 }
 
 export function renderReview(d: ReviewData, href: Href): Html {
-  const state = { month: d.month, ask: d.ask, group: d.group };
+  const state = { month: d.month, ask: d.ask };
   const to: Page['to'] = (changes = {}) => href('/review', { ...state, ...changes });
-  const page: Page = { d, href, to };
+  const page: Page = { d, href, to, check: checkLink(d, href) };
   const body = appShell({
     rail: appRail('review', d.userName, href),
     tabs: monthTabs(monthOf(d.today), d.month, (m) => to({ month: m ?? monthOf(d.today), group: null, edit: null })),
@@ -320,38 +328,7 @@ function main(page: Page): Html[] {
           amount: t.doubtfulSum,
           symbol: d.symbol,
           note: count(t.doubtful.length, 'трата', 'траты', 'трат'),
-          body: [
-            metricList({
-              label: 'Траты, про которые непонятно, что это',
-              symbol: d.symbol,
-              items: t.doubtful.length
-                ? DOUBTFUL.flatMap((g) => {
-                    const items = t.doubtful.filter((e) => e.bucket === g);
-                    if (!items.length) return [];
-                    return [
-                      {
-                        label: DOUBTFUL_ROWS[g].label,
-                        icon: DOUBTFUL_ROWS[g].icon,
-                        tone: DOUBTFUL_ROWS[g].tone,
-                        amount: items.reduce((s, e) => s + e.o.amount, 0),
-                        note: `${items.length} шт.`,
-                        href: `${to({ group: d.group === g ? null : g, edit: null })}#check`,
-                        active: d.group === g,
-                      },
-                    ];
-                  })
-                : [{ label: 'Всё, что в неделях, размечено', amount: 0, icon: 'check' as const, tone: 'green' as const }],
-            }),
-            d.group
-              ? operationList({
-                  label: DOUBTFUL_ROWS[d.group].label,
-                  rows: t.doubtful
-                    .filter((e) => e.bucket === d.group)
-                    .sort((a, b) => a.o.date.localeCompare(b.o.date))
-                    .map((e) => spendRow(page, e.o)),
-                })
-              : null,
-          ],
+          body: groupRows(page, null),
         }),
         panelCard({
           title: 'Регулярные платежи',
@@ -364,6 +341,33 @@ function main(page: Page): Html[] {
       ],
     }),
   ];
+}
+
+/** The groups of expenses to check, each leading to its page; the one shown there is highlighted. */
+function groupRows(page: Page, current: Doubtful | null, options: { counts?: boolean } = {}): Html {
+  const { d } = page;
+  const t = totals(d);
+  return metricList({
+    label: 'Траты, про которые непонятно, что это',
+    symbol: d.symbol,
+    items: t.doubtful.length
+      ? DOUBTFUL.flatMap((g) => {
+          const items = t.doubtful.filter((e) => e.bucket === g);
+          if (!items.length) return [];
+          return [
+            {
+              label: DOUBTFUL_ROWS[g].label,
+              icon: DOUBTFUL_ROWS[g].icon,
+              tone: DOUBTFUL_ROWS[g].tone,
+              amount: items.reduce((s, e) => s + e.o.amount, 0),
+              note: options.counts === false ? undefined : `${items.length} шт.`,
+              href: page.check(g),
+              active: g === current,
+            },
+          ];
+        })
+      : [{ label: 'Всё, что в неделях, размечено', amount: 0, icon: 'check' as const, tone: 'green' as const }],
+  });
 }
 
 function regularRows(d: ReviewData): Array<{ label: string; amount: number }> {
@@ -382,15 +386,15 @@ function versusUsual(c: CategoryWeekly): string | undefined {
   return ratio > 1 ? `+${percent(ratio - 1)}` : `−${percent(1 - ratio)}`;
 }
 
-/** An expense's row that opens in place to be marked. */
-function spendRow(page: Page, o: Operation): Html {
+/** An expense's row that opens in place to be marked; under a day's heading it does not repeat the date. */
+function spendRow(page: Page, o: Operation, options: { date?: boolean } = {}): Html {
   const { d, href, to } = page;
   const key = `spending-${o.id}`;
   const open = d.edit === key;
   return operationRow({
     id: key,
     title: markingTitle(o),
-    details: [dayMonth(o.date), markingDetails(o), o.payee === SELF_PAYEE ? selfHint(d, o) : undefined].filter(Boolean).join(' · '),
+    details: [options.date === false ? undefined : dayMonth(o.date), markingDetails(o), o.payee === SELF_PAYEE ? selfHint(d, o) : undefined].filter(Boolean).join(' · '),
     icon: o.category ? categoryIcon(o.category.title) : 'tag',
     color: categoryColor(o.category?.id ?? null, o.category?.color ?? null),
     kind: 'expense',
@@ -459,7 +463,7 @@ function insights(page: Page): Insight[] {
       tone: 'blue',
       title: `Переводы людям в неделях: ${money(people.reduce((s, e) => s + e.o.amount, 0), d.symbol)}`,
       text: stop(`${count(people.length, 'перевод')}, крупнейший — ${largest.payee} ${money(largest.amount, d.symbol)}`),
-      href: `${to({ group: 'person' })}#check`,
+      href: page.check('person'),
     });
   }
   const self = t.doubtful.filter((e) => e.bucket === 'self');
@@ -472,7 +476,7 @@ function insights(page: Page): Insight[] {
       text: shop.length
         ? `${count(self.length, 'перевод')}, из них ${shop.length} с некруглой суммой похожи на покупки на Ozon и WB.`
         : `${count(self.length, 'перевод')}, круглые суммы — кредит или крупная покупка.`,
-      href: `${to({ group: 'self' })}#check`,
+      href: page.check('self'),
     });
   }
   const growth = d.categories.find((c) => c.usual !== null && c.perWeek > c.usual * 1.2 && c.perWeek - c.usual > 2_000);
@@ -586,7 +590,64 @@ function answer(page: Page, ask: Question): Html {
 
 /** Opens an expense in place in «Проверить», or on the overview's week when it is not there. */
 function openSpend(page: Page, e: ReviewData['expenses'][number]): string {
-  const { to, href } = page;
-  if (isDoubtful(e.bucket)) return `${to({ group: e.bucket, edit: `spending-${e.o.id}` })}#spending-${e.o.id}`;
+  const { href } = page;
+  if (isDoubtful(e.bucket)) return page.check(e.bucket, `spending-${e.o.id}`);
   return href('/operations', { month: monthOf(e.o.date), q: e.o.payee, edit: `spending-${e.o.id}` });
+}
+
+// ---- What to check, a group at a time
+
+/** The expenses of one group to check, by day, newest first; they leave it as they are marked. */
+export function renderReviewCheck(d: ReviewData, href: Href): Html {
+  const t = totals(d);
+  const group = d.group ?? DOUBTFUL.find((g) => t.doubtful.some((e) => e.bucket === g)) ?? 'person';
+  const to: Page['to'] = (changes = {}) => href('/review/check', { month: d.month, group, ...changes });
+  const page: Page = { d, href, to, check: checkLink(d, href) };
+  const items = t.doubtful.filter((e) => e.bucket === group).sort((a, b) => b.o.date.localeCompare(a.o.date) || b.o.created - a.o.created);
+  const days = new Map<DateString, Operation[]>();
+  for (const { o } of items) days.set(o.date, [...(days.get(o.date) ?? []), o]);
+  const sum = items.reduce((s, e) => s + e.o.amount, 0);
+  const body = appShell({
+    rail: appRail('review', d.userName, href),
+    tabs: monthTabs(monthOf(d.today), d.month, (m) => href('/review/check', { month: m ?? monthOf(d.today), group })),
+    main: [
+      topBar({ crumbs: [{ label: `Разбор ${monthName(d.month, 'genitive')}`, icon: 'target' }, { label: DOUBTFUL_ROWS[group].label }] }),
+      toolbar({
+        items: [
+          segmentedLinks({ label: 'Назад', items: [{ label: '← К разбору', href: href('/review', { month: d.month }) }] }),
+          segmentedLinks({
+            label: 'Что проверить',
+            items: DOUBTFUL.map((g) => ({
+              label: DOUBTFUL_ROWS[g].label,
+              href: page.check(g),
+              active: g === group,
+              count: t.doubtful.filter((e) => e.bucket === g).length,
+            })),
+          }),
+        ],
+      }),
+      pageIntro({
+        title: DOUBTFUL_ROWS[group].label,
+        text: items.length
+          ? `${count(items.length, 'трата', 'траты', 'трат')} на ${money(sum, d.symbol)} ${plural(items.length, ['считается', 'считаются', 'считаются'])} в неделях, а что это — непонятно.${
+              group === 'self' ? ' Банк неизвестен, подсказка — по сумме.' : ''
+            }`
+          : 'Здесь всё размечено.',
+      }),
+      items.length
+        ? stack({
+            gap: 18,
+            items: [...days].map(([date, operations]) =>
+              dayGroup({ date, today: d.today, net: { amount: -operations.reduce((s, o) => s + o.amount, 0), symbol: d.symbol }, rows: operations.map((o) => spendRow(page, o, { date: false })) }),
+            ),
+          })
+        : emptyState({ text: 'Траты, размеченные здесь, ушли в свои категории.' }),
+    ],
+    side: [
+      topBar({ crumbs: [{ label: 'Проверить' }] }),
+      balanceTotal({ amount: t.doubtfulSum, symbol: d.symbol, note: `${count(t.doubtful.length, 'трата', 'траты', 'трат')} в неделях ${monthName(d.month, 'genitive')} без категории` }),
+      groupRows(page, group, { counts: false }),
+    ],
+  });
+  return pageDocument({ title: 'Бюджет: что проверить', body });
 }
