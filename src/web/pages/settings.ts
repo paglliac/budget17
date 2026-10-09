@@ -1,5 +1,6 @@
-// Settings: the day a week begins on and the categories expenses are sorted into. The day is picked in one click and
-// posts to /budget/week-start/:day (see submitBudget); the amount of one week is changed on the week itself (see
+// Settings: the day a week begins on, the user's own name in transfers to themselves, and the categories expenses are
+// sorted into. The day is picked in one click and posts to /budget/week-start/:day; the name opens by ?edit=self-payee
+// and posts to /budget/self-payee (see submitBudget). The amount of one week is changed on the week itself (see
 // dashboard.ts). ZenMoney's categories can be renamed or hidden, and the user adds their own; ZenMoney itself is
 // never changed. They are listed in the order marking offers them, the most popular first; hidden ones go apart,
 // under «Скрытые». A row opens for editing by ?edit=<category id>; forms post to /categories, /categories/:id and
@@ -18,7 +19,7 @@ import { categoryIcon } from '../icons.ts';
 import { categoryColor, toneColor } from '../tones.ts';
 import { choiceGroup, emptyState, field, pageIntro, section } from '../widgets/basics.ts';
 import { entryForm, entryList, entryRow } from '../widgets/entries.ts';
-import { appShell, topBar } from '../widgets/shell.ts';
+import { appShell, stack, topBar } from '../widgets/shell.ts';
 import { appRail, userName, type Href } from './chrome.ts';
 import { allExpenses, type SavedMarking } from './marking.ts';
 
@@ -32,6 +33,8 @@ export interface CategoryForm {
 /** What the budget is set up with. */
 export interface BudgetSetup {
   weekStart: WeekStart;
+  /** The user's own name in transfers to their accounts in other banks; the month review sets those apart. */
+  selfPayee: string | null;
   symbol: string;
 }
 
@@ -45,8 +48,8 @@ export interface SettingsData {
   userName: string | null;
 }
 
-export function loadBudgetSetup(data: EntityCollections, saved: Pick<SavedMarking, 'weekStart'>): BudgetSetup {
-  return { weekStart: saved.weekStart, symbol: mainCurrency(data).symbol };
+export function loadBudgetSetup(data: EntityCollections, saved: Pick<SavedMarking, 'weekStart' | 'selfPayee'>): BudgetSetup {
+  return { weekStart: saved.weekStart, selfPayee: saved.selfPayee ?? null, symbol: mainCurrency(data).symbol };
 }
 
 export function loadSettingsPage(
@@ -65,8 +68,16 @@ export function loadSettingsPage(
   };
 }
 
-/** Applies a form posted to /budget/week-start/:day, 0 for Monday to 6 for Sunday. */
-export function submitBudget(settings: Settings, path: string): { status: 'saved' } | { status: 'missing' } {
+/**
+ * Applies a form posted to /budget/week-start/:day, 0 for Monday to 6 for Sunday, or to /budget/self-payee with the
+ * user's name in `name`; an empty name forgets it.
+ */
+export function submitBudget(settings: Settings, path: string, body: URLSearchParams = new URLSearchParams()): { status: 'saved' } | { status: 'missing' } {
+  if (path === '/budget/self-payee') {
+    const name = (body.get('name') ?? '').trim().slice(0, 80);
+    settings.setSelfPayee(name || null);
+    return { status: 'saved' };
+  }
   const start = /^\/budget\/week-start\/([0-6])$/.exec(path);
   if (!start) return { status: 'missing' };
   settings.setWeekStart(Number(start[1]));
@@ -123,7 +134,16 @@ export function renderSettings(d: SettingsData, href: Href): Html {
     main: [
       topBar({ crumbs: [{ label: 'Бюджет' }, { label: 'Настройки', icon: 'sliders' }] }),
       pageIntro({ title: 'Настройки', text: `${budgetSentence(d.budget)} ${settingsSentence(d)}` }),
-      section({ title: 'Бюджет', body: weekStartChoice(d.budget, href) }),
+      section({
+        title: 'Бюджет',
+        body: stack({
+          gap: 16,
+          items: [
+            weekStartChoice(d.budget, href),
+            entryList({ label: 'Переводы себе', items: [d.edit === 'self-payee' ? selfPayeeForm(d.budget, href) : selfPayeeRow(d.budget, href)] }),
+          ],
+        }),
+      }),
       section({
         title: 'Категории',
         body: [
@@ -171,6 +191,30 @@ function weekStartChoice(b: BudgetSetup, href: Href): Html {
   return choiceGroup({
     label: 'Неделя начинается',
     choices: WEEKDAYS.map((label, day) => ({ label, current: day === b.weekStart, action: href(`/budget/week-start/${day}`) })),
+  });
+}
+
+/** The user's own name in transfers to themselves; the row opens a form to change it. */
+function selfPayeeRow(b: BudgetSetup, href: Href): Html {
+  return entryRow({
+    id: 'self-payee',
+    title: 'Переводы себе',
+    details: b.selfPayee ? `приходят на имя ${b.selfPayee}` : 'имя не указано',
+    icon: 'card',
+    color: toneColor('violet'),
+    href: href('/settings', { edit: 'self-payee' }),
+  });
+}
+
+function selfPayeeForm(b: BudgetSetup, href: Href): Html {
+  return entryForm({
+    id: 'self-payee',
+    action: href('/budget/self-payee'),
+    submitLabel: 'Сохранить',
+    icon: 'card',
+    color: toneColor('violet'),
+    fields: field({ label: 'Ваше имя, как его пишет банк в переводах себе в другие банки', name: 'name', value: b.selfPayee ?? '', placeholder: 'Иван И.', maxLength: 80 }),
+    cancelHref: href('/settings'),
   });
 }
 

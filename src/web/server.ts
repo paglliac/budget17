@@ -36,6 +36,7 @@ import { isAccessToken, isAuthorized, sessionCookie } from './auth.ts';
 import { demoCollections } from './demo.ts';
 import { escape } from './html.ts';
 import { createHref, userName } from './pages/chrome.ts';
+import { loadReview, renderReview, renderReviewCheck } from './pages/review.ts';
 import { budgetOf, loadDashboard, renderDashboard, submitDashboard, type DashboardForm, type SavedBudget } from './pages/dashboard.ts';
 import { loadIncome, renderIncome, submitIncome } from './pages/income.ts';
 import { renderLogin } from './pages/login.ts';
@@ -100,6 +101,7 @@ function savedMarking(settings: Settings): SavedMarking {
     descriptions: settings.spendingDescriptions(),
     categories: settings.categorySetup(),
     weekStart: settings.weekStart(),
+    selfPayee: settings.selfPayee(),
   };
 }
 
@@ -211,7 +213,7 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
   }
   if (path.startsWith('/budget/')) {
     using settings = new Settings(SETTINGS_PATH);
-    return submitBudget(settings, path).status === 'saved' ? { status: 'saved', next: href('/settings') } : { status: 'missing', message: 'Такого дня недели нет' };
+    return submitBudget(settings, path, body).status === 'saved' ? { status: 'saved', next: href('/settings') } : { status: 'missing', message: 'Такой настройки нет' };
   }
   if (/^\/regular(\/|$)/.test(path)) {
     using settings = new Settings(SETTINGS_PATH);
@@ -357,6 +359,18 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     case '/':
       send(response, 200, 'text/html', dashboardPage(params, context));
       return;
+    case '/review':
+    case '/review/check': {
+      const review = loadReview(loadCollections(demo, today), loadSettings(savedBudget), {
+        today,
+        month: params.get('month'),
+        ask: params.get('ask'),
+        kind: params.get('kind'),
+        edit: params.get('edit'),
+      });
+      send(response, 200, 'text/html', (url.pathname === '/review' ? renderReview(review, href) : renderReviewCheck(review, href)).toString());
+      return;
+    }
     case '/operations': {
       const operations = loadOperations(loadCollections(demo, today), loadSettings(savedMarking), {
         today,

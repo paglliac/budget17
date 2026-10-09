@@ -18,6 +18,7 @@ import {
   iconBadge,
   iconPicker,
   inlineForm,
+  listHeading,
   pageIntro,
   progressBar,
   searchField,
@@ -27,9 +28,11 @@ import {
   shareBar,
 } from './widgets/basics.ts';
 import { monthCalendar } from './widgets/calendar.ts';
-import { categoryTile, paymentCard, statCard } from './widgets/cards.ts';
+import { assistantAnswer, assistantHero, insightList } from './widgets/assistant.ts';
+import { categoryTile, figureCard, panelCard, paymentCard, statCard } from './widgets/cards.ts';
+import { flowChart, weekBars } from './widgets/charts.ts';
 import { entryDivider, entryForm, entryList, entryRow } from './widgets/entries.ts';
-import { categoryList, dayGroup, operationRow } from './widgets/operations.ts';
+import { amountList, categoryList, dayGroup, operationRow } from './widgets/operations.ts';
 import { appShell, grid, rail, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
 
 export interface Story {
@@ -52,7 +55,7 @@ export interface WidgetDoc {
   stories: Story[];
 }
 
-export const GROUPS = ['Каркас', 'Основа', 'Фильтры', 'Формы', 'Карточки', 'Операции', 'Настройка', 'Календарь', 'Счета'] as const;
+export const GROUPS = ['Каркас', 'Основа', 'Фильтры', 'Формы', 'Карточки', 'Графики', 'Операции', 'Ассистент', 'Настройка', 'Календарь', 'Счета'] as const;
 
 function doc<P>(
   widget: (props: P) => Html,
@@ -209,6 +212,10 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       name: 'Приветствие',
       props: { title: 'Добрый день', emoji: '👋', text: 'В октябре вы потратили 80 820 ₽. Это на 14% больше, чем к 5 сентября.' },
     },
+    { name: 'С бейджем', props: { title: 'Разбор сентября', text: 'Что произошло с деньгами и что стоит поправить.', badge: { text: 'ассистент сделал 6 выводов', tone: 'green' } } },
+  ]),
+  doc(listHeading, { group: 'Основа', description: 'Заголовок над списком и сколько в нём всего.' }, [
+    { name: 'С числом', width: 420, props: { title: 'Главные выводы', count: 6 } },
   ]),
   doc(section, { group: 'Основа', description: 'Блок страницы с заголовком.' }, [
     { name: 'С содержимым', props: { title: 'Больше всего тратите на', body: emptyState({ text: 'Содержимое блока' }) } },
@@ -407,6 +414,49 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       },
     },
   ]),
+  doc(figureCard, { group: 'Карточки', description: 'Крупная цифра на карточке: что это, сумма с тихой валютой, пояснение и полоса.' }, [
+    { name: 'Только сумма', width: 260, props: { label: 'Доход', amount: 736_821, symbol: '₽' } },
+    { name: 'С полосой', width: 260, props: { label: 'Потрачено', amount: 645_370, symbol: '₽', note: '88% от дохода', progress: { value: 0.88, tone: 'violet' } } },
+  ]),
+  doc(panelCard, { group: 'Карточки', description: 'Блок страницы на карточке: заголовок с бейджем, крупная сумма с пояснением и ссылка дальше.' }, [
+    {
+      name: 'С бейджем и ссылкой',
+      width: 480,
+      props: { title: 'Недельные траты', amount: 488_432, symbol: '₽', note: 'при плане 225 000 ₽', badge: { text: '+263 432 ₽', tone: 'red' }, href: '#', body: emptyState({ text: 'Содержимое блока' }) },
+    },
+    { name: 'Только заголовок', width: 480, props: { title: 'Куда ушли деньги', body: emptyState({ text: 'Содержимое блока' }) } },
+  ]),
+  doc(flowChart, { group: 'Графики', description: 'Куда ушли деньги: источник слева растекается на части справа, у каждой сумма и доля источника.' }, [
+    {
+      name: 'Доход месяца',
+      props: {
+        label: 'Куда ушёл доход',
+        symbol: '₽',
+        source: { label: 'доход', amount: 736_821 },
+        parts: [
+          { label: 'Недели', amount: 488_432, color: 'var(--yellow)' },
+          { label: 'Регулярные', amount: 154_448, color: 'var(--gray)' },
+          { label: 'Дополнительные', amount: 2_490, color: 'var(--violet)' },
+          { label: 'Осталось', amount: 91_451, color: 'var(--teal)' },
+        ],
+      },
+    },
+  ]),
+  doc(weekBars, { group: 'Графики', description: 'Траты недель столбиками, лимит недели — пунктир поперёк, выше него столбик темнее; будущая неделя пустая.' }, [
+    {
+      name: 'Месяц с перерасходом',
+      width: 480,
+      props: {
+        label: 'Траты недель',
+        bars: [
+          { label: 'Нед. 1', value: 91_301, limit: 45_000, href: '#' },
+          { label: 'Нед. 2', value: 30_253, limit: 45_000, href: '#' },
+          { label: 'Нед. 3', value: 179_519, limit: 45_000, href: '#' },
+          { label: 'Нед. 4', value: 0, limit: 30_000, ahead: true },
+        ],
+      },
+    },
+  ]),
   doc(categoryTile, { group: 'Карточки', description: 'Траты в категории в цвете категории. Со ссылкой появляется стрелка.' }, [
     { name: 'Без ссылки', width: 240, props: { icon: 'cart', color: '#4FAE7F', title: 'Продукты', amount: 8_832, symbol: '₽' } },
     { name: 'Со ссылкой', width: 240, props: { icon: 'coffee', color: '#F09A4A', title: 'Кафе и рестораны', amount: 8_691, symbol: '₽', href: '#' } },
@@ -502,6 +552,74 @@ export const WIDGET_DOCS: WidgetDoc[] = [
   doc(dayGroup, { group: 'Операции', description: 'Операции одного дня под заголовком с итогом дня.' }, [
     { name: 'Сегодня', width: 560, props: { date: TODAY, today: TODAY, net: { amount: -1_807.9, symbol: '₽' }, rows: operationRows } },
     { name: 'Давно', width: 560, props: { date: '2026-09-12', today: TODAY, rows: operationRows.slice(0, 1) } },
+  ]),
+  doc(amountList, { group: 'Операции', description: 'Суммы одна под другой: с точкой или иконкой, по желанию с полосой доли, пометкой и ссылкой; открытая подсвечена.' }, [
+    {
+      name: 'С полосами',
+      width: 420,
+      props: {
+        label: 'Категории в неделю',
+        items: [
+          { label: 'Продукты', amount: 26_560, color: '#4FAE7F', share: 1, note: '+39%' },
+          { label: 'Кафе и рестораны', amount: 6_330, color: 'var(--blue)', share: 0.24, note: '−49%' },
+          { label: 'Шоппинг', amount: 4_624, color: 'var(--orange)', share: 0.17 },
+        ],
+      },
+    },
+    {
+      name: 'С иконками и ссылками',
+      width: 420,
+      props: {
+        label: 'Проверить',
+        symbol: '₽',
+        items: [
+          { label: 'Переводы людям', amount: 123_158, icon: 'arrowUpRight', tone: 'blue', note: '14 шт.', href: '#', active: true },
+          { label: 'Без категории', amount: 20_172, icon: 'tag', tone: 'gray', note: '17 шт.', href: '#' },
+        ],
+      },
+    },
+    { name: 'Просто суммы', width: 420, props: { label: 'Регулярные', items: [{ label: 'Школа', amount: 45_000 }, { label: 'Аренда', amount: 40_000 }] } },
+  ]),
+  doc(assistantHero, { group: 'Ассистент', description: 'Приветствие ассистента: что он сделал и нашёл, вопросы чипами; отвеченный подсвечен.' }, [
+    {
+      name: 'С выбранным вопросом',
+      width: 440,
+      props: {
+        title: 'Разобрал сентябрь',
+        text: 'Нашёл 6 важных моментов.',
+        chips: [
+          { label: 'Где перерасход и почему', icon: 'trendingUp', href: '#', active: true },
+          { label: 'Какие траты проверить', icon: 'search', href: '#' },
+          { label: 'На чём сэкономить', icon: 'piggy', href: '#' },
+        ],
+      },
+    },
+  ]),
+  doc(assistantAnswer, { group: 'Ассистент', description: 'Ответ ассистента: вопрос, абзацы и ссылки на то, о чём речь.' }, [
+    {
+      name: 'Со ссылками',
+      width: 440,
+      props: {
+        question: 'Где перерасход и почему',
+        paragraphs: ['Недели потратили 488 432 ₽ при плане 225 000 ₽.', 'Больше всего потратила неделя 12 – 18 сентября, и раздули её траты ниже.'],
+        links: [{ label: '18 сентября · Татьяна А.', detail: '70 000 ₽', href: '#' }],
+        closeHref: '#',
+      },
+    },
+    { name: 'Без ссылок', width: 440, props: { question: 'На чём сэкономить', paragraphs: ['Ни одна категория заметно не выросла.'], closeHref: '#' } },
+  ]),
+  doc(insightList, { group: 'Ассистент', description: 'Что нашёл ассистент: иконка в круге, жирная строка, тихое пояснение и ссылка дальше.' }, [
+    {
+      name: 'Выводы',
+      width: 440,
+      props: {
+        label: 'Главные выводы',
+        items: [
+          { icon: 'trendingUp', tone: 'red', title: 'Недели потратили на 263 432 ₽ больше плана', text: 'Больше всего — 12 – 18 сентября: 179 519 ₽.', href: '#' },
+          { icon: 'check', tone: 'green', title: 'Дополнительные почти не тронуты', text: '2 490 ₽ из 100 000 ₽.' },
+        ],
+      },
+    },
   ]),
   doc(categoryList, { group: 'Операции', description: 'Траты по категориям с долей; категория ведёт к своим операциям, выбранная подсвечена.' }, [
     {

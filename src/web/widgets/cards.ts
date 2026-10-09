@@ -1,10 +1,10 @@
-// Cards of the overview: a figure with progress, a category, an upcoming payment.
+// Cards: a figure with progress, a category, an upcoming payment, a big figure, and a titled block of a page.
 
 import { daysBetween } from '../../dates.ts';
 import type { OperationKind } from '../../operations.ts';
 import type { DateString } from '../../zenmoney/types.ts';
-import { daysLeft, money, monthName } from '../format.ts';
-import { html, type Html } from '../html.ts';
+import { daysLeft, money, monthName, num } from '../format.ts';
+import { html, type Content, type Html } from '../html.ts';
 import { icon, type IconName } from '../icons.ts';
 import { toneColor, type Tone } from '../tones.ts';
 import { badge, iconBadge, progressBar } from './basics.ts';
@@ -66,4 +66,40 @@ export function paymentCard(options: {
       <div class="row"><span>Осталось</span><b>${daysLeft(days)}</b></div>
       ${progressBar({ value: 1 - Math.min(days, 30) / 30, tone: options.tone, label: `Осталось ${daysLeft(days)}` })}
     </article>`;
+}
+
+/** A big figure on a card: what it is, the amount with a quieter currency, a note and an optional bar. */
+export function figureCard(options: { label: string; amount: number; symbol: string; note?: string; progress?: { value: number; tone: Tone } }): Html {
+  return html`
+    <article class="figure">
+      <p class="figure-label">${options.label}</p>
+      <p class="figure-amount">${num(options.amount)} <span>${options.symbol}</span></p>
+      ${options.note ? html`<p class="figure-note">${options.note}</p>` : null}
+      ${options.progress ? progressBar({ value: options.progress.value, tone: options.progress.tone, label: options.note }) : null}
+    </article>`;
+}
+
+/** A block of a page on a card: its title with an optional badge, a big amount with a note, and a link to more. */
+export function panelCard(options: {
+  title: string;
+  amount?: number;
+  symbol?: string;
+  note?: string;
+  badge?: { text: string; tone?: Tone };
+  href?: string;
+  body: Content;
+}): Html {
+  return html`
+    <section class="pcard">
+      <header class="pcard-head">
+        <div class="pcard-title">
+          <h2>${options.title}${options.badge ? badge(options.badge) : null}</h2>
+          ${options.amount === undefined
+            ? null
+            : html`<p class="pcard-amount">${num(options.amount)} <span>${options.symbol ?? ''}</span>${options.note ? html`<small>${options.note}</small>` : null}</p>`}
+        </div>
+        ${options.href ? html`<a class="pcard-go" href="${options.href}" aria-label="Подробнее: ${options.title}">${icon('chevronRight', 16)}</a>` : null}
+      </header>
+      <div class="pcard-body">${options.body}</div>
+    </section>`;
 }

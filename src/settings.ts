@@ -89,7 +89,8 @@ const SCHEMA = `
     hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))
   ) STRICT;
 
-  -- Single values the user picked, such as week_start, the day a week begins on (0 for Monday).
+  -- Single values the user picked, such as week_start, the day a week begins on (0 for Monday), or self_payee, the
+  -- user's own name as banks write it in transfers to their accounts in other banks.
   CREATE TABLE IF NOT EXISTS preference (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -211,6 +212,18 @@ export class Settings {
     const row = this.#db.prepare("SELECT value FROM preference WHERE key = 'week_start'").get();
     const start = Number(row?.value);
     return Number.isInteger(start) && start >= 0 && start <= 6 ? start : 0;
+  }
+
+  /** The user's own name as banks write it in transfers to their accounts in other banks, such as Кирилл А. */
+  selfPayee(): string | null {
+    const row = this.#db.prepare("SELECT value FROM preference WHERE key = 'self_payee'").get();
+    return row ? String(row.value) : null;
+  }
+
+  /** Null forgets it. */
+  setSelfPayee(name: string | null): void {
+    if (name === null) this.#db.prepare("DELETE FROM preference WHERE key = 'self_payee'").run();
+    else this.#db.prepare("INSERT INTO preference (key, value) VALUES ('self_payee', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(name);
   }
 
   /**

@@ -34,6 +34,8 @@ export interface SavedMarking {
   descriptions: ReadonlyMap<string, string>;
   categories: CategorySetup;
   weekStart: WeekStart;
+  /** The user's own name as banks write it in transfers to their accounts in other banks, when they gave it. */
+  selfPayee?: string | null;
 }
 
 /** What marking an expense needs besides the expense. */

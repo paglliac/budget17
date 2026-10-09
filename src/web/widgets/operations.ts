@@ -2,7 +2,7 @@
 
 import type { OperationKind } from '../../operations.ts';
 import type { DateString } from '../../zenmoney/types.ts';
-import { dayHeading, money } from '../format.ts';
+import { dayHeading, money, num } from '../format.ts';
 import { html, type Content, type Html } from '../html.ts';
 import { icon, type IconName } from '../icons.ts';
 import { toneColor, type Tone } from '../tones.ts';
@@ -107,4 +107,35 @@ export function categoryList(options: {
         </a>
       </li>`,
   )}</ul>`;
+}
+
+/**
+ * Named amounts one under another, each led by a dot or an icon tile, with an optional share bar, a quiet note, and a
+ * link to more; the item open there is highlighted.
+ */
+export function amountList(options: {
+  label: string;
+  /** Shown after each amount when given. */
+  symbol?: string;
+  items: Array<{ label: string; amount: number; color?: string; icon?: IconName; tone?: Tone; share?: number; note?: string; href?: string; active?: boolean }>;
+}): Html {
+  return html`<ul class="amounts" aria-label="${options.label}">${options.items.map((item) => {
+    const lead = item.icon
+      ? html`<span class="amount-icon" style="--tone:${toneColor(item.tone ?? 'gray')}">${icon(item.icon, 14)}</span>`
+      : item.color
+        ? html`<i class="amount-dot" style="background:${item.color}"></i>`
+        : null;
+    const inner = html`${lead}<span class="amount-label">${item.label}</span>${
+      item.share === undefined
+        ? null
+        : html`<span class="amount-bar"><i style="width:${(Math.min(1, Math.max(0, item.share)) * 100).toFixed(1)}%;background:${item.color ?? 'var(--violet)'}"></i></span>`
+    }${item.note ? html`<small class="amount-note">${item.note}</small>` : null}<b class="amount-value">${num(item.amount)}${
+      options.symbol ? html` <span>${options.symbol}</span>` : null
+    }</b>${item.href ? html`<span class="amount-go">${icon('chevronRight', 14)}</span>` : null}`;
+    return html`<li>${
+      item.href
+        ? html`<a class="amount" href="${item.href}"${item.active ? html` aria-current="true"` : null}>${inner}</a>`
+        : html`<span class="amount">${inner}</span>`
+    }</li>`;
+  })}</ul>`;
 }

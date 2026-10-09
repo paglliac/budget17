@@ -34,6 +34,7 @@ function saved(settings: Settings): SavedMarking {
     descriptions: new Map(),
     categories: settings.categorySetup(),
     weekStart: settings.weekStart(),
+    selfPayee: settings.selfPayee(),
   };
 }
 
@@ -87,6 +88,16 @@ describe('settings page budget', () => {
     assert.ok(days.includes('action="/budget/week-start/0"') && !days.includes('action="/budget/week-start/2"'));
     assert.ok(!page.includes('Изменить бюджет недели'), 'the amount of a week is changed on the week');
   });
+
+  it('keeps the user’s own name in transfers to themselves, opening a form to change it', () => {
+    using settings = new Settings(':memory:');
+    assert.ok(render(settings).includes('<b>Переводы себе</b><small>имя не указано</small>'));
+    settings.setSelfPayee('Иван И.');
+    assert.ok(render(settings).includes('<b>Переводы себе</b><small>приходят на имя Иван И.</small>'));
+
+    const form = render(settings, { edit: 'self-payee' });
+    assert.ok(form.includes('action="/budget/self-payee"') && form.includes('value="Иван И."'));
+  });
 });
 
 describe('submitBudget', () => {
@@ -98,6 +109,15 @@ describe('submitBudget', () => {
     assert.deepEqual(submitBudget(settings, '/budget/week-start/7'), { status: 'missing' });
     assert.deepEqual(submitBudget(settings, '/budget/weeks'), { status: 'missing' });
     assert.equal(settings.weekStart(), 4);
+  });
+
+  it('saves the user’s own name trimmed, and forgets it when sent empty', () => {
+    using settings = new Settings(':memory:');
+
+    assert.deepEqual(submitBudget(settings, '/budget/self-payee', new URLSearchParams({ name: '  Кирилл А. ' })), { status: 'saved' });
+    assert.equal(settings.selfPayee(), 'Кирилл А.');
+    assert.deepEqual(submitBudget(settings, '/budget/self-payee', new URLSearchParams({ name: ' ' })), { status: 'saved' });
+    assert.equal(settings.selfPayee(), null);
   });
 });
 

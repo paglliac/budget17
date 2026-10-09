@@ -89,6 +89,16 @@ describe('Settings', () => {
     assert.deepEqual([...settings.weekLimits()], [['2026-10-12', 30_000], ['2026-10-19', 50_000]]);
   });
 
+  it('remembers the user’s own name in transfers to themselves and forgets it', () => {
+    using settings = new Settings(':memory:');
+    assert.equal(settings.selfPayee(), null);
+    settings.setSelfPayee('Иван И.');
+    settings.setSelfPayee('Кирилл А.');
+    assert.equal(settings.selfPayee(), 'Кирилл А.');
+    settings.setSelfPayee(null);
+    assert.equal(settings.selfPayee(), null);
+  });
+
   it('sets what a week allows and gives the usual back', () => {
     using settings = new Settings(':memory:');
     settings.setWeekLimit('2026-10-12', 30_000);
