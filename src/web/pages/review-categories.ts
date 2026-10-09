@@ -906,7 +906,7 @@ function variantB(page: Page): Html {
     title: 'Из чего недели',
     amount: total,
     symbol: d.symbol,
-    note: `${unsorted > 0 ? `не разобрано ${money(unsorted, d.symbol)}, ${percent(unsorted / total)}` : 'всё разобрано'}${moved.size || splits.size ? ' · точка — есть подсказка' : ''}`,
+    note: `${unsorted > 0 ? `не разобрано ${money(unsorted, d.symbol)}, ${percent(unsorted / total)}` : 'всё разобрано'}${moved.size || splits.size ? ' · точка и сиреневая рамка — есть подсказка' : ''}`,
     body: categoryMap({
       label: 'Траты недель по категориям',
       symbol: d.symbol,
@@ -918,7 +918,7 @@ function variantB(page: Page): Html {
         href: here({ tile: d.proto.tile === t.id ? null : t.id }),
         active: d.proto.tile === t.id,
         hinted: (t.category !== null && splits.has(t.category)) || hinted(t.spends),
-        items: t.items.map((i) => ({ label: i.label, amount: i.amount, href: here({ tile: i.id }), active: d.proto.tile === i.id, hinted: hinted(i.spends) })),
+        items: t.items.map((i) => ({ label: i.label, amount: i.amount, href: here({ tile: d.proto.tile === i.id ? null : i.id }), active: d.proto.tile === i.id, hinted: hinted(i.spends) })),
       })),
     }),
   });

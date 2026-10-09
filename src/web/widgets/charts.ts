@@ -108,8 +108,9 @@ function place(r: Rect, width: number, height: number): string {
 /**
  * Parts of a whole as nested tiles sized by amount: groups, such as categories, each tinted with its colour and holding
  * its items, such as subcategories or payees. A `hatched` group is one nobody has sorted yet. Groups and items link
- * to more with `href`; the open one is outlined. A `hinted` tile has a suggestion about it, marked with a dot in its
- * corner. Tiles too small for words show them on hover.
+ * to more with `href`; the open one is outlined. A `hinted` tile has a suggestion about it: a group gets a dot in its
+ * corner, an item a violet outline, since most items are too small for a dot beside their words. Tiles too small for
+ * words show them on hover.
  */
 export function categoryMap(options: {
   label: string;
@@ -161,9 +162,9 @@ export function categoryMap(options: {
       showItems
         ? html`<span class="cmap-items">${items.map((item, ii) => {
             const ir = itemRects[ii]!;
-            const itemClasses = `cmap-item${item.active ? ' active' : ''}${ir.w * ir.h < 60 ? ' tiny' : ''}`;
-            const itemTitle = `${item.label}: ${num(item.amount)} ${options.symbol}`;
-            return tile(item.href ? 'a' : 'div', item.href, itemClasses, place(ir, inner.w, inner.h), itemTitle, html`<b>${item.label}</b><small>${num(item.amount)}</small>${item.hinted ? dot : null}`);
+            const itemClasses = `cmap-item${item.active ? ' active' : ''}${ir.w * ir.h < 60 ? ' tiny' : ''}${item.hinted ? ' hinted' : ''}`;
+            const itemTitle = `${item.label}: ${num(item.amount)} ${options.symbol}${item.hinted ? ' · есть подсказка' : ''}`;
+            return tile(item.href ? 'a' : 'div', item.href, itemClasses, place(ir, inner.w, inner.h), itemTitle, html`<b>${item.label}</b><small>${num(item.amount)}</small>`);
           })}</span>`
         : null
     }`;
