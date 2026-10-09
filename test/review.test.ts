@@ -90,6 +90,26 @@ describe('reviewMonth', () => {
     assert.deepEqual(r.next, { month: '2026-10', weeks: 5, regular: 75_500 });
   });
 
+  it('lists the regular expenses due in the month by when they were paid or due, each with what its weeks paid', () => {
+    const sorted = saved();
+    sorted.categorizations = new Map([...sorted.categorizations, ['internet', { regular: 3 }]]);
+    sorted.regular.push(
+      regular({ id: 3, title: 'Интернет', amount: 1_100, day: 30 }),
+      regular({ id: 4, title: 'Машина', amount: 91_000, day: 5, start: '2026-11-01' }),
+    );
+    // Paid on the 10th although due on the 30th: it still counts in September, where it was paid.
+    const r = review(data([transaction({ id: 'internet', date: '2026-09-10', outcome: 1_100, payee: 'Ростелеком' })]), sorted);
+
+    assert.deepEqual(
+      r.payments.map((p) => [p.expense.title, p.date, p.paid.map((o) => o.id)]),
+      [
+        ['Школа', '2026-09-07', ['school']],
+        ['Интернет', '2026-09-30', ['internet']],
+        ['Кредит', '2026-09-26', []],
+      ],
+    );
+  });
+
   it('counts ordinary spending a week by category against the three months before', () => {
     const r = review();
 

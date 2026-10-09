@@ -131,6 +131,16 @@ describe('month review page', () => {
     assert.ok(!plan.includes('₽..'));
   });
 
+  it('lists every regular payment due in the month, a check by those linked expenses paid', () => {
+    const html = page({ today });
+    const block = html.slice(html.indexOf('aria-label="Регулярные платежи месяца"'));
+
+    assert.ok(html.includes('оплачено 1 из 2'));
+    assert.match(block, /Школа<\/span><small class="amount-note">7 сентября<\/small><b class="amount-value">45 000/);
+    assert.match(block, /Кредит Kia K5<\/span><small class="amount-note">срок 26 сентября<\/small><b class="amount-value">30 500/);
+    assert.ok(block.indexOf('Школа') < block.indexOf('Кредит Kia K5'), 'by date');
+  });
+
   it('reviews another month when asked, but not one still ahead', () => {
     assert.ok(page({ today, month: '2026-10' }).includes('Разбор октября'));
     assert.ok(page({ today, month: '2026-12' }).includes('Разбор октября'));

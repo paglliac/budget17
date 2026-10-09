@@ -40,6 +40,7 @@ import {
   isToCheck,
   isTransfer,
   ordinaryPerWeek,
+  paidOn,
   reviewHints,
   reviewMonth,
   TO_CHECK,
@@ -62,7 +63,7 @@ import type { DateString, EntityCollections, TagId } from '../../zenmoney/types.
 import { pageDocument } from '../document.ts';
 import { capitalize, dayMonth, dayMonthYear, money, monthName, percent, plural } from '../format.ts';
 import type { Html } from '../html.ts';
-import { categoryIcon, type IconName } from '../icons.ts';
+import { categoryIcon, entryIcon, type IconName } from '../icons.ts';
 import { categoryColor, toneColor, type Tone } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
 import { assistantAnswer, assistantHero, insightList, suggestionList } from '../widgets/assistant.ts';
@@ -75,6 +76,7 @@ import { appShell, grid, screenOnly, stack, toolbar, topBar } from '../widgets/s
 import { appRail, monthTabs, parseMonth, userName, type Href } from './chrome.ts';
 import { budgetOf, type SavedBudget } from './dashboard.ts';
 import { allExpenses, allIncomes, envelopeMark, loadMarking, markingActions, markingPanel, markingTitle, type Marking } from './marking.ts';
+import { STATUS_TONE } from './regular.ts';
 
 /** Questions to the assistant, as its chips offer them. */
 const CHIPS: Array<{ key: Question; label: string; icon: IconName }> = [
@@ -256,6 +258,7 @@ function main(page: Page, tile: Html[] | null): Html[] {
   const { d, href, here } = page;
   const r = d.review;
   const over = r.inWeeks - r.limits;
+  const paidCount = r.payments.filter((p) => p.paid.length).length;
   return [
     topBar({ crumbs: [{ label: span(r), icon: 'calendar' }] }),
     pageIntro({
@@ -330,8 +333,11 @@ function main(page: Page, tile: Html[] | null): Html[] {
           amount: r.regular,
           symbol: d.symbol,
           note: 'вне лимитов',
+          badge: r.payments.length ? { text: `оплачено ${paidCount} из ${r.payments.length}`, tone: paidCount === r.payments.length ? 'green' : 'gray' } : undefined,
           href: href('/regular'),
-          body: r.regular > 0 ? amountList({ label: 'Регулярные платежи месяца', items: regularRows(r) }) : emptyState({ text: 'Платежей регулярных трат нет.' }),
+          body: r.payments.length
+            ? amountList({ label: 'Регулярные платежи месяца', items: regularRows(d) })
+            : emptyState({ text: 'Регулярных платежей в этом месяце нет.' }),
         }),
       ],
     }),
@@ -357,12 +363,25 @@ function toCheckRows(page: Page, current: ToCheck): Html {
   });
 }
 
-function regularRows(r: MonthReview): Array<{ label: string; amount: number }> {
-  const rows = new Map<string, number>();
-  for (const { operation: o, kind } of r.expenses) {
-    if (kind === 'regular' && o.regular) rows.set(o.regular.title, (rows.get(o.regular.title) ?? 0) + o.amount);
-  }
-  return [...rows].sort((a, b) => b[1] - a[1]).map(([label, amount]) => ({ label, amount }));
+/**
+ * The month's regular payments by when they were paid or due, as on /regular: one that linked expenses of its weeks
+ * paid gets a check, what they paid and when, the others their own icon, what is due and when.
+ */
+function regularRows(d: ReviewData): Array<{ label: string; amount: number; icon: IconName; tone: Tone; note: string }> {
+  return d.review.payments.map((p) => {
+    const { expense, date, paid } = p;
+    const on = paidOn(p);
+    if (on) {
+      return { label: expense.title, amount: paid.reduce((total, o) => total + o.amount, 0), icon: 'check', tone: STATUS_TONE.paid, note: dayMonth(on) };
+    }
+    return {
+      label: expense.title,
+      amount: expense.amount,
+      icon: entryIcon(expense.icon, expense.title),
+      tone: date! < d.today ? STATUS_TONE.past : STATUS_TONE.ahead,
+      note: `срок ${dayMonth(date!)}`,
+    };
+  });
 }
 
 /** An expense to check, under its day's heading; it opens in place to be marked. */

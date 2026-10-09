@@ -75,6 +75,17 @@ export interface ReviewedExpense {
   envelope: Envelope;
 }
 
+/**
+ * A regular expense in a month: the date of its payment, null when the month has none, and the linked expenses of the
+ * month's weeks that paid it, whatever date they were due, so a payment made early or late still counts in the month
+ * it was made.
+ */
+export interface RegularPayment {
+  expense: RegularExpense;
+  date: DateString | null;
+  paid: Operation[];
+}
+
 export interface MonthReview {
   month: MonthString;
   /** The first day of its first week and the last day of its last week. */
@@ -93,6 +104,8 @@ export interface MonthReview {
   inWeeks: number;
   limits: number;
   regular: number;
+  /** The regular expenses with a payment in the month, and any its weeks paid besides, by when they were paid or due. */
+  payments: RegularPayment[];
   extra: number;
   outside: number;
   /** Expenses to check, largest first. */
@@ -160,6 +173,14 @@ export function reviewMonth(
     inWeeks: weeks.reduce((s, w) => s + w.spent, 0),
     limits: weeks.reduce((s, w) => s + w.limit, 0),
     regular: sumOf(expenses.filter((e) => e.kind === 'regular')),
+    payments: budget.regular
+      .map((expense) => ({
+        expense,
+        date: paymentDate(expense, month),
+        paid: expenses.filter((e) => e.operation.regular?.id === expense.id).map((e) => e.operation),
+      }))
+      .filter((p) => p.date !== null || p.paid.length > 0)
+      .sort((a, b) => (paidOn(a) ?? a.date!).localeCompare(paidOn(b) ?? b.date!)),
     extra: sumOf(expenses.filter((e) => e.kind === 'extra')),
     outside: sumOf(expenses.filter((e) => e.kind === 'outside')),
     toCheck: expenses.filter((e) => isToCheck(e.kind)),
@@ -170,6 +191,11 @@ export function reviewMonth(
       regular: budget.regular.reduce((s, r) => s + (paymentDate(r, next) ? r.amount : 0), 0),
     },
   };
+}
+
+/** The date of the latest expense that paid a payment; null when none did. */
+export function paidOn(p: Pick<RegularPayment, 'paid'>): DateString | null {
+  return p.paid.reduce<DateString | null>((latest, o) => (latest === null || o.date > latest ? o.date : latest), null);
 }
 
 /** What stands out in a month, most pressing first. */
