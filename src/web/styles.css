@@ -476,6 +476,11 @@ a.cmap-item:hover { background: rgb(255 255 255 / .85); }
 .cmap-item.active { box-shadow: inset 0 0 0 2px var(--ink); }
 .cmap-item b { font-weight: 400; font-size: 11px; }
 .cmap-item small { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cmap-head { position: relative; padding-right: 22px; }
+.cmap-item { padding-right: 18px; }
+.cmap-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--violet); box-shadow: 0 0 0 3px color-mix(in srgb, var(--violet) 22%, transparent); }
+.cmap-item .cmap-dot { top: 7px; right: 7px; width: 7px; height: 7px; }
+.cmap-item.tiny .cmap-dot { top: 50%; right: 50%; transform: translate(50%, -50%); }
 .cmap-group.tiny .cmap-head, .cmap-item.tiny { padding: 3px 5px; }
 .cmap-group.tiny .cmap-head b, .cmap-group.tiny .cmap-head small, .cmap-item.tiny b, .cmap-item.tiny small { visibility: hidden; }
 

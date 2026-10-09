@@ -442,15 +442,15 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       },
     },
   ]),
-  doc(categoryMap, { group: 'Графики', description: 'Части целого плитками по сумме: группы своим цветом, внутри — их части; неразобранная группа заштрихована, открытая обведена.' }, [
+  doc(categoryMap, { group: 'Графики', description: 'Части целого плитками по сумме: группы своим цветом, внутри — их части; неразобранная группа заштрихована, открытая обведена, точка в углу — есть подсказка.' }, [
     {
       name: 'Недели месяца',
       props: {
         label: 'Из чего недели',
         symbol: '₽',
         groups: [
-          { label: 'Продукты', amount: 130_681, color: '#4FAE7F', href: '#', items: [{ label: 'Лента', amount: 46_000 }, { label: 'Рынок', amount: 32_600 }, { label: 'У дома', amount: 20_000 }, { label: 'Доставка', amount: 12_000 }] },
-          { label: 'Переводы людям', amount: 123_158, color: 'var(--gray)', hatched: true, href: '#', active: true, items: [{ label: 'Татьяна А.', amount: 79_250, href: '#' }, { label: 'Николай А.', amount: 10_000, href: '#' }] },
+          { label: 'Продукты', amount: 130_681, color: '#4FAE7F', href: '#', hinted: true, items: [{ label: 'Лента', amount: 46_000 }, { label: 'Рынок', amount: 32_600 }, { label: 'У дома', amount: 20_000 }, { label: 'Доставка', amount: 12_000 }] },
+          { label: 'Переводы людям', amount: 123_158, color: 'var(--gray)', hatched: true, href: '#', active: true, hinted: true, items: [{ label: 'Татьяна А.', amount: 79_250, href: '#' }, { label: 'Дарья Ч.', amount: 10_000, href: '#', hinted: true }] },
           { label: 'Кафе и рестораны', amount: 30_939, color: 'var(--blue)', href: '#', items: [] },
           { label: 'Шоппинг', amount: 21_434, color: 'var(--orange)', items: [] },
         ],

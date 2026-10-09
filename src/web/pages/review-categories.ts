@@ -897,11 +897,16 @@ function variantB(page: Page): Html {
   const tiles = tilesOf(page);
   const total = tiles.reduce((s, t) => s + t.amount, 0);
   const unsorted = tiles.filter((t) => t.hatched).reduce((s, t) => s + t.amount, 0);
+  // A dot goes where a suggestion would change something: spends a hint moves, and a category Claude would split.
+  const pending = d.proto.hints.filter((h) => !h.done);
+  const moved = new Set(pending.flatMap((h) => h.spends));
+  const splits = new Set(pending.filter((h) => h.kind === 'split').map((h) => h.category));
+  const hinted = (spends: Operation[]) => spends.some((o) => moved.has(o.id));
   return panelCard({
     title: 'Из чего недели',
     amount: total,
     symbol: d.symbol,
-    note: unsorted > 0 ? `не разобрано ${money(unsorted, d.symbol)}, ${percent(unsorted / total)}` : 'всё разобрано',
+    note: `${unsorted > 0 ? `не разобрано ${money(unsorted, d.symbol)}, ${percent(unsorted / total)}` : 'всё разобрано'}${moved.size || splits.size ? ' · точка — есть подсказка' : ''}`,
     body: categoryMap({
       label: 'Траты недель по категориям',
       symbol: d.symbol,
@@ -912,7 +917,8 @@ function variantB(page: Page): Html {
         hatched: t.hatched,
         href: here({ tile: d.proto.tile === t.id ? null : t.id }),
         active: d.proto.tile === t.id,
-        items: t.items.map((i) => ({ label: i.label, amount: i.amount, href: here({ tile: i.id }), active: d.proto.tile === i.id })),
+        hinted: (t.category !== null && splits.has(t.category)) || hinted(t.spends),
+        items: t.items.map((i) => ({ label: i.label, amount: i.amount, href: here({ tile: i.id }), active: d.proto.tile === i.id, hinted: hinted(i.spends) })),
       })),
     }),
   });

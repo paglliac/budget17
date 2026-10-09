@@ -108,7 +108,8 @@ function place(r: Rect, width: number, height: number): string {
 /**
  * Parts of a whole as nested tiles sized by amount: groups, such as categories, each tinted with its colour and holding
  * its items, such as subcategories or payees. A `hatched` group is one nobody has sorted yet. Groups and items link
- * to more with `href`; the open one is outlined. Tiles too small for words show them on hover.
+ * to more with `href`; the open one is outlined. A `hinted` tile has a suggestion about it, marked with a dot in its
+ * corner. Tiles too small for words show them on hover.
  */
 export function categoryMap(options: {
   label: string;
@@ -120,7 +121,8 @@ export function categoryMap(options: {
     hatched?: boolean;
     href?: string;
     active?: boolean;
-    items: Array<{ label: string; amount: number; href?: string; active?: boolean }>;
+    hinted?: boolean;
+    items: Array<{ label: string; amount: number; href?: string; active?: boolean; hinted?: boolean }>;
   }>;
 }): Html {
   const width = 160;
@@ -130,6 +132,7 @@ export function categoryMap(options: {
     groups.map((g) => g.amount),
     { x: 0, y: 0, w: width, h: height },
   );
+  const dot = html`<i class="cmap-dot" aria-label="Есть подсказка"></i>`;
   const tile = (tag: 'a' | 'div', href: string | undefined, classes: string, style: string, title: string, inner: Html) =>
     tag === 'a' ? html`<a class="${classes}" href="${href!}" style="${style}" title="${title}">${inner}</a>` : html`<div class="${classes}" style="${style}" title="${title}">${inner}</div>`;
   return html`<div class="cmap" role="img" aria-label="${options.label}">${groups.map((g, gi) => {
@@ -152,7 +155,7 @@ export function categoryMap(options: {
       `cmap-head${showItems ? '' : ' fill'}`,
       '',
       title,
-      html`<b>${g.label}</b><small>${num(g.amount)} ${options.symbol}</small>`,
+      html`<b>${g.label}</b><small>${num(g.amount)} ${options.symbol}</small>${g.hinted ? dot : null}`,
     );
     const body = html`${head}${
       showItems
@@ -160,7 +163,7 @@ export function categoryMap(options: {
             const ir = itemRects[ii]!;
             const itemClasses = `cmap-item${item.active ? ' active' : ''}${ir.w * ir.h < 60 ? ' tiny' : ''}`;
             const itemTitle = `${item.label}: ${num(item.amount)} ${options.symbol}`;
-            return tile(item.href ? 'a' : 'div', item.href, itemClasses, place(ir, inner.w, inner.h), itemTitle, html`<b>${item.label}</b><small>${num(item.amount)}</small>`);
+            return tile(item.href ? 'a' : 'div', item.href, itemClasses, place(ir, inner.w, inner.h), itemTitle, html`<b>${item.label}</b><small>${num(item.amount)}</small>${item.hinted ? dot : null}`);
           })}</span>`
         : null
     }`;
