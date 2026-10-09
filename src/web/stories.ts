@@ -427,12 +427,13 @@ export const WIDGET_DOCS: WidgetDoc[] = [
     { name: 'Только сумма', width: 260, props: { label: 'Доход', amount: 736_821, symbol: '₽' } },
     { name: 'С полосой', width: 260, props: { label: 'Потрачено', amount: 645_370, symbol: '₽', note: '88% от дохода', progress: { value: 0.88, tone: 'violet' } } },
   ]),
-  doc(panelCard, { group: 'Карточки', description: 'Блок страницы на карточке: заголовок с бейджем, крупная сумма с пояснением и ссылка дальше.' }, [
+  doc(panelCard, { group: 'Карточки', description: 'Блок страницы на карточке: заголовок с бейджем, крупная сумма с пояснением под ним или в правом верхнем углу и ссылка дальше.' }, [
     {
       name: 'С бейджем и ссылкой',
       width: 480,
       props: { title: 'Недельные траты', amount: 488_432, symbol: '₽', note: 'при плане 225 000 ₽', badge: { text: '+263 432 ₽', tone: 'red' }, href: '#', body: emptyState({ text: 'Содержимое блока' }) },
     },
+    { name: 'Сумма в углу', width: 480, props: { title: 'Куда ушли деньги', amount: 581_372, symbol: '₽', aside: true, body: emptyState({ text: 'Содержимое блока' }) } },
     { name: 'Только заголовок', width: 480, props: { title: 'Куда ушли деньги', body: emptyState({ text: 'Содержимое блока' }) } },
   ]),
   doc(flowChart, { group: 'Графики', description: 'Куда ушли деньги: источник слева растекается на части справа, у каждой сумма и доля источника.' }, [
@@ -441,12 +442,13 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       props: {
         label: 'Куда ушёл доход',
         symbol: '₽',
-        source: { label: 'доход', amount: 736_821 },
+        source: { label: 'доход', amount: 702_432 },
         parts: [
-          { label: 'Недели', amount: 488_432, color: 'var(--yellow)' },
-          { label: 'Регулярные', amount: 154_448, color: 'var(--gray)' },
-          { label: 'Дополнительные', amount: 2_490, color: 'var(--violet)' },
-          { label: 'Осталось', amount: 91_451, color: 'var(--teal)' },
+          { label: 'Недели', amount: 327_494, color: 'var(--yellow)' },
+          { label: 'Регулярные', amount: 185_453, color: 'var(--gray)' },
+          { label: 'Дополнительные', amount: 32_423, color: 'var(--violet)' },
+          { label: 'Вне бюджета', amount: 100_000, color: 'var(--blue)' },
+          { label: 'Осталось', amount: 57_062, color: 'var(--teal)' },
         ],
       },
     },

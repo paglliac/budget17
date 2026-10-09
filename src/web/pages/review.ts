@@ -291,6 +291,7 @@ function main(page: Page, tile: Html[] | null): Html[] {
       title: 'Куда ушли деньги',
       amount: r.spent,
       symbol: d.symbol,
+      aside: true,
       body: flowChart({
         label: 'Куда ушёл доход',
         source: { label: 'доход', amount: r.income },

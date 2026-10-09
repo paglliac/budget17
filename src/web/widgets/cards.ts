@@ -79,25 +79,32 @@ export function figureCard(options: { label: string; amount: number; symbol: str
     </article>`;
 }
 
-/** A block of a page on a card: its title with an optional badge, a big amount with a note, and a link to more. */
+/**
+ * A block of a page on a card: its title with an optional badge, a big amount with a note, and a link to more. The
+ * amount sits under the title, or in the top right corner across from it when `aside` is set.
+ */
 export function panelCard(options: {
   title: string;
   amount?: number;
   symbol?: string;
   note?: string;
+  aside?: boolean;
   badge?: { text: string; tone?: Tone };
   href?: string;
   body: Content;
 }): Html {
+  const amount =
+    options.amount === undefined
+      ? null
+      : html`<p class="pcard-amount">${num(options.amount)} <span>${options.symbol ?? ''}</span>${options.note ? html`<small>${options.note}</small>` : null}</p>`;
   return html`
     <section class="pcard">
-      <header class="pcard-head">
+      <header class="pcard-head${options.aside ? ' aside' : ''}">
         <div class="pcard-title">
           <h2>${options.title}${options.badge ? badge(options.badge) : null}</h2>
-          ${options.amount === undefined
-            ? null
-            : html`<p class="pcard-amount">${num(options.amount)} <span>${options.symbol ?? ''}</span>${options.note ? html`<small>${options.note}</small>` : null}</p>`}
+          ${options.aside ? null : amount}
         </div>
+        ${options.aside ? amount : null}
         ${options.href ? html`<a class="pcard-go" href="${options.href}" aria-label="Подробнее: ${options.title}">${icon('chevronRight', 16)}</a>` : null}
       </header>
       <div class="pcard-body">${options.body}</div>

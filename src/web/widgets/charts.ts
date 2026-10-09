@@ -14,17 +14,24 @@ export function flowChart(options: { label: string; source: { label: string; amo
   const parts = options.parts.filter((p) => p.amount > 0);
   const total = Math.max(options.source.amount, parts.reduce((s, p) => s + p.amount, 0)) || 1;
   const width = 400;
-  const height = 240;
-  // The ribbons leave the source as one band and fan out to the rows of the legend beside the chart.
-  const band = height * 0.72;
-  const row = height / Math.max(parts.length, 1);
+  // In units of a page pixel: how high the source's band is, the least a legend row needs, and the air between ribbons.
+  const band = 180;
+  const row = 44;
+  const gap = 14;
+  // Each ribbon arrives in a slot of its own, beside its legend row, so the ribbons never cross; a ribbon higher than a
+  // row gets a taller slot and the chart grows to fit.
+  const heights = parts.map((p) => Math.max(3, (p.amount / total) * band));
+  const slots = heights.map((h) => Math.max(row, h + gap));
+  const height = Math.max(slots.reduce((s, h) => s + h, 0), row);
   const id = `flow-${++flows}`;
-  let top = (height - band) / 2;
+  let top = (height - heights.reduce((s, h) => s + h, 0)) / 2;
+  let slot = 0;
   const ribbons = parts.map((p, i) => {
-    const h = Math.max(3, (p.amount / total) * band);
+    const h = heights[i]!;
     const from = top;
     top += h;
-    const to = Math.min(Math.max(row * (i + 0.5) - h / 2, 0), height - h);
+    const to = slot + (slots[i]! - h) / 2;
+    slot += slots[i]!;
     const d = [
       `M0 ${from.toFixed(1)}`,
       `C${width / 2} ${from.toFixed(1)} ${width / 2} ${to.toFixed(1)} ${width} ${to.toFixed(1)}`,
@@ -38,9 +45,9 @@ export function flowChart(options: { label: string; source: { label: string; amo
     <div class="flow" role="img" aria-label="${options.label}">
       <div class="flow-chart">
         <p class="flow-source"><b>${num(options.source.amount)}</b><small>${options.source.label}</small></p>
-        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">${ribbons}</svg>
+        <svg viewBox="0 0 ${width} ${height.toFixed(1)}" preserveAspectRatio="none" aria-hidden="true">${ribbons}</svg>
       </div>
-      <ul class="flow-legend">${parts.map(
+      <ul class="flow-legend" style="--rows:${slots.map((h) => `${h.toFixed(1)}fr`).join(' ')}">${parts.map(
         (p) => html`<li><i style="background:${p.color}"></i><span><small>${p.label}</small><b>${num(p.amount)} <span>${options.symbol}</span></b></span><em>${share(p.amount, options.source.amount)}</em></li>`,
       )}</ul>
     </div>`;
