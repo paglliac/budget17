@@ -28,7 +28,7 @@ import {
 import { monthCalendar } from './widgets/calendar.ts';
 import { categoryTile, paymentCard, statCard } from './widgets/cards.ts';
 import { entryDivider, entryForm, entryList, entryRow } from './widgets/entries.ts';
-import { categoryList, dayGroup, operationRow } from './widgets/operations.ts';
+import { categoryList, dayGroup, operationList, operationRow } from './widgets/operations.ts';
 import { appShell, grid, rail, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
 
 export interface Story {
@@ -486,6 +486,9 @@ export const WIDGET_DOCS: WidgetDoc[] = [
   doc(dayGroup, { group: 'Операции', description: 'Операции одного дня под заголовком с итогом дня.' }, [
     { name: 'Сегодня', width: 560, props: { date: TODAY, today: TODAY, net: { amount: -1_807.9, symbol: '₽' }, rows: operationRows } },
     { name: 'Давно', width: 560, props: { date: '2026-09-12', today: TODAY, rows: operationRows.slice(0, 1) } },
+  ]),
+  doc(operationList, { group: 'Операции', description: 'Операции одна под другой, без заголовков дней, например крупные траты месяца.' }, [
+    { name: 'Крупные траты', width: 560, props: { label: 'Крупные траты', rows: operationRows } },
   ]),
   doc(categoryList, { group: 'Операции', description: 'Траты по категориям с долей; категория ведёт к своим операциям, выбранная подсвечена.' }, [
     {

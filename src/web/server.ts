@@ -36,6 +36,7 @@ import { isAccessToken, isAuthorized, sessionCookie } from './auth.ts';
 import { demoCollections } from './demo.ts';
 import { escape } from './html.ts';
 import { createHref, userName } from './pages/chrome.ts';
+import { loadReview, renderReview } from './pages/review.ts';
 import { budgetOf, loadDashboard, renderDashboard, submitDashboard, type DashboardForm, type SavedBudget } from './pages/dashboard.ts';
 import { loadIncome, renderIncome, submitIncome } from './pages/income.ts';
 import { renderLogin } from './pages/login.ts';
@@ -355,6 +356,18 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     case '/':
       send(response, 200, 'text/html', dashboardPage(params, context));
       return;
+    case '/review': {
+      // PROTOTYPE: the month review, see pages/review.ts.
+      const review = loadReview(loadCollections(demo, today), loadSettings(savedBudget), {
+        today,
+        month: params.get('month'),
+        variant: params.get('variant'),
+        group: params.get('group'),
+        edit: params.get('edit'),
+      });
+      send(response, 200, 'text/html', renderReview(review, href).toString());
+      return;
+    }
     case '/operations': {
       const operations = loadOperations(loadCollections(demo, today), loadSettings(savedMarking), {
         today,

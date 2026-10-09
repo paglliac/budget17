@@ -89,6 +89,11 @@ export function dayGroup(options: { date: DateString; today: DateString; net?: {
     </section>`;
 }
 
+/** PROTOTYPE: operations one under another without day headings, such as the largest expenses of a month. */
+export function operationList(options: { label: string; rows: Html[] }): Html {
+  return html`<ul class="operations" aria-label="${options.label}">${options.rows}</ul>`;
+}
+
 /** Spending by category with each one's share; a category links to its operations, the chosen one is highlighted. */
 export function categoryList(options: {
   label: string;
