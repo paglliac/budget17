@@ -183,13 +183,23 @@ final class ScreensTests: XCTestCase {
         sleep(1)
         XCTAssert(["", "Описание"].contains(description.value as? String ?? ""), "the description is taken away")
 
-        let extra = sheet("marking").buttons.matching(NSPredicate(format: "label == 'Дополнительные'")).firstMatch
-        extra.tap()
+        XCTAssert(sheet("place").waitForExistence(timeout: 5), "only the place picked shows")
+        let extra = countIn("Дополнительные")
         XCTAssert(extra.wait(for: \.isSelected, toEqual: true, timeout: 5))
+        XCTAssert(sheet("place").waitForExistence(timeout: 5), "a pick folds the other places away")
         shot("marking-extra")
-        let week = sheet("marking").buttons.matching(NSPredicate(format: "label == 'Неделя'")).firstMatch
-        week.tap()
+        let week = countIn("Неделя")
         XCTAssert(week.wait(for: \.isSelected, toEqual: true, timeout: 5))
+    }
+
+    /// Picks where the open expense counts, unfolding the places first.
+    private func countIn(_ label: String) -> XCUIElement {
+        let place = sheet("marking").buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
+        sheet("place").tap()
+        shot("marking-places")
+        wait(for: [expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: place)], timeout: 5)
+        place.tap()
+        return place
     }
 
     /// Unfolds the categories and payments of the open expense, when a pick folded them.

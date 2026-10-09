@@ -3,8 +3,8 @@ import SwiftUI
 /// An expense opened to mark it. On top what it is: whom it went to, how much and when, what the bank said and what is
 /// suggested. Then what it was for — a category, or the payment of a regular expense or a purchase it made — alone on a
 /// card; a tap on it unfolds all of them as tiles and cards to pick another, and a pick folds them back. While nothing
-/// is picked they are unfolded. Under it what the user wrote about the expense, and at the bottom where it counts, as
-/// large cards. Opened from the expenses that wait for a category, it steps through them: «1 из 4». Choices post to
+/// is picked they are unfolded. Under it what the user wrote about the expense, and at the bottom where it counts: the
+/// place picked alone on a large card, which unfolds the others the same way. Opened from the expenses that wait for a category, it steps through them: «1 из 4». Choices post to
 /// /api/spending/:id/:choice, the description to /api/spending/:id/description when its field is left.
 struct MarkingSheet: View {
     enum Mode: Hashable { case category, payment }
@@ -21,6 +21,8 @@ struct MarkingSheet: View {
     @State private var showOthers = false
     /// Whether the categories and payments are unfolded; nil until the card is tapped, unfolded while nothing is picked.
     @State private var picking: Bool?
+    /// Whether the places the expense can count in are unfolded; folded to the picked one until tapped.
+    @State private var placing = false
     /// The description as typed, until the server sends it back.
     @State private var draft: String?
     /// The draft last sent, so leaving the field and then the sheet sends it once.
@@ -92,6 +94,7 @@ struct MarkingSheet: View {
             applying = nil
             showOthers = false
             picking = nil
+            placing = false
             draft = nil
             sent = nil
         }
@@ -160,14 +163,34 @@ struct MarkingSheet: View {
         return paid && s.categories.choices.allSatisfy { !$0.isCurrent } ? .payment : .category
     }
 
+    /// The lists of the sheet that unfold to pick from.
+    private enum List { case choices, places }
+
     /// Picks a category or a payment, and folds the others away once its tick has shown.
     private func pick(_ choice: String) {
-        let spending = id
         picking = true
         choose(choice)
+        fold(.choices)
+    }
+
+    /// Picks where the expense counts, and folds the other places away once its tick has shown.
+    private func place(_ choice: String) {
+        choose(choice)
+        fold(.places)
+    }
+
+    /// Folds a list a moment after a pick, unless the sheet has moved to another expense by then.
+    private func fold(_ list: List) {
+        let spending = id
         Task {
             try? await Task.sleep(for: .milliseconds(350))
-            if id == spending { withAnimation(.snappy) { picking = false } }
+            guard id == spending else { return }
+            withAnimation(.snappy) {
+                switch list {
+                case .choices: picking = false
+                case .places: placing = false
+                }
+            }
         }
     }
 
@@ -415,41 +438,54 @@ struct MarkingSheet: View {
         }
     }
 
-    /// Where the expense counts, as large cards with what each means; the picked one is lilac.
+    /// Where the expense counts: the picked place alone, as a large lilac card with what it means; a tap on it unfolds
+    /// the others around it, one after another, and a pick folds them back.
     private func envelopes(_ s: SpendingScreen) -> some View {
         let picked = current(s.envelopes, clearedBy: "")
+        let open = placing || picked == nil
         return VStack(alignment: .leading, spacing: 10) {
             Text("Где считается").font(.subheadline).foregroundStyle(Lilac.muted).padding(.top, 6)
-            ForEach(s.envelopes) { choice in
+            ForEach(Array(s.envelopes.enumerated()), id: \.element.id) { index, choice in
                 let selected = choice.choice == picked
-                Button {
-                    if !selected { choose(choice.choice) }
-                } label: {
-                    HStack(spacing: 14) {
-                        ZStack {
-                            Circle().fill(selected ? Lilac.accent.opacity(0.16) : Lilac.track)
+                if open || selected {
+                    Button {
+                        if !selected { place(choice.choice) } else { withAnimation(.snappy) { placing = !open } }
+                    } label: {
+                        HStack(spacing: 14) {
+                            ZStack {
+                                Circle().fill(selected ? Lilac.accent.opacity(0.16) : Lilac.track)
+                                if selected {
+                                    Image(systemName: Self.envelopeIcons[choice.choice] ?? "circle").font(.system(size: 15, weight: .semibold)).foregroundStyle(Lilac.accent)
+                                } else {
+                                    Circle().fill(Lilac.muted.opacity(0.6)).frame(width: 7, height: 7)
+                                }
+                            }
+                            .frame(width: 42, height: 42)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(choice.label).font(.body.weight(.semibold)).foregroundStyle(Color.primary)
+                                if let detail = choice.detail { Text(detail).font(.footnote).foregroundStyle(Lilac.muted) }
+                            }
+                            Spacer(minLength: 8)
                             if selected {
-                                Image(systemName: Self.envelopeIcons[choice.choice] ?? "circle").font(.system(size: 15, weight: .semibold)).foregroundStyle(Lilac.accent)
-                            } else {
-                                Circle().fill(Lilac.muted.opacity(0.6)).frame(width: 7, height: 7)
+                                Image(systemName: open ? "checkmark" : "chevron.down")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(Lilac.accent)
+                                    .contentTransition(.symbolEffect(.replace))
                             }
                         }
-                        .frame(width: 42, height: 42)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(choice.label).font(.body.weight(.semibold)).foregroundStyle(Color.primary)
-                            if let detail = choice.detail { Text(detail).font(.footnote).foregroundStyle(Lilac.muted) }
-                        }
-                        Spacer(minLength: 8)
-                        if selected { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Lilac.accent) }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(selected ? Lilac.tint : Lilac.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .shadow(color: .black.opacity(selected ? 0 : 0.05), radius: 8, y: 3)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(selected ? Lilac.tint : Lilac.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .shadow(color: .black.opacity(selected ? 0 : 0.05), radius: 8, y: 3)
+                    .buttonStyle(PressableStyle())
+                    .modifier(Unfold(index: index, animated: !selected))
+                    .transition(.asymmetric(insertion: .identity, removal: .opacity.combined(with: .scale(scale: 0.96))))
+                    .accessibilityLabel(choice.label)
+                    .accessibilityHint(selected ? (open ? "Свернуть" : "Выбрать другое") : "")
+                    .accessibilityIdentifier(selected && !open ? "place" : choice.choice)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
-                .buttonStyle(PressableStyle())
-                .accessibilityLabel(choice.label)
-                .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
     }
@@ -563,7 +599,13 @@ struct PaymentCard: View {
 /// Comes in a moment after the one before it, so tiles unfold from the top when they open.
 private struct Unfold: ViewModifier {
     let index: Int
-    @State private var shown = false
+    @State private var shown: Bool
+
+    /// Not `animated`, it is there at once, as the place picked is when the sheet opens.
+    init(index: Int, animated: Bool = true) {
+        self.index = index
+        _shown = State(initialValue: !animated)
+    }
 
     func body(content: Content) -> some View {
         content
