@@ -384,7 +384,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       const options = { today, month: params.get('month'), ask: params.get('ask'), kind: params.get('kind'), edit: params.get('edit'), tile: params.get('tile') };
       const page =
         url.pathname === '/review'
-          ? renderAiReview(loadAiReview(loadCollections(demo, today), loadSettings(savedBudget), { ...options, variant, story: params.get('story') }), keep)
+          ? renderAiReview(loadAiReview(loadCollections(demo, today), loadSettings(savedBudget), { ...options, variant, list: params.get('list') }), keep)
           : renderReviewCheck(loadReview(loadCollections(demo, today), loadSettings(savedBudget), options), keep);
       send(response, 200, 'text/html', page.toString());
       return;

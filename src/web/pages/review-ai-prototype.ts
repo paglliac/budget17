@@ -1,7 +1,8 @@
 // PROTOTYPE (throwaway, branch prototype/review-ai): what Claude does on the month review. Three variants of /review,
 // switched by ?variant= and a floating bar, show one answer Claude wrote in a Claude Code session ("wizard of Oz"),
 // review-ai.prototype.json, read again on every request so it can be rewritten while the server runs:
-// - A «Советчик»: the side is Claude's — the month in words, findings, questions, hints and what could be spared; all by click.
+// - A «Советчик»: the side is Claude's — findings, hints (its questions first) and what could be spared, one tab at a time
+//   (?list=); all by click.
 // - B «Разметчик»: Claude has already marked the expenses and split the categories; the main column lists what it did, each
 //   with «Не так», and asks what it could not tell; the side stays the rule assistant.
 // - C «Письмо»: the main column opens with Claude's letter about the month, its questions and hints inside; the side only
@@ -17,12 +18,12 @@ import { shopKey } from '../../payees.ts';
 import type { Envelope } from '../../week.ts';
 import type { DateString, EntityCollections, TagId } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
-import { capitalize, dayMonth, money, monthName } from '../format.ts';
+import { dayMonth, money, monthName } from '../format.ts';
 import { Html } from '../html.ts';
 import type { IconName } from '../icons.ts';
 import type { Tone } from '../tones.ts';
 import { assistantAnswer, assistantHero, insightList, suggestionList } from '../widgets/assistant.ts';
-import { listHeading, pageIntro } from '../widgets/basics.ts';
+import { listHeading, pageIntro, segmentedLinks } from '../widgets/basics.ts';
 import { panelCard } from '../widgets/cards.ts';
 import { amountList } from '../widgets/operations.ts';
 import { appShell, screenOnly, topBar } from '../widgets/shell.ts';
@@ -178,13 +179,17 @@ export interface AiReview {
   variant: VariantKey;
   /** Expense ids of each piece of Claude's word, by its id. */
   ids: Map<string, string[]>;
-  story: boolean;
+  /** The tab of the side in A. */
+  list: List;
 }
+
+const LISTS = ['findings', 'hints', 'spare'] as const;
+type List = (typeof LISTS)[number];
 
 export function loadAiReview(
   data: EntityCollections,
   saved: SavedBudget,
-  options: Parameters<typeof loadReview>[2] & { variant: VariantKey; story?: string | null },
+  options: Parameters<typeof loadReview>[2] & { variant: VariantKey; list?: string | null },
 ): AiReview {
   const ai = readAi();
   const d = loadReview(data, overlay(data, saved, ai, options.variant, options), options);
@@ -195,7 +200,7 @@ export function loadAiReview(
     ...ai.questions.filter((q) => !state.answers.has(q.id)),
   ];
   d.aiHinted = new Set(waiting.flatMap((x) => ids.get(x.id) ?? []));
-  return { d, ai, variant: options.variant, ids, story: options.story !== 'hidden' };
+  return { d, ai, variant: options.variant, ids, list: LISTS.find((l) => l === options.list) ?? 'findings' };
 }
 
 // ---- Pieces of Claude's word
@@ -313,7 +318,7 @@ function withTileWord(r: AiReview, page: Page): Html[] {
 
 export function renderAiReview(r: AiReview, href: Href): Html {
   const d = r.d;
-  const here: Page['here'] = (changes) => href('/review', { month: d.review.month, ask: d.ask, tile: d.tile, story: r.story ? null : 'hidden', ...changes });
+  const here: Page['here'] = (changes) => href('/review', { month: d.review.month, ask: d.ask, tile: d.tile, list: r.list === 'findings' ? null : r.list, ...changes });
   const page: Page = { d, href, here };
   const tile = d.tile ? withTileWord(r, page) : null;
   const ownMonth = d.review.month === r.ai.month;
@@ -333,26 +338,41 @@ export function renderAiReview(r: AiReview, href: Href): Html {
 
 // A — the side is Claude's.
 
-function mainA(_r: AiReview, page: Page, tile: Html[] | null): Html[] {
-  return main(page, tile);
+function mainA(r: AiReview, page: Page, tile: Html[] | null): Html[] {
+  const blocks = main(page, tile);
+  const intro = pageIntro({
+    title: `Разбор ${monthName(r.d.review.month, 'genitive')}`,
+    text: 'Что произошло с деньгами и что стоит поправить.',
+    badge: { text: `Claude сделал ${count(r.ai.findings.length, ['вывод', 'вывода', 'выводов'])}`, tone: 'green' },
+  });
+  return [blocks[0]!, intro, ...blocks.slice(2)];
+}
+
+/** What still waits for a word: questions unanswered, Claude's marking and splits neither taken nor turned down, rule hints. */
+function pending(r: AiReview): number {
+  const open = (id: string) => !state.accepted.has(id) && !state.declined.has(id);
+  return r.ai.questions.filter((q) => !state.answers.has(q.id)).length + [...r.ai.marking, ...r.ai.splits].filter((x) => open(x.id)).length + r.d.hints.length;
 }
 
 function sideA(r: AiReview, page: Page): Html[] {
-  const { href, here } = page;
-  const waiting = r.ai.questions.filter((q) => !state.answers.has(q.id)).length;
-  const hints = [...r.ai.marking.map((m) => markingItem(r, href, m)), ...r.ai.splits.map((s) => splitItem(r, href, s)), ...r.d.hints.map((h) => hintItem(page, h))];
+  const { d, href, here } = page;
+  const hints = [
+    ...r.ai.questions.map((q) => questionItem(r, href, q)),
+    ...r.ai.marking.map((m) => markingItem(r, href, m)),
+    ...r.ai.splits.map((s) => splitItem(r, href, s)),
+    ...d.hints.map((h) => hintItem(page, h)),
+  ];
+  const tab = (list: List) => href('/review', { month: d.review.month, ask: d.ask, list: list === 'findings' ? null : list });
+  const lists: Record<List, { label: string; count: number; body: () => Html }> = {
+    findings: { label: 'Выводы', count: r.ai.findings.length, body: () => insightList({ label: 'Главные выводы', items: findingItems(r, here) }) },
+    hints: { label: 'Подсказки', count: pending(r), body: () => suggestionList({ label: 'Подсказки', items: hints }) },
+    spare: { label: 'Лишние траты', count: r.ai.avoidable.length, body: () => insightList({ label: 'Можно было не тратить', items: avoidableItems(r) }) },
+  };
   return [
-    hero(r, here, `${madeAt(r)} · ${count(r.ai.findings.length, ['вывод', 'вывода', 'выводов'])}, ${count(waiting, ['вопрос', 'вопроса', 'вопросов'])}`),
+    hero(r, here, `${madeAt(r)} · ${count(r.ai.findings.length, ['вывод', 'вывода', 'выводов'])}, ${count(pending(r), ['подсказка', 'подсказки', 'подсказок'])}`),
     aiAnswer(r, here),
-    r.story ? assistantAnswer({ question: `${capitalize(monthName(r.d.review.month))} словами`, paragraphs: r.ai.story, closeHref: href('/review', { month: r.d.review.month, ask: r.d.ask, tile: r.d.tile, story: 'hidden' }) }) : null,
-    listHeading({ title: 'Главные выводы', count: r.ai.findings.length }),
-    insightList({ label: 'Главные выводы', items: findingItems(r, here) }),
-    listHeading({ title: 'Claude спрашивает', count: waiting }),
-    suggestionList({ label: 'Claude спрашивает', items: r.ai.questions.map((q) => questionItem(r, href, q)) }),
-    listHeading({ title: 'Подсказки', count: hints.length }),
-    suggestionList({ label: 'Подсказки', items: hints }),
-    listHeading({ title: 'Можно было не тратить', count: r.ai.avoidable.length }),
-    insightList({ label: 'Можно было не тратить', items: avoidableItems(r) }),
+    segmentedLinks({ label: 'Что нашёл Claude', items: LISTS.map((l) => ({ label: lists[l].label, count: lists[l].count, href: tab(l), active: l === r.list })) }),
+    lists[r.list].body(),
   ].filter((b): b is Html => b !== null);
 }
 
