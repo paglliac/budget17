@@ -4,13 +4,13 @@
 // a purchase counts as `mark`. Built from the same loaders and phrases as the pages.
 
 import type { Suggestion } from '../categorization.ts';
-import { addDays, monthOf, shiftMonth, type MonthString } from '../dates.ts';
+import { addDays, dateOf, daysInMonth, monthOf, shiftMonth, weekday, type MonthString } from '../dates.ts';
 import { INCOME_MODEL_IDS, incomeModel, incomeValues, monthlyIncome, type Income, type IncomeModelId } from '../income.ts';
 import { listOperations, type Operation } from '../ledger.ts';
 import { paymentDate, regularTotals, regularValues, type RegularExpense } from '../regular.ts';
 import { adviceTarget, envelopeOf, MONTH_LIMIT, monthOfWeek, WEEK_LIMIT, type Envelope, type PurchaseStatus, type WeekSummary } from '../week.ts';
 import type { DateString, EntityCollections } from '../zenmoney/types.ts';
-import { capitalize, dayHeading, dayMonth, money, monthName, plural, timeOn, weekLabel, WEEKDAYS_FULL } from './format.ts';
+import { capitalize, dayHeading, dayMonth, fromToday, money, monthName, plural, timeOn, weekLabel, WEEKDAYS, WEEKDAYS_FULL } from './format.ts';
 import { categoryIcon, ENTRY_ICONS, entryIcon, type IconName } from './icons.ts';
 import { recentMonths } from './pages/chrome.ts';
 import {
@@ -559,28 +559,93 @@ export function incomeScreen(data: EntityCollections, incomes: Parameters<typeof
   };
 }
 
+/** How many months the savings widget draws, this one last. */
+const SAVINGS_MONTHS = 10;
+
 /**
- * What the widget shows: what is left of the current week with its bar, and the expenses of this month that still
- * wait for a category, as the «Разобрать» tab counts them.
+ * What the widgets show. The week: what is left of it, with its days, today among them and those with spending. Today:
+ * what went into the week today and when the server last synced. The expenses of this month that wait for a category,
+ * with the share of its expenses that do not. Savings: what this month's income is above its spending, as the
+ * operations count them, against the month before and with the months before it. The next regular payment.
  */
-export function widgetScreen(data: EntityCollections, saved: SavedBudget, options: { today: DateString }) {
+export function widgetScreen(data: EntityCollections, saved: SavedBudget, options: { today: DateString; syncedAt?: string | null }) {
   const { today } = options;
   const d = loadDashboard(data, saved, { today, source: 'zenmoney', canSync: false });
-  const total = weekTotal(d.week, d.current, d.symbol);
-  const { pending } = loadUncategorized(data, saved, { today });
-  const count = pending.length;
+  const w = d.week;
+  const spentOn = new Set(w.spending.map((o) => o.date));
+  const todaySpent = w.spending.filter((o) => o.date === today && envelopeOf(d.marking, o) === 'week').reduce((sum, o) => sum + o.amount, 0);
+  const u = loadUncategorized(data, saved, { today });
+  const count = u.pending.length;
+  const amount = u.pending.reduce((sum, p) => sum + p.expense.amount, 0);
   return {
     symbol: d.symbol,
-    week: weekLabel(d.week.week),
-    free: total.amount,
-    note: total.note,
-    parts: total.parts,
+    week: {
+      label: 'Неделя',
+      free: w.free,
+      note: w.free < 0 ? 'потрачено сверх недели' : 'свободно до конца недели',
+      days: Array.from({ length: 7 }, (_, i) => {
+        const date = addDays(w.week, i);
+        return { label: WEEKDAYS[weekday(date)], today: date === today, ahead: date > today, spent: spentOn.has(date) };
+      }),
+    },
+    today: { label: 'Сегодня потрачено', amount: todaySpent, syncedAt: options.syncedAt ?? null },
     pending: {
       count,
-      amount: pending.reduce((sum, p) => sum + p.expense.amount, 0),
-      note: count === 0 ? 'Всё разобрано' : `${count} ${plural(count, ['трата', 'траты', 'трат'])} без категории`,
+      amount,
+      /** Of this month's expenses, the share that has a category: the ring around the count. */
+      sorted: u.count === 0 ? 1 : (u.count - count) / u.count,
+      label: count === 0 ? 'Всё разобрано' : `${plural(count, ['трата ждёт', 'траты ждут', 'трат ждут'])} разбора`,
+      title: count === 0 ? 'Все операции разобраны' : `${count} ${plural(count, ['трата ждёт', 'траты ждут', 'трат ждут'])} разбора`,
+      note: count === 0 ? 'Отличная работа!' : `на ${money(amount, d.symbol)}`,
     },
+    savings: savingsOf(data, saved, today, d.symbol),
+    payment: nextPayment(data, saved, today),
   };
+}
+
+/**
+ * Income above spending of this month and of the months before it, as the operations count them: transfers between
+ * the user's accounts and what is not counted left out. The months before the first operation are not drawn. Against
+ * the month before in percent when both months saved, in money otherwise.
+ */
+function savingsOf(data: EntityCollections, saved: SavedMarking, today: DateString, symbol: string) {
+  const current = monthOf(today);
+  const first = shiftMonth(current, 1 - SAVINGS_MONTHS);
+  const operations = listOperations(data, { from: dateOf(first, 1), to: dateOf(current, daysInMonth(current)) }, saved);
+  const net = new Map<MonthString, number>();
+  for (const o of operations) {
+    const sign = o.kind === 'income' ? 1 : o.kind === 'expense' ? -1 : 0;
+    if (sign !== 0) net.set(monthOf(o.date), (net.get(monthOf(o.date)) ?? 0) + sign * o.amount);
+  }
+  const months: Array<{ month: MonthString; amount: number }> = [];
+  for (let month = first; month <= current; month = shiftMonth(month, 1)) {
+    if (months.length > 0 || net.has(month) || month === current) months.push({ month, amount: net.get(month) ?? 0 });
+  }
+  const amount = net.get(current) ?? 0;
+  const before = months.length > 1 ? (months.at(-2)?.amount ?? 0) : null;
+  return {
+    label: 'Накопления',
+    period: 'в этом месяце',
+    amount,
+    change: before === null ? null : savingsChange(amount, before, symbol),
+    months,
+  };
+}
+
+function savingsChange(amount: number, before: number, symbol: string) {
+  const diff = Math.round(amount) - Math.round(before);
+  if (diff === 0) return { direction: 'same' as const, label: 'как в прошлом месяце', note: null };
+  const direction = diff > 0 ? ('up' as const) : ('down' as const);
+  const by = amount > 0 && before > 0 ? `${Math.round((Math.abs(diff) / before) * 100)}%` : money(Math.abs(diff), symbol);
+  return { direction, label: `на ${by} ${diff > 0 ? 'больше' : 'меньше'}`, note: 'чем в прошлом месяце' };
+}
+
+/** The regular payment that comes next and is not paid yet: this month's, or else the next month's. */
+function nextPayment(data: EntityCollections, saved: SavedMarking, today: DateString) {
+  const { ahead, later } = timeline(loadRegular(data, saved, { today }));
+  const next = ahead[0] ?? later[0];
+  if (!next) return null;
+  return { title: next.expense.title, amount: next.expense.amount - next.status.covered, date: dayMonth(next.status.date), when: fromToday(next.status.date, today) };
 }
 
 /** The day a week begins on, to pick from the days Monday first; it posts to /api/budget/week-start/:day. */

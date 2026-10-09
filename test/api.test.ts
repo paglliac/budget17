@@ -296,17 +296,56 @@ describe('api', () => {
     assert.equal(plain(weekScreen(zenmoney, saved(), budget)).total.note, 'из 45 000 руб. на неделю', 'the pages keep руб.');
   });
 
-  it('gives the widget what is left of the week and what waits for a category', () => {
-    const widget = plain(widgetScreen(data(), saved(), { today }));
+  it('gives the widgets the week with its days, today, what waits for a category and the next payment', () => {
+    const widget = plain(widgetScreen(data(), saved(), { today, syncedAt: '2026-10-06T08:00:00.000Z' }));
 
-    assert.equal(widget.week, '5–11 октября');
-    assert.equal(widget.free, -3_473);
-    assert.equal(widget.note, 'из 45 000 ₽ на неделю');
-    assert.deepEqual(widget.parts.map((p: { label: string }) => p.label), ['Потрачено', 'План', 'Свободно']);
-    assert.deepEqual(widget.pending, { count: 2, amount: 70_000, note: '2 траты без категории' });
+    assert.deepEqual([widget.week.label, widget.week.free, widget.week.note], ['Неделя', -3_473, 'потрачено сверх недели']);
+    assert.deepEqual(widget.week.days[0], { label: 'Пн', today: false, ahead: false, spent: true });
+    assert.deepEqual(widget.week.days[1], { label: 'Вт', today: true, ahead: false, spent: false });
+    assert.deepEqual(
+      widget.week.days.map((d: { label: string; ahead: boolean }) => `${d.label}${d.ahead ? '…' : ''}`),
+      ['Пн', 'Вт', 'Ср…', 'Чт…', 'Пт…', 'Сб…', 'Вс…'],
+    );
+    assert.deepEqual(widget.today, { label: 'Сегодня потрачено', amount: 0, syncedAt: '2026-10-06T08:00:00.000Z' });
+    assert.deepEqual(widget.pending, {
+      count: 2,
+      amount: 70_000,
+      sorted: 1 / 3,
+      label: 'траты ждут разбора',
+      title: '2 траты ждут разбора',
+      note: 'на 70 000 ₽',
+    });
+    assert.deepEqual(widget.payment, { title: 'Школа, ЛДК', amount: 45_000, date: '7 октября', when: 'завтра' });
 
     const sorted = { ...saved(), categorizations: new Map([['transfer', { tag: 'groceries' }], ['last-week', { tag: 'groceries' }]]) };
-    assert.deepEqual(plain(widgetScreen(data(), sorted, { today })).pending, { count: 0, amount: 0, note: 'Всё разобрано' });
+    const done = plain(widgetScreen(data(), sorted, { today })).pending;
+    assert.deepEqual([done.count, done.sorted, done.label, done.title, done.note], [0, 1, 'Всё разобрано', 'Все операции разобраны', 'Отличная работа!']);
+  });
+
+  it('gives the savings widget income above spending by month, against the month before', () => {
+    const first = plain(widgetScreen(data(), saved(), { today })).savings;
+    assert.deepEqual(first, { label: 'Накопления', period: 'в этом месяце', amount: 150_000 - 70_473, change: null, months: [{ month: '2026-10', amount: 79_527 }] });
+
+    const withSeptember = (income: number) => ({
+      ...data(),
+      transaction: [
+        ...data().transaction!,
+        transaction({ id: 'september-salary', date: '2026-09-05', income, payee: 'ООО Работа' }),
+        transaction({ id: 'september-rent', date: '2026-09-10', outcome: 20_000, payee: 'Аренда' }),
+      ],
+    });
+    // What is not counted is left out: October without the transfer saves 119 527, September 80 000.
+    const savings = plain(widgetScreen(withSeptember(100_000), saved([['transfer', 'ignored']]), { today })).savings;
+    assert.equal(savings.amount, 119_527);
+    assert.deepEqual(savings.months, [
+      { month: '2026-09', amount: 80_000 },
+      { month: '2026-10', amount: 119_527 },
+    ]);
+    assert.deepEqual(savings.change, { direction: 'up', label: 'на 49% больше', note: 'чем в прошлом месяце' });
+
+    // A month that spent more than it got is compared in money.
+    const after = plain(widgetScreen(withSeptember(10_000), saved(), { today })).savings;
+    assert.deepEqual(after.change, { direction: 'up', label: 'на 89 527 ₽ больше', note: 'чем в прошлом месяце' });
   });
 
   it('gives the week from the day picked in the settings with the amount set for it', () => {
@@ -318,7 +357,7 @@ describe('api', () => {
     assert.deepEqual(week.limit, { amount: 80_000, usual: 45_000 });
     assert.deepEqual(plain(weekScreen(data(), saved(), budget)).limit, { amount: 45_000, usual: 45_000 });
     assert.equal(week.total.amount, 80_000 - 70_473);
-    assert.equal(plain(widgetScreen(data(), settings, { today })).note, 'из 80 000 ₽ на неделю');
+    assert.equal(plain(widgetScreen(data(), settings, { today })).week.free, 80_000 - 70_473);
     assert.deepEqual(plain(monthScreen(data(), settings, budget)).weeks.map((w: { week: string }) => w.week), ['2026-10-01', '2026-10-08', '2026-10-15', '2026-10-22']);
   });
 

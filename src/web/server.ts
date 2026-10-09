@@ -264,7 +264,7 @@ function apiScreen(path: string, params: URLSearchParams, { today, demo }: Conte
     case '/api/budget-settings':
       return budgetSettingsScreen(collections(), loadSettings(savedMarking));
     case '/api/widget':
-      return widgetScreen(collections(), loadSettings(savedBudget), { today });
+      return widgetScreen(collections(), loadSettings(savedBudget), { today, syncedAt: budget.syncedAt });
     default:
       return null;
   }

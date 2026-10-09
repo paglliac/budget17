@@ -44,9 +44,16 @@ struct RootView: View {
             // The tab bar stays at the bottom under the keyboard, as when searching operations.
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .task(id: session.version) { await session.refreshPending() }
-            // budget://week and budget://sort, from the widget.
+            // budget://week, sort, operations and regular, from the widgets.
             .onOpenURL { url in
-                if url.host() == "sort" { openPending() } else { tab = .home }
+                switch url.host() {
+                case "sort": openPending()
+                case "operations":
+                    filter = .all
+                    tab = .operations
+                case "regular": tab = .more
+                default: tab = .home
+                }
             }
             .onChange(of: scenePhase, initial: true) { _, phase in
                 if phase == .active { Task { await session.sync() } }
