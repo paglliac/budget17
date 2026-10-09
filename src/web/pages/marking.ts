@@ -1,10 +1,12 @@
 // Marking an expense, the same on every page that lists expenses: what it paid (a payment of a regular expense or a
 // purchase planned in a week), its category, which wins over ZenMoney's, and where it counts in the budget, if at all.
 // An open expense shows under its row when and how it was paid, then these as choices made in one click, the
-// likeliest payments and the most popular categories first. Choices post to /spending/:id/:choice, and the list of other payments to /spending/:id with the
-// choice as `target` (see submitMarking).
+// likeliest payments and the most popular categories first, and what the user wrote about it. Choices post to
+// /spending/:id/:choice, the list of other payments to /spending/:id with the choice as `target`, and the description
+// to /spending/:id/description (see submitMarking).
 
 import { mainCurrency } from '../../balances.ts';
+import { MAX_DESCRIPTION, parseDescription } from '../../input.ts';
 import { byPopularity, categoryCatalog, type CategoryEntry, type CategorySetup } from '../../categories.ts';
 import { paymentChoices, suggester, type Categorization, type PaymentChoice, type Suggestion } from '../../categorization.ts';
 import { addDays } from '../../dates.ts';
@@ -16,7 +18,7 @@ import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { dayMonth, money, timeOn, weekLabel } from '../format.ts';
 import type { Html } from '../html.ts';
 import { categoryColor, type Tone } from '../tones.ts';
-import { choiceGroup, factList } from '../widgets/basics.ts';
+import { choiceGroup, factList, inlineForm } from '../widgets/basics.ts';
 import type { Href } from './chrome.ts';
 
 /** What the user keeps in the app about expenses. */
@@ -28,6 +30,8 @@ export interface SavedMarking {
   purchases: Purchase[];
   /** Envelopes of spending moved out of where it counts by default. */
   marks: ReadonlyMap<string, Envelope>;
+  /** What the user wrote about expenses, by ZenMoney transaction id. */
+  descriptions: ReadonlyMap<string, string>;
   categories: CategorySetup;
   weekStart: WeekStart;
 }
@@ -69,7 +73,7 @@ export function loadMarking(data: EntityCollections, saved: SavedMarking, expens
 
 // ---- Forms
 
-export type MarkingSubmission = { status: 'saved' } | { status: 'missing' };
+export type MarkingSubmission = { status: 'saved' } | { status: 'missing' } | { status: 'invalid'; error: string };
 
 const ENVELOPES: Envelope[] = ['week', 'extra', 'outside', 'ignored'];
 
@@ -78,6 +82,7 @@ const ENVELOPES: Envelope[] = ['week', 'extra', 'outside', 'ignored'];
  * category (tag-<id>), the regular expense or purchase the expense paid (regular-<id>, purchase-<id>), unlink,
  * uncategorize, or where it counts (week, extra, outside, ignored for nowhere). A payment counts where what it paid
  * counts, so linking one drops where the expense was moved, and counts it again if it was not counted. The expense and what it is put into must exist.
+ * `description` gives the expense the `description` of the form, and an empty one takes it away.
  */
 export function submitMarking(settings: Settings, data: EntityCollections, path: string, body: URLSearchParams): MarkingSubmission {
   const [, id, action] = /^\/spending\/([\w-]+)(?:\/([\w-]+))?$/.exec(path) ?? [];
@@ -85,6 +90,12 @@ export function submitMarking(settings: Settings, data: EntityCollections, path:
   const choice = action ?? body.get('target') ?? '';
   const sorted = settings.categorizations().get(id);
 
+  if (choice === 'description') {
+    const description = parseDescription(body.get('description') ?? '');
+    if ('error' in description) return { status: 'invalid', error: description.error };
+    settings.describeSpending(id, description.value);
+    return { status: 'saved' };
+  }
   const envelope = ENVELOPES.find((e) => e === choice);
   if (envelope) {
     settings.markSpending(id, envelope);
@@ -144,12 +155,23 @@ export function markingTitle(o: Operation): string {
   return o.regular?.title ?? o.purchase?.title ?? o.payee;
 }
 
-/** What an expense is marked as, for its row under markingTitle: who it went to when it is linked, and its category. */
+/**
+ * What an expense is marked as, for its row under markingTitle: who it went to when it is linked, and its category;
+ * then what the user wrote about it.
+ */
 export function markingDetails(o: Operation): string {
   const category = o.category && o.category.id !== REGULAR_CATEGORY.id && o.category.id !== PURCHASE_CATEGORY.id ? o.category.title : null;
-  if (o.regular) return o.payee;
-  if (o.purchase) return [o.payee, category?.toLowerCase() === o.purchase.title.toLowerCase() ? null : category].filter(Boolean).join(' · ');
-  return category ?? 'без категории';
+  const marked = o.regular
+    ? o.payee
+    : o.purchase
+      ? [o.payee, category?.toLowerCase() === o.purchase.title.toLowerCase() ? null : category].filter(Boolean).join(' · ')
+      : (category ?? 'без категории');
+  return [marked, o.description].filter(Boolean).join(' · ');
+}
+
+/** What is written under an operation's row: what the user wrote about it, then the bank's comment. */
+export function writtenAbout(o: Pick<Operation, 'description' | 'comment'>): string | null {
+  return [o.description, o.comment].filter(Boolean).join(' · ') || null;
 }
 
 /** Where an expense counts, for the mark on its row. */
@@ -160,7 +182,7 @@ export function envelopeMark(m: Pick<Marking, 'marks' | 'purchases'>, o: Operati
 /** What an open expense shows under its row. */
 export function markingPanel(m: Marking, o: Operation, href: Href): Html[] {
   const suggestion = o.category === null ? m.suggest(o) : null;
-  return [facts(m, o), paymentGroup(m, o, href, suggestion), categoryGroup(m, o, href, suggestion), envelopeGroup(m, o, href)];
+  return [facts(m, o), paymentGroup(m, o, href, suggestion), categoryGroup(m, o, href, suggestion), envelopeGroup(m, o, href), descriptionForm(o, href)];
 }
 
 /** When, from where and how the bank put it, with whatever else it said: comment, foreign amount, not settled yet. */
@@ -179,6 +201,18 @@ export function markingFacts(m: Pick<Marking, 'symbol'>, o: Operation): Array<{ 
 
 function facts(m: Marking, o: Operation): Html {
   return factList({ label: 'О трате', items: markingFacts(m, o) });
+}
+
+function descriptionForm(o: Operation, href: Href): Html {
+  return inlineForm({
+    label: 'Описание',
+    action: href(`/spending/${o.id}/description`),
+    name: 'description',
+    value: o.description ?? '',
+    placeholder: 'Например, подарок маме',
+    maxLength: MAX_DESCRIPTION,
+    submitLabel: 'Сохранить',
+  });
 }
 
 /** A choice made in one click on an open expense, as /spending/:id/:choice takes it. */

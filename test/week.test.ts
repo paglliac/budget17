@@ -21,7 +21,7 @@ const today = '2026-10-06';
 const week = '2026-10-05';
 
 function spending(id: string, date: string, amount: number): Operation {
-  return { id, date, created: 0, kind: 'expense', amount, original: null, payee: id, originalPayee: null, comment: null, category: null, zenmoneyCategory: null, regular: null, purchase: null, account: 'Основной', toAccount: null, hold: false, ignored: false };
+  return { id, date, created: 0, kind: 'expense', amount, original: null, payee: id, originalPayee: null, comment: null, description: null, category: null, zenmoneyCategory: null, regular: null, purchase: null, account: 'Основной', toAccount: null, hold: false, ignored: false };
 }
 
 function purchase(id: number, title: string, amount: number, overrides: Partial<Purchase> = {}): Purchase {

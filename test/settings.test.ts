@@ -160,6 +160,16 @@ describe('Settings', () => {
     assert.deepEqual([...settings.purchasePayments()], []);
   });
 
+  it('keeps what the user wrote about expenses, replaces it and takes it away', () => {
+    using settings = new Settings(':memory:');
+
+    settings.describeSpending('tx-1', 'Подарок маме');
+    settings.describeSpending('tx-2', 'Бензин в Шерегеш');
+    settings.describeSpending('tx-1', 'Подарок на день рождения');
+    settings.describeSpending('tx-2', null);
+    assert.deepEqual([...settings.spendingDescriptions()], [['tx-1', 'Подарок на день рождения']]);
+  });
+
   it('renames and hides ZenMoney categories, and keeps the user’s own', () => {
     using settings = new Settings(':memory:');
 
@@ -271,7 +281,7 @@ describe('Settings', () => {
     }
   });
 
-  it('adds purchase links and categories to a file made before them, keeping how expenses were sorted', () => {
+  it('adds purchase links, categories and descriptions to a file made before them, keeping how expenses were sorted', () => {
     const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
     try {
       const path = join(dir, 'settings.db');
@@ -289,8 +299,10 @@ describe('Settings', () => {
       assert.deepEqual([...settings.categorizations()], [['tx-1', { tag: 'cafe' }]]);
       settings.linkPurchase('tx-1', 1);
       settings.renameCategory('cafe', 'Кафе');
+      settings.describeSpending('tx-1', 'Кофе с Машей');
       assert.deepEqual([...settings.purchasePayments()], [['tx-1', 1]]);
       assert.equal(settings.categorySetup().changes.get('cafe')?.title, 'Кафе');
+      assert.deepEqual([...settings.spendingDescriptions()], [['tx-1', 'Кофе с Машей']]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

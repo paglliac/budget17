@@ -48,6 +48,7 @@ function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
     ],
     wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500 }],
     marks: new Map(marks),
+    descriptions: new Map(),
     regular: [regular({ id: 7, title: 'Школа, ЛДК', amount: 45_000, day: 7 })],
     categorizations: new Map(),
     purchasePayments: new Map(),
@@ -205,6 +206,18 @@ describe('api', () => {
     assert.equal(spending.envelopes[0].detail, 'Учесть в текущей неделе', 'the app says what each place means');
     assert.equal(spending.hint, null, 'nothing to suggest for a transfer to a person');
     assert.deepEqual(spending.undo, []);
+    assert.equal(spending.description, null);
+  });
+
+  it('shows what the user wrote about an expense on its sheet and under its rows', () => {
+    const described = { ...data(), transaction: data().transaction!.map((t) => (t.id === 'pyaterochka' ? { ...t, comment: 'Оплата товаров' } : t)) };
+    const descriptions = { ...saved(), descriptions: new Map([['pyaterochka', 'Торт на день рождения']]) };
+
+    assert.equal(spendingScreen(described, descriptions, { today, id: 'pyaterochka' })?.description, 'Торт на день рождения');
+    const operation = plain(operationsScreen(described, descriptions, { today })).days[0].items.find((o: { id: string }) => o.id === 'pyaterochka');
+    assert.equal(operation.comment, 'Торт на день рождения · Оплата товаров', 'the description goes before the bank’s comment');
+    const week = plain(weekScreen(described, descriptions, budget)).days.flatMap((d: { items: unknown[] }) => d.items);
+    assert.equal(week.find((o: { spending: string }) => o.spending === 'pyaterochka').details, 'Продукты · Торт на день рождения');
   });
 
   it('opens an expense that does not count, and nothing that is not an expense', () => {

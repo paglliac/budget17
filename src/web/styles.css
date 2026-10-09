@@ -297,6 +297,8 @@ button.choice:hover { border-color: var(--soft); color: var(--ink); }
 .choices-empty { padding: 6px 2px; font-size: 12px; color: var(--muted); }
 .choices-other { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
 .choices-other .button { margin-bottom: 3px; }
+.inline-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.inline-form .button { margin-bottom: 3px; }
 
 /* entryList, entryRow, entryForm */
 .entries { display: grid; gap: 2px; list-style: none; container-type: inline-size; }

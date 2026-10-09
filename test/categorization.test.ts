@@ -15,7 +15,7 @@ const phone = regular({ id: 4, title: 'Телефон', amount: 1_500, day: 2 })
 const wifePhone = regular({ id: 5, title: 'Телефон жены', amount: 1_500, day: 2 });
 
 function expense(payee: string, amount: number, date: string, sorted: Partial<Pick<Operation, 'category' | 'regular' | 'purchase'>> = {}): Operation {
-  return { id: `${payee}-${date}`, date, created: 0, kind: 'expense', amount, original: null, payee, originalPayee: null, comment: null, category: null, zenmoneyCategory: null, regular: null, purchase: null, account: 'Основной', toAccount: null, hold: false, ignored: false, ...sorted };
+  return { id: `${payee}-${date}`, date, created: 0, kind: 'expense', amount, original: null, payee, originalPayee: null, comment: null, description: null, category: null, zenmoneyCategory: null, regular: null, purchase: null, account: 'Основной', toAccount: null, hold: false, ignored: false, ...sorted };
 }
 
 /** An expense the user linked to a regular expense. */

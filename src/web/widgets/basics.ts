@@ -247,6 +247,28 @@ export function choiceGroup(options: {
   </div>`;
 }
 
+/**
+ * One text field with its own button, posting a form to its URL, such as a description of an expense. An empty field
+ * posts too, to clear what was there.
+ */
+export function inlineForm(options: {
+  label: string;
+  action: string;
+  name: string;
+  value?: string;
+  placeholder?: string;
+  maxLength?: number;
+  submitLabel: string;
+}): Html {
+  return html`<form class="inline-form" method="post" action="${options.action}">${field({
+    label: options.label,
+    name: options.name,
+    value: options.value,
+    placeholder: options.placeholder,
+    maxLength: options.maxLength,
+  })}${button({ label: options.submitLabel, submit: true })}</form>`;
+}
+
 /** Facts about something, a label and a value each, in a row that wraps, such as when and from where an expense was paid. */
 export function factList(options: { label: string; items: Array<{ label: string; value: string }> }): Html {
   return html`<dl class="facts" aria-label="${options.label}">${options.items.map(

@@ -15,6 +15,15 @@ export function parseTitle(text: string): Parsed<string> {
   return { value: title };
 }
 
+export const MAX_DESCRIPTION = 200;
+
+/** Trims the description and collapses inner spaces and line breaks; an empty one means none. */
+export function parseDescription(text: string): Parsed<string | null> {
+  const description = text.trim().replace(/\s+/g, ' ');
+  if (description.length > MAX_DESCRIPTION) return { error: `Не длиннее ${MAX_DESCRIPTION} символов` };
+  return { value: description || null };
+}
+
 /** A positive sum with up to two decimals; spaces and a decimal comma are fine: 13 000, 1500,50. */
 export function parseAmount(text: string): Parsed<number> {
   const amount = text.replace(/\s/g, '').replace(',', '.');

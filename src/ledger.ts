@@ -21,6 +21,8 @@ export interface Operation {
   /** How the bank named the payee, when ZenMoney or the user named it otherwise. */
   originalPayee: string | null;
   comment: string | null;
+  /** What the user wrote about it in the app. */
+  description: string | null;
   /**
    * Top-level category with the title the user gave it: the one the user picked in the app, or else the one from
    * ZenMoney; a payment of a regular expense without either goes under REGULAR_CATEGORY, of a purchase under
@@ -53,6 +55,8 @@ export interface Sorting {
   categories?: CategorySetup;
   /** Where the user said expenses count; those not counted at all are left out. */
   marks?: ReadonlyMap<string, Envelope>;
+  /** What the user wrote about expenses, by ZenMoney transaction id. */
+  descriptions?: ReadonlyMap<string, string>;
 }
 
 /** Payments of regular expenses go together under this category when they have no other. */
@@ -136,6 +140,7 @@ export function listOperations(
       payee,
       originalPayee: originalPayee && originalPayee.toLocaleLowerCase('ru') !== payee.toLocaleLowerCase('ru') ? originalPayee : null,
       comment: comment === payee ? null : comment,
+      description: sorting?.descriptions?.get(t.id) ?? null,
       category: category ?? (paid ? REGULAR_CATEGORY : bought ? PURCHASE_CATEGORY : null),
       zenmoneyCategory: zenmoneyCategory ?? null,
       regular: paid ? { id: paid.id, title: paid.title } : null,
@@ -158,7 +163,7 @@ export interface OperationFilter {
   kind?: OperationKind;
   /** A top-level category, or 'none' for incomes and expenses without one. */
   category?: TagId | 'none';
-  /** Text to find in the payee, comment, category or account, in any case. */
+  /** Text to find in the payee, comment, description, category or account, in any case. */
   query?: string;
 }
 
@@ -169,7 +174,7 @@ export function filterOperations(operations: Operation[], filter: OperationFilte
     if (filter.category === 'none' && (o.category !== null || o.kind === 'transfer')) return false;
     if (filter.category && filter.category !== 'none' && o.category?.id !== filter.category) return false;
     if (query) {
-      const text = [o.payee, o.comment, o.category?.title, o.regular?.title, o.purchase?.title, o.account, o.toAccount].filter(Boolean).join(' ');
+      const text = [o.payee, o.comment, o.description, o.category?.title, o.regular?.title, o.purchase?.title, o.account, o.toAccount].filter(Boolean).join(' ');
       if (!text.toLocaleLowerCase('ru').includes(query)) return false;
     }
     return true;

@@ -97,6 +97,7 @@ function savedMarking(settings: Settings): SavedMarking {
     regular: settings.regularExpenses(),
     purchases: settings.purchases(),
     marks: settings.spendingMarks(),
+    descriptions: settings.spendingDescriptions(),
     categories: settings.categorySetup(),
     weekStart: settings.weekStart(),
   };
@@ -194,9 +195,10 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
   if (path.startsWith('/spending/')) {
     using settings = new Settings(SETTINGS_PATH);
     const result = submitMarking(settings, loadCollections(demo, today), path, body);
-    return result.status === 'saved'
-      ? { status: 'saved', next: backTo(request) }
-      : { status: 'missing', message: 'Такой траты, категории, регулярной траты или покупки нет' };
+    if (result.status === 'saved') return { status: 'saved', next: backTo(request) };
+    if (result.status === 'missing') return { status: 'missing', message: 'Такой траты, категории, регулярной траты или покупки нет' };
+    // The page's field allows no more than the server takes, so only a hand-made form gets here.
+    return { status: 'invalid', errors: { description: result.error }, page: () => `<p>${escape(result.error)}</p>` };
   }
   if (/^\/categories(\/|$)/.test(path)) {
     using settings = new Settings(SETTINGS_PATH);

@@ -285,6 +285,8 @@ struct SpendingScreen: Decodable, Hashable {
     /// 6 октября, 20:05.
     let when: String
     let account: String
+    /// What the user wrote about the expense; posted to /api/spending/:id/description.
+    let description: String?
     /// What else the bank said, such as its comment or that it has not settled the expense yet.
     let notes: [String]
     let payments: Payments

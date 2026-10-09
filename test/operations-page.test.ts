@@ -22,7 +22,7 @@ const data: EntityCollections = {
     transaction({ date: '2026-09-30', outcome: 999, payee: 'Сентябрь' }),
   ],
 };
-const sorting: SavedMarking = { categorizations: new Map(), purchasePayments: new Map(), regular: [], purchases: [], marks: new Map(), categories: NO_SETUP, weekStart: 0 };
+const sorting: SavedMarking = { categorizations: new Map(), purchasePayments: new Map(), regular: [], purchases: [], marks: new Map(), descriptions: new Map(), categories: NO_SETUP, weekStart: 0 };
 const render = (options: Parameters<typeof loadOperations>[2]) => String(renderOperations(loadOperations(data, sorting, options), createHref()));
 
 describe('operations page', () => {
@@ -104,6 +104,12 @@ describe('operations page', () => {
     assert.ok(page.includes('<dt>Когда</dt><dd>3 октября, 14:58</dd>'));
     assert.ok(page.includes('<dt>В банке</dt><dd>ATM 1234</dd>') && page.includes('<dt>Комментарий</dt><dd>Снял в банкомате</dd>'));
     assert.ok(page.includes('Не учитывать</span></span>'), 'chosen');
+    assert.ok(page.includes('action="/spending/cash/description"') && page.includes('name="description" value=""'), 'a description can be written');
+
+    const described = loadOperations(withCash, { ...ignored, descriptions: new Map([['cash', 'На ремонт']]) }, { today, edit: 'spending-cash' });
+    const again = String(renderOperations(described, createHref()));
+    assert.ok(again.includes('name="description" value="На ремонт"'));
+    assert.ok(again.includes('На ремонт · Снял в банкомате</small>'), 'the row shows it before the bank’s comment');
   });
 
   it('ignores an unknown kind and a month in the future', () => {

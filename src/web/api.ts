@@ -39,6 +39,7 @@ import {
   PAYMENT_WORDS,
   paymentOptions,
   undoChoices,
+  writtenAbout,
   type Marking,
   type MarkingChoice,
   type SavedMarking,
@@ -331,6 +332,8 @@ export function spendingScreen(data: EntityCollections, saved: SavedMarking, opt
     symbol: marking.symbol,
     when: time ? `${dayMonth(o.date)}, ${time}` : dayMonth(o.date),
     account: o.account,
+    /** What the user wrote about the expense; posted to /api/spending/:id/description. */
+    description: o.description,
     /** What else the bank said: how it named the payee, its comment, the amount in a foreign currency, not settled yet. */
     notes: [
       o.originalPayee ? `в банке — ${o.originalPayee}` : null,
@@ -417,7 +420,7 @@ export function operationsScreen(
           muted: o.ignored,
         }),
         kind: o.kind,
-        comment: o.comment,
+        comment: writtenAbout(o),
         hold: o.hold,
         original: o.original ? { amount: o.original.amount, symbol: o.original.instrument.symbol } : null,
         spending: o.kind === 'expense' ? o.id : null,
@@ -448,7 +451,7 @@ export function uncategorizedScreen(data: EntityCollections, saved: SavedMarking
     ...row({
       id: `spending-${o.id}`,
       title: o.payee,
-      details: [o.comment, suggestion ? `похоже на ${suggestionName(suggestion)}` : 'без категории'].filter(Boolean).join(' · '),
+      details: [writtenAbout(o), suggestion ? `похоже на ${suggestionName(suggestion)}` : 'без категории'].filter(Boolean).join(' · '),
       icon: 'tag',
       color: toneColor('gray'),
       amount: o.amount,

@@ -31,6 +31,7 @@ function saved(settings: Settings): SavedMarking {
     regular: [],
     purchases: [],
     marks: new Map(),
+    descriptions: new Map(),
     categories: settings.categorySetup(),
     weekStart: settings.weekStart(),
   };

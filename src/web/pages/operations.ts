@@ -19,7 +19,7 @@ import { emptyState, filterTag, pageIntro, searchField, segmentedLinks } from '.
 import { categoryList, dayGroup, operationRow } from '../widgets/operations.ts';
 import { appShell, stack, toolbar, topBar } from '../widgets/shell.ts';
 import { appRail, monthTabs, parseMonth, userName, type Href } from './chrome.ts';
-import { allExpenses, loadMarking, markingActions, markingPanel, type Marking, type SavedMarking } from './marking.ts';
+import { allExpenses, loadMarking, markingActions, markingPanel, writtenAbout, type Marking, type SavedMarking } from './marking.ts';
 
 export interface OperationsData {
   today: DateString;
@@ -222,7 +222,7 @@ function row(d: OperationsData, o: Operation, href: Href, to: (changes: { edit?:
     amount: o.amount,
     symbol: d.symbol,
     original: o.original ? { amount: o.original.amount, symbol: o.original.instrument.symbol } : undefined,
-    comment: o.comment ?? undefined,
+    comment: writtenAbout(o) ?? undefined,
     hold: o.hold,
     muted: o.ignored,
     href: o.kind === 'expense' ? to({ edit: open ? null : key }) : undefined,

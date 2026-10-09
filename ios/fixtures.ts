@@ -45,6 +45,7 @@ const saved = (): SavedBudget => ({
   regular: settings.regularExpenses(),
   purchases: settings.purchases(),
   marks: settings.spendingMarks(),
+  descriptions: settings.spendingDescriptions(),
   categories: settings.categorySetup(),
   weekStart: settings.weekStart(),
   weekLimits: settings.weekLimits(),

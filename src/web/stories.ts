@@ -17,6 +17,7 @@ import {
   footnote,
   iconBadge,
   iconPicker,
+  inlineForm,
   pageIntro,
   progressBar,
   searchField,
@@ -348,6 +349,21 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       name: 'Выбирать не из чего',
       width: 320,
       props: { label: 'Категория', choices: [], empty: 'Из ZenMoney: Продукты' },
+    },
+  ]),
+  doc(inlineForm, {
+    group: 'Формы',
+    description: 'Одно поле со своей кнопкой, например описание траты. Пустое поле тоже отправляется: так описание убирают.',
+  }, [
+    {
+      name: 'Пусто',
+      width: 520,
+      props: { label: 'Описание', action: '#', name: 'description', placeholder: 'Например, подарок маме', maxLength: 200, submitLabel: 'Сохранить' },
+    },
+    {
+      name: 'С описанием',
+      width: 520,
+      props: { label: 'Описание', action: '#', name: 'description', value: 'Подарок на день рождения Савелию', maxLength: 200, submitLabel: 'Сохранить' },
     },
   ]),
   doc(iconPicker, {

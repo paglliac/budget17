@@ -118,7 +118,7 @@ function pendingItem({ d, href, here }: Page, o: Operation, suggestion: Suggesti
   return entryRow({
     id: key,
     title: o.payee,
-    details: [where(o), suggestion ? `похоже на ${suggestionName(suggestion)}` : null].filter(Boolean).join(' · '),
+    details: [where(o), o.description, suggestion ? `похоже на ${suggestionName(suggestion)}` : null].filter(Boolean).join(' · '),
     icon: 'tag',
     color: toneColor('gray'),
     amount: o.amount,

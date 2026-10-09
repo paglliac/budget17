@@ -47,6 +47,7 @@ describe('listOperations', () => {
       payee: 'Яндекс Go',
       originalPayee: null,
       comment: null,
+      description: null,
       category: { id: transport.id, title: 'Транспорт', color: '#5b84f0' },
       zenmoneyCategory: { id: transport.id, title: 'Транспорт', color: '#5b84f0' },
       regular: null,
@@ -282,12 +283,13 @@ describe('filterOperations', () => {
       ...base,
       transaction: [
         transaction({ payee: 'Такси домой', outcome: 500, tag: [taxi.id] }),
-        transaction({ payee: 'Пекарня', outcome: 200, comment: 'Круассаны' }),
+        transaction({ id: 'bakery', payee: 'Пекарня', outcome: 200, comment: 'Круассаны' }),
         transaction({ payee: 'Зарплата', income: 100_000 }),
         transaction({ outcome: 1000, income: 1000, outcomeAccount: 'card', incomeAccount: 'savings' }),
       ],
     },
     october,
+    { categorizations: new Map(), regular: [], descriptions: new Map([['bakery', 'Завтрак с Машей']]) },
   );
   const payees = (filter: Parameters<typeof filterOperations>[1]) => filterOperations(operations, filter).map((o) => o.payee);
 
@@ -301,8 +303,9 @@ describe('filterOperations', () => {
     assert.deepEqual(payees({ category: 'none' }), ['Пекарня', 'Зарплата']);
   });
 
-  it('finds text in payee, comment, category and accounts in any case', () => {
+  it('finds text in payee, comment, description, category and accounts in any case', () => {
     assert.deepEqual(payees({ query: 'КРУАС' }), ['Пекарня']);
+    assert.deepEqual(payees({ query: 'машей' }), ['Пекарня']);
     assert.deepEqual(payees({ query: 'транспорт' }), ['Такси домой']);
     assert.deepEqual(payees({ query: 'копилка' }), ['Т-Банк → Копилка']);
     assert.deepEqual(payees({ query: '  ' }).length, 4);

@@ -70,6 +70,8 @@ final class ScreensTests: XCTestCase {
         expense.tap()
         if sheet("marking").waitForExistence(timeout: 10) {
             shot("spending")
+            unfold()
+            shot("spending-unfolded")
             app.buttons["Платёж"].tap()
             shot("spending-payment")
             app.swipeUp()
@@ -138,17 +140,25 @@ final class ScreensTests: XCTestCase {
         XCTAssert(sheet("marking").waitForExistence(timeout: 10))
         shot("marking-before")
 
+        unfold()
         let tile = sheet("marking").buttons.matching(NSPredicate(format: "label BEGINSWITH 'Продукты'")).firstMatch
         tile.tap()
         shot("marking-category")
         XCTAssert(app.staticTexts["категория"].waitForExistence(timeout: 5), "the category shows on top")
+        XCTAssert(app.buttons["Платёж"].waitForNonExistence(timeout: 5), "a pick folds the others away")
+        shot("marking-folded")
         let undo = app.buttons["Убрать категорию"]
         if undo.waitForExistence(timeout: 5) { undo.tap() }
         sleep(1)
         shot("marking-category-undone")
 
+        unfold()
+        shot("marking-unfolded")
         app.buttons["Платёж"].tap()
+        shot("marking-payments")
         let card = sheet("marking").buttons.matching(NSPredicate(format: "label CONTAINS '₽'")).firstMatch
+        // The cards fade in one after another when they unfold.
+        wait(for: [expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: card)], timeout: 5)
         card.tap()
         XCTAssert(app.staticTexts["оплатила платёж"].waitForExistence(timeout: 5), "the payment shows on top")
         shot("marking-payment")
@@ -157,11 +167,35 @@ final class ScreensTests: XCTestCase {
         sleep(1)
         shot("marking-payment-undone")
 
-        sheet("marking").buttons.matching(NSPredicate(format: "label == 'Дополнительные'")).firstMatch.tap()
-        XCTAssert(app.staticTexts["в дополнительных"].waitForExistence(timeout: 5))
+        let description = sheet("description")
+        description.tap()
+        description.typeText("Проверка описания\n")
+        sleep(2)
+        shot("marking-description")
+        app.buttons["Готово"].tap()
+        XCTAssert(sheet("marking").waitForNonExistence(timeout: 5))
+        expense.tap()
+        XCTAssert(description.waitForExistence(timeout: 10))
+        XCTAssertEqual(description.value as? String, "Проверка описания", "the description is kept")
+        // At the end of the text, so the deletes take all of it.
+        description.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        description.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Проверка описания".count) + "\n")
+        sleep(1)
+        XCTAssert(["", "Описание"].contains(description.value as? String ?? ""), "the description is taken away")
+
+        let extra = sheet("marking").buttons.matching(NSPredicate(format: "label == 'Дополнительные'")).firstMatch
+        extra.tap()
+        XCTAssert(extra.wait(for: \.isSelected, toEqual: true, timeout: 5))
         shot("marking-extra")
-        sheet("marking").buttons.matching(NSPredicate(format: "label == 'Неделя'")).firstMatch.tap()
-        XCTAssert(app.staticTexts["в неделе"].waitForExistence(timeout: 5))
+        let week = sheet("marking").buttons.matching(NSPredicate(format: "label == 'Неделя'")).firstMatch
+        week.tap()
+        XCTAssert(week.wait(for: \.isSelected, toEqual: true, timeout: 5))
+    }
+
+    /// Unfolds the categories and payments of the open expense, when a pick folded them.
+    private func unfold() {
+        if !app.buttons["Платёж"].waitForExistence(timeout: 2) { app.buttons["Выбрать другое"].tap() }
+        XCTAssert(app.buttons["Платёж"].waitForExistence(timeout: 5), "the categories and payments unfold")
     }
 
     /// Loads the screens from the server, opens the app again with a server that is gone, and switches back to the

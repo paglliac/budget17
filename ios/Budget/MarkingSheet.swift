@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// An expense opened to mark it. On top what it is: whom it went to, how much and when, what the bank said and what is
-/// suggested, then what it is now. Then one of two ways to say what it was for — a category, or the payment of a regular
-/// expense or a purchase it made — each a tap on a tile, shown at once; at the bottom where it counts, as large cards.
-/// Opened from the expenses that wait for a category, it steps through them: «1 из 4». Choices post to
-/// /api/spending/:id/:choice.
+/// suggested. Then what it was for — a category, or the payment of a regular expense or a purchase it made — alone on a
+/// card; a tap on it unfolds all of them as tiles and cards to pick another, and a pick folds them back. While nothing
+/// is picked they are unfolded. Under it what the user wrote about the expense, and at the bottom where it counts, as
+/// large cards. Opened from the expenses that wait for a category, it steps through them: «1 из 4». Choices post to
+/// /api/spending/:id/:choice, the description to /api/spending/:id/description when its field is left.
 struct MarkingSheet: View {
     enum Mode: Hashable { case category, payment }
 
@@ -18,6 +19,13 @@ struct MarkingSheet: View {
     /// A choice made and not yet confirmed by the server, shown as made already.
     @State private var applying: String?
     @State private var showOthers = false
+    /// Whether the categories and payments are unfolded; nil until the card is tapped, unfolded while nothing is picked.
+    @State private var picking: Bool?
+    /// The description as typed, until the server sends it back.
+    @State private var draft: String?
+    /// The draft last sent, so leaving the field and then the sheet sends it once.
+    @State private var sent: String?
+    @FocusState private var writing: Bool
     @State private var error: String?
     @State private var saved = 0
 
@@ -33,27 +41,23 @@ struct MarkingSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         header(s)
-                        now(s)
-                        LilacSegmented(
-                            items: [Segment(value: Mode.category, label: "Категория"), Segment(value: Mode.payment, label: "Платёж")],
-                            selection: Binding(get: { shownMode(s) }, set: { mode = $0 }),
-                            width: nil
-                        )
-                        Group {
-                            switch shownMode(s) {
-                            case .category: categories(s)
-                            case .payment: payments(s)
-                            }
-                        }
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        choice(s)
+                        description(s)
                         envelopes(s)
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 24)
                 }
                 .scrollIndicators(.hidden)
+                .scrollDismissesKeyboard(.interactively)
                 .accessibilityIdentifier("marking")
-                .onChange(of: s) { withAnimation(.snappy) { applying = nil } }
+                .onChange(of: s) {
+                    withAnimation(.snappy) { applying = nil }
+                    if !writing, let draft, Self.oneLine(draft) == (s.description ?? "") {
+                        self.draft = nil
+                        sent = nil
+                    }
+                }
             }
             .id(id)
             if let next = next {
@@ -67,6 +71,8 @@ struct MarkingSheet: View {
         .errorAlert($error)
         .sensoryFeedback(.selection, trigger: applying)
         .sensoryFeedback(.success, trigger: saved)
+        .onChange(of: writing) { if !writing { saveDescription() } }
+        .onDisappear { saveDescription() }
     }
 
     // MARK: - Stepping
@@ -79,11 +85,15 @@ struct MarkingSheet: View {
     }
 
     private func step(to other: String) {
+        saveDescription()
         withAnimation(.snappy) {
             id = other
             mode = nil
             applying = nil
             showOthers = false
+            picking = nil
+            draft = nil
+            sent = nil
         }
     }
 
@@ -139,10 +149,26 @@ struct MarkingSheet: View {
         return s.categories.choices.first { $0.choice == key }
     }
 
+    /// Unfolded when tapped open, or while the expense has neither a category nor a payment.
+    private func isPicking(_ s: SpendingScreen) -> Bool {
+        picking ?? (currentPayment(s) == nil && currentCategory(s) == nil)
+    }
+
     private func shownMode(_ s: SpendingScreen) -> Mode {
         if let mode { return mode }
         let paid = s.payments.choices.contains { $0.isCurrent || $0.isSuggested }
         return paid && s.categories.choices.allSatisfy { !$0.isCurrent } ? .payment : .category
+    }
+
+    /// Picks a category or a payment, and folds the others away once its tick has shown.
+    private func pick(_ choice: String) {
+        let spending = id
+        picking = true
+        choose(choice)
+        Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            if id == spending { withAnimation(.snappy) { picking = false } }
+        }
     }
 
     private func choose(_ choice: String) {
@@ -184,45 +210,137 @@ struct MarkingSheet: View {
         .padding(.top, 4)
     }
 
-    /// What the expense is now: the payment it made or its category, and where it counts; the cross takes back what the
-    /// app said about it.
-    private func now(_ s: SpendingScreen) -> some View {
+    /// What the expense was for, alone on a card that unfolds the categories and payments under it to pick another.
+    private func choice(_ s: SpendingScreen) -> some View {
+        let open = isPicking(s)
+        return VStack(alignment: .leading, spacing: 14) {
+            picked(s, open: open)
+            if open {
+                VStack(alignment: .leading, spacing: 14) {
+                    LilacSegmented(
+                        items: [Segment(value: Mode.category, label: "Категория"), Segment(value: Mode.payment, label: "Платёж")],
+                        selection: Binding(get: { shownMode(s) }, set: { mode = $0 }),
+                        width: nil
+                    )
+                    Group {
+                        switch shownMode(s) {
+                        case .category: categories(s)
+                        case .payment: payments(s)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: -10)), removal: .opacity.combined(with: .scale(scale: 0.97, anchor: .top))))
+            }
+        }
+    }
+
+    /// The payment the expense made or its category, on its colour; the cross takes back what the app said about it,
+    /// and the card or its chevron unfolds the rest.
+    private func picked(_ s: SpendingScreen, open: Bool) -> some View {
         let payment = currentPayment(s)
         let category = currentCategory(s)
         let undo = payment != nil ? "unlink" : "uncategorize"
         let canUndo = applying == nil && s.undo.contains { $0.choice == undo }
         let title = payment?.label ?? category?.label ?? "Не размечена"
         let subtitle = payment != nil ? "оплатила платёж" : category != nil ? (category?.detail == "из ZenMoney" ? "категория из ZenMoney" : "категория") : "выберите категорию или платёж"
-        return HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.body.weight(.semibold)).lineLimit(2)
-                Text(subtitle).font(.footnote).foregroundStyle(Lilac.muted)
+        let color = Palette.color(payment != nil ? "violet" : (category?.color ?? "gray"))
+        let toggle = { withAnimation(.snappy) { picking = !open } }
+        return HStack(spacing: 10) {
+            Button(action: toggle) {
+                HStack(spacing: 12) {
+                    Image(systemName: Icons.symbol(payment?.icon ?? category?.icon ?? "tag"))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(color)
+                        .frame(width: 42, height: 42)
+                        .background(color.opacity(0.15), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.body.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(2)
+                        Text(subtitle).font(.footnote).foregroundStyle(Lilac.muted)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 8)
-            if let envelope = current(s.envelopes, clearedBy: "") {
-                Text(Self.envelopeWords[envelope] ?? "")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(envelope == "week" ? Lilac.accent : Lilac.muted)
-                    .padding(.horizontal, 8)
-                    .frame(height: 22)
-                    .background((envelope == "week" ? Lilac.tint : Lilac.track), in: Capsule())
-            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("picked")
             if canUndo {
-                Button { choose(undo) } label: {
+                Button { picking = nil; choose(undo) } label: {
                     Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(Lilac.muted.opacity(0.7))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(s.undo.first { $0.choice == undo }?.label ?? "Отменить")
             }
+            Button(action: toggle) {
+                Image(systemName: "chevron.down")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(open ? Lilac.accent : Lilac.muted)
+                    .rotationEffect(.degrees(open ? 180 : 0))
+                    .frame(width: 32, height: 42)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(open ? "Свернуть" : "Выбрать другое")
         }
-        .padding(16)
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
+        .padding(.vertical, 12)
         .background(Lilac.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(open ? Lilac.accent.opacity(0.35) : .clear, lineWidth: 1)
+        }
         .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
         .id(title)
         .transition(.asymmetric(insertion: .scale(scale: 0.95).combined(with: .opacity), removal: .opacity))
     }
 
-    private static let envelopeWords = ["week": "в неделе", "extra": "в дополнительных", "outside": "вне бюджета", "ignored": "не учитывается"]
+    /// What the user wrote about the expense, in a field that grows to four lines; return or leaving it sends it.
+    private func description(_ s: SpendingScreen) -> some View {
+        let text = Binding(
+            get: { draft ?? s.description ?? "" },
+            set: { typed in
+                if typed.contains("\n") {
+                    draft = typed.replacingOccurrences(of: "\n", with: " ")
+                    writing = false
+                } else {
+                    draft = typed
+                }
+            }
+        )
+        return HStack(spacing: 12) {
+            Image(systemName: "text.alignleft").font(.subheadline).foregroundStyle(Lilac.muted)
+            TextField("Описание", text: text, axis: .vertical)
+                .lineLimit(1...4)
+                .focused($writing)
+                .submitLabel(.done)
+                .accessibilityIdentifier("description")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 15)
+        .background(Lilac.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
+    }
+
+    /// Sends the description typed, once; an empty one takes it away.
+    private func saveDescription() {
+        guard let draft, draft != sent else { return }
+        sent = draft
+        let path = "spending/\(id)/description"
+        Task {
+            do {
+                try await session.send(path, ["description": draft])
+                saved += 1
+            } catch {
+                sent = nil
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    /// The description as the server keeps it: in one line, without extra spaces.
+    private static func oneLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
 
     @ViewBuilder
     private func categories(_ s: SpendingScreen) -> some View {
@@ -232,10 +350,21 @@ struct MarkingSheet: View {
             let picked = current(s.categories.choices, clearedBy: "uncategorize")
             // In the server's order, the most popular first: a suggestion goes once a category is picked, and tiles
             // that moved then would jump under the finger.
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
-                ForEach(s.categories.choices) { choice in
-                    CategoryTile(choice: choice, selected: choice.choice == picked) {
-                        if choice.choice != picked { choose(choice.choice) }
+            // A grid that is not lazy, so the tiles unfold together when it opens, not as they scroll in.
+            Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+                ForEach(Array(stride(from: 0, to: s.categories.choices.count, by: 3)), id: \.self) { start in
+                    GridRow {
+                        ForEach(start..<start + 3, id: \.self) { index in
+                            if index < s.categories.choices.count {
+                                let choice = s.categories.choices[index]
+                                CategoryTile(choice: choice, selected: choice.choice == picked) {
+                                    if choice.choice != picked { pick(choice.choice) }
+                                }
+                                .modifier(Unfold(index: index))
+                            } else {
+                                Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                            }
+                        }
                     }
                 }
             }
@@ -246,10 +375,11 @@ struct MarkingSheet: View {
     private func payments(_ s: SpendingScreen) -> some View {
         let picked = applying.flatMap { $0.hasPrefix("regular-") || $0.hasPrefix("purchase-") ? $0 : nil } ?? current(s.payments.choices, clearedBy: "unlink")
         VStack(spacing: 10) {
-            ForEach(s.payments.choices) { choice in
+            ForEach(Array(s.payments.choices.enumerated()), id: \.element.id) { index, choice in
                 PaymentCard(label: choice.label, detail: choice.detail, icon: choice.icon ?? "repeat", selected: choice.choice == picked, suggested: choice.isSuggested) {
-                    if choice.choice != picked { choose(choice.choice) }
+                    if choice.choice != picked { pick(choice.choice) }
                 }
+                .modifier(Unfold(index: index))
             }
             if s.payments.choices.isEmpty && s.payments.others.isEmpty {
                 LilacEmpty(text: s.payments.empty)
@@ -274,7 +404,7 @@ struct MarkingSheet: View {
                             Text(group.label).font(.subheadline).foregroundStyle(Lilac.muted).padding(.top, 6)
                             ForEach(group.options, id: \.value) { option in
                                 PaymentCard(label: option.label, detail: nil, icon: option.icon ?? "repeat", selected: option.value == picked, suggested: false, compact: true) {
-                                    if option.value != picked { choose(option.value) }
+                                    if option.value != picked { pick(option.value) }
                                 }
                             }
                         }
@@ -427,6 +557,22 @@ struct PaymentCard: View {
         }
         .buttonStyle(PressableStyle())
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// Comes in a moment after the one before it, so tiles unfold from the top when they open.
+private struct Unfold: ViewModifier {
+    let index: Int
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .scaleEffect(shown ? 1 : 0.88)
+            .offset(y: shown ? 0 : -6)
+            .onAppear {
+                withAnimation(.snappy(duration: 0.3).delay(Double(min(index, 15)) * 0.018)) { shown = true }
+            }
     }
 }
 

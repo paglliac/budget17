@@ -32,6 +32,7 @@ function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
     ],
     wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500 }],
     marks: new Map(marks),
+    descriptions: new Map(),
     regular: [regular({ id: 7, title: 'Школа, ЛДК', amount: 45_000, day: 7 })],
     categorizations: new Map(),
     purchasePayments: new Map(),

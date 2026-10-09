@@ -66,6 +66,21 @@ describe('submitMarking', () => {
     assert.deepEqual([...settings.spendingMarks()], [], 'a linked payment counts again');
   });
 
+  it('gives an expense a description in one line, and takes it away with an empty one', () => {
+    using settings = new Settings(':memory:');
+
+    assert.deepEqual(submitMarking(settings, data, '/spending/kiosk/description', form({ description: '  Подарок\n маме  ' })), { status: 'saved' });
+    assert.deepEqual([...settings.spendingDescriptions()], [['kiosk', 'Подарок маме']]);
+    assert.deepEqual(submitMarking(settings, data, '/spending/kiosk/description', form({ description: 'я'.repeat(201) })), {
+      status: 'invalid',
+      error: 'Не длиннее 200 символов',
+    });
+    assert.deepEqual([...settings.spendingDescriptions()], [['kiosk', 'Подарок маме']], 'a long one leaves the old one');
+    assert.deepEqual(submitMarking(settings, data, '/spending/kiosk/description', form({ description: ' ' })), { status: 'saved' });
+    assert.deepEqual([...settings.spendingDescriptions()], []);
+    assert.deepEqual(submitMarking(settings, data, '/spending/gone/description', form({ description: 'Нет' })), { status: 'missing' });
+  });
+
   it('refuses an unknown expense, category, regular expense, purchase or choice', () => {
     using settings = new Settings(':memory:');
 

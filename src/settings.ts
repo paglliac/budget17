@@ -69,6 +69,12 @@ const SCHEMA = `
     transaction_id TEXT PRIMARY KEY
   ) STRICT;
 
+  -- What the user wrote about ZenMoney expenses in the app, such as whom a present was for.
+  CREATE TABLE IF NOT EXISTS spending_description (
+    transaction_id TEXT PRIMARY KEY,
+    description TEXT NOT NULL
+  ) STRICT;
+
   -- ZenMoney categories as the user changed them in the app: a title of their own, or hidden when sorting expenses.
   CREATE TABLE IF NOT EXISTS category_change (
     tag_id TEXT PRIMARY KEY,
@@ -106,8 +112,8 @@ const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> 
 
 /**
  * What the user sets up in the app itself: regular expenses, incomes, the day a week begins on, what a week allows,
- * the weeks' purchases, wishes, where spending counts, what expenses paid or which category they go into, and the
- * categories themselves. It lives in its own
+ * the weeks' purchases, wishes, where spending counts, what expenses paid or which category they go into, what the
+ * user wrote about them, and the categories themselves. It lives in its own
  * SQLite file, apart from the ZenMoney copy, so make resync never deletes it.
  */
 export class Settings {
@@ -399,6 +405,29 @@ export class Settings {
       this.#db.prepare('INSERT INTO purchase_payment (transaction_id, purchase_id) VALUES (?, ?)').run(transactionId, purchaseId);
       this.#db.prepare('DELETE FROM categorization WHERE transaction_id = ? AND regular_expense_id IS NOT NULL').run(transactionId);
     });
+  }
+
+  /** What the user wrote about expenses, by ZenMoney transaction id. */
+  spendingDescriptions(): Map<string, string> {
+    return new Map(
+      this.#db
+        .prepare('SELECT transaction_id, description FROM spending_description')
+        .all()
+        .map((row) => [String(row.transaction_id), String(row.description)] as const),
+    );
+  }
+
+  /** Gives an expense a description, replacing what it had; null takes it away. */
+  describeSpending(transactionId: string, description: string | null): void {
+    if (description === null) {
+      this.#db.prepare('DELETE FROM spending_description WHERE transaction_id = ?').run(transactionId);
+      return;
+    }
+    this.#db
+      .prepare(
+        'INSERT INTO spending_description (transaction_id, description) VALUES (?, ?) ON CONFLICT (transaction_id) DO UPDATE SET description = excluded.description',
+      )
+      .run(transactionId, description);
   }
 
   /** ZenMoney categories the user renamed or hid, and their own categories by title. */
