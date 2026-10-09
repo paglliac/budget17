@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { describe, it } from 'node:test';
+import { pageDocument } from '../src/web/document.ts';
 import { daysLeft, money, moneyParts, monthName, plural } from '../src/web/format.ts';
 import { html, raw } from '../src/web/html.ts';
 
@@ -43,5 +45,14 @@ describe('format', () => {
     assert.equal(monthName('2026-10-05', 'genitive'), 'октября');
     assert.equal(monthName('2026-05', 'prepositional'), 'мае');
     assert.deepEqual([0, 1, 3, 7].map(daysLeft), ['сегодня', 'завтра', '3 дня', '7 дней']);
+  });
+});
+
+describe('pageDocument', () => {
+  it('links the icons that lie next to the server', () => {
+    const page = String(pageDocument({ title: 'Бюджет', body: html`<p></p>` }));
+    const icons = [...page.matchAll(/<link rel="(?:icon|apple-touch-icon)"[^>]* href="\/([^"]+)"/g)].map((match) => match[1]);
+    assert.deepEqual(icons, ['favicon.png', 'apple-touch-icon.png']);
+    for (const icon of icons) assert.ok(existsSync(new URL(`../src/web/${icon}`, import.meta.url)), icon);
   });
 });

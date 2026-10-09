@@ -32,7 +32,7 @@ export interface RailItem {
 export function rail(options: { groups: Array<{ title: string; items: RailItem[] }>; footer?: { title: string; body: Content } }): Html {
   return html`
     <nav class="rail" aria-label="Разделы">
-      <span class="rail-logo">${icon('wallet', 18)}</span>
+      <img class="rail-logo" src="/apple-touch-icon.png" alt="" width="40" height="40">
       ${options.groups.map(
         (group) => html`
           <span class="rail-title">${group.title}</span>

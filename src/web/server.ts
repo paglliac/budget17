@@ -50,6 +50,11 @@ import { WIDGET_DOCS } from './stories.ts';
 const DB_PATH = fileURLToPath(new URL('../../data/zenmoney.db', import.meta.url));
 const SETTINGS_PATH = fileURLToPath(new URL('../../data/settings.db', import.meta.url));
 const STYLES_PATH = fileURLToPath(new URL('./styles.css', import.meta.url));
+/** Icons go out without a token, so the login page and a phone's home screen get them too. */
+const ICONS: Record<string, string> = {
+  '/favicon.png': fileURLToPath(new URL('./favicon.png', import.meta.url)),
+  '/apple-touch-icon.png': fileURLToPath(new URL('./apple-touch-icon.png', import.meta.url)),
+};
 const PORT = Number(process.env.PORT ?? 4317);
 /** The address to listen on; every interface unless set, 127.0.0.1 behind a proxy on a server. */
 const HOST = process.env.HOST || undefined;
@@ -276,6 +281,11 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   };
   const { today, demo, href } = context;
 
+  const icon = ICONS[url.pathname];
+  if (icon && request.method === 'GET') {
+    response.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=86400' }).end(readFileSync(icon));
+    return;
+  }
   if (request.method === 'POST' && !isSameOrigin(request)) {
     send(response, 403, 'text/plain', 'Запрос с другого сайта');
     return;
