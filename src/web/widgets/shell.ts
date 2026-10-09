@@ -28,11 +28,21 @@ export interface RailItem {
   active?: boolean;
 }
 
-/** Navigation between pages as icons, in titled groups, with something like an avatar at the bottom. */
-export function rail(options: { groups: Array<{ title: string; items: RailItem[] }>; footer?: { title: string; body: Content } }): Html {
+/**
+ * Navigation between pages as icons, in titled groups, with something like an avatar at the bottom. The logo on top
+ * leads to `home` when given.
+ */
+export function rail(options: {
+  groups: Array<{ title: string; items: RailItem[] }>;
+  home?: { label: string; href: string };
+  footer?: { title: string; body: Content };
+}): Html {
+  const logo = html`<img src="/favicon.png" alt="" width="40" height="40">`;
   return html`
     <nav class="rail" aria-label="Разделы">
-      <img class="rail-logo" src="/apple-touch-icon.png" alt="" width="40" height="40">
+      ${options.home
+        ? html`<a class="rail-logo" href="${options.home.href}" title="${options.home.label}" aria-label="${options.home.label}">${logo}</a>`
+        : html`<span class="rail-logo">${logo}</span>`}
       ${options.groups.map(
         (group) => html`
           <span class="rail-title">${group.title}</span>

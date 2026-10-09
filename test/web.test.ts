@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { pageDocument } from '../src/web/document.ts';
+import { appRail, createHref } from '../src/web/pages/chrome.ts';
 import { daysLeft, money, moneyParts, monthName, plural } from '../src/web/format.ts';
 import { html, raw } from '../src/web/html.ts';
+import { rail } from '../src/web/widgets/shell.ts';
 
 describe('html', () => {
   it('escapes interpolated text', () => {
@@ -54,5 +56,18 @@ describe('pageDocument', () => {
     const icons = [...page.matchAll(/<link rel="(?:icon|apple-touch-icon)"[^>]* href="\/([^"]+)"/g)].map((match) => match[1]);
     assert.deepEqual(icons, ['favicon.png', 'apple-touch-icon.png']);
     for (const icon of icons) assert.ok(existsSync(new URL(`../src/web/${icon}`, import.meta.url)), icon);
+  });
+});
+
+describe('rail', () => {
+  it('leads home from the logo, keeping the demo switch', () => {
+    const page = String(appRail('operations', null, createHref({ demo: '1' })));
+    assert.match(page, /<a class="rail-logo" href="\/\?demo=1" title="Обзор" aria-label="Обзор"><img src="\/favicon.png"/);
+  });
+
+  it('shows the logo without a link when there is no home', () => {
+    const page = String(rail({ groups: [] }));
+    assert.match(page, /<span class="rail-logo"><img src="\/favicon.png"/);
+    assert.ok(!page.includes('<a class="rail-logo"'));
   });
 });

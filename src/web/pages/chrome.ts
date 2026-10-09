@@ -26,6 +26,7 @@ export type Section = 'overview' | 'review' | 'operations' | 'uncategorized' | '
 
 export function appRail(active: Section, userName: string | null, href: Href): Html {
   return rail({
+    home: { label: 'Обзор', href: href('/') },
     groups: [
       {
         title: 'Меню',

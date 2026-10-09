@@ -145,11 +145,12 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       },
     ],
   ),
-  doc(rail, { group: 'Каркас', description: 'Навигация иконками по группам; текущая страница подсвечена.' }, [
+  doc(rail, { group: 'Каркас', description: 'Навигация иконками по группам; текущая страница подсвечена, логотип ведёт на главную.' }, [
     {
       name: 'Меню и профиль',
       width: 90,
       props: {
+        home: { label: 'Обзор', href: '#' },
         groups: [
           {
             title: 'Меню',
