@@ -20,10 +20,10 @@ export function assistantHero(options: { title: string; text: string; chips: Arr
 }
 
 /** The assistant's answer to a question: the question, a few paragraphs, and links to what they are about. */
-export function assistantAnswer(options: { question: string; paragraphs: string[]; links?: Array<{ label: string; detail?: string; href: string }>; closeHref: string }): Html {
+export function assistantAnswer(options: { question: string; paragraphs: string[]; links?: Array<{ label: string; detail?: string; href: string }>; closeHref?: string }): Html {
   return html`
     <article class="answer">
-      <header class="answer-head"><h3>${icon('sparkles', 14)}${options.question}</h3><a href="${options.closeHref}" aria-label="Закрыть">${icon('x', 14)}</a></header>
+      <header class="answer-head"><h3>${icon('sparkles', 14)}${options.question}</h3>${options.closeHref ? html`<a href="${options.closeHref}" aria-label="Закрыть">${icon('x', 14)}</a>` : null}</header>
       ${options.paragraphs.map((p) => html`<p>${p}</p>`)}
       ${options.links?.length
         ? html`<ul class="answer-links">${options.links.map(

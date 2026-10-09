@@ -36,7 +36,8 @@ import { isAccessToken, isAuthorized, sessionCookie } from './auth.ts';
 import { demoCollections } from './demo.ts';
 import { escape } from './html.ts';
 import { createHref, userName } from './pages/chrome.ts';
-import { loadReview, renderReview, renderReviewCheck, submitReview } from './pages/review.ts';
+import { loadReview, renderReviewCheck, submitReview } from './pages/review.ts';
+import { loadAiReview, parseVariant, renderAiReview, submitAi } from './pages/review-ai-prototype.ts';
 import { budgetOf, loadDashboard, renderDashboard, submitDashboard, type DashboardForm, type SavedBudget } from './pages/dashboard.ts';
 import { loadIncome, renderIncome, submitIncome } from './pages/income.ts';
 import { renderLogin } from './pages/login.ts';
@@ -195,6 +196,11 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     if (result.status === 'missing') return { status: 'missing', message: 'Такой записи нет' };
     const back = new URL(backTo(request), 'http://localhost');
     return { status: 'invalid', errors: result.form.errors, page: () => dashboardPage(back.searchParams, context, result.form) };
+  }
+  if (path.startsWith('/review/ai/')) {
+    // PROTOTYPE: what is done with Claude's word lives in memory.
+    const form = new URLSearchParams([...new URL(request.url ?? '/', 'http://localhost').searchParams, ...body]);
+    return submitAi(path, form) ? { status: 'saved', next: backTo(request) } : { status: 'missing', message: 'Такого действия нет' };
   }
   if (path.startsWith('/review/')) {
     // Choices post empty forms to URLs that carry what was chosen, so the query and the fields read alike.
@@ -372,15 +378,15 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       return;
     case '/review':
     case '/review/check': {
-      const review = loadReview(loadCollections(demo, today), loadSettings(savedBudget), {
-        today,
-        month: params.get('month'),
-        ask: params.get('ask'),
-        kind: params.get('kind'),
-        edit: params.get('edit'),
-        tile: params.get('tile'),
-      });
-      send(response, 200, 'text/html', (url.pathname === '/review' ? renderReview(review, href) : renderReviewCheck(review, href)).toString());
+      // PROTOTYPE: ?variant= picks what Claude does on the review, and every link keeps it.
+      const variant = parseVariant(params.get('variant'));
+      const keep = createHref({ ...(params.has('demo') ? { demo: '1' } : {}), variant });
+      const options = { today, month: params.get('month'), ask: params.get('ask'), kind: params.get('kind'), edit: params.get('edit'), tile: params.get('tile') };
+      const page =
+        url.pathname === '/review'
+          ? renderAiReview(loadAiReview(loadCollections(demo, today), loadSettings(savedBudget), { ...options, variant, story: params.get('story') }), keep)
+          : renderReviewCheck(loadReview(loadCollections(demo, today), loadSettings(savedBudget), options), keep);
+      send(response, 200, 'text/html', page.toString());
       return;
     }
     case '/operations': {

@@ -58,9 +58,9 @@ import { budgetOf, type SavedBudget } from './dashboard.ts';
 import { allExpenses, allIncomes, envelopeMark, loadMarking, markingActions, markingPanel, markingTitle, type Marking } from './marking.ts';
 
 /** Questions to the assistant, as its chips offer them. */
-type Question = 'overspend' | 'check' | 'optimize' | 'plan';
+export type Question = 'overspend' | 'check' | 'optimize' | 'plan';
 
-const QUESTIONS: Array<{ key: Question; label: string; icon: IconName }> = [
+export const QUESTIONS: Array<{ key: Question; label: string; icon: IconName }> = [
   { key: 'overspend', label: 'Где перерасход и почему', icon: 'trendingUp' },
   { key: 'check', label: 'Какие траты проверить', icon: 'search' },
   { key: 'optimize', label: 'На чём сэкономить', icon: 'piggy' },
@@ -94,6 +94,8 @@ export interface ReviewData {
   selfPayee: string | null;
   /** On /review: the part of the map open on the side, its piece or one expense (see partId and opened). */
   tile: string | null;
+  /** PROTOTYPE: expenses Claude has a word about, outlined on the map like hinted ones. */
+  aiHinted?: Set<string>;
 }
 
 export function loadReview(
@@ -143,7 +145,7 @@ export function loadReview(
   };
 }
 
-interface Page {
+export interface Page {
   d: ReviewData;
   href: Href;
   /** This page with an expense, an answer or a tile open or closed, keeping the rest of its state. */
@@ -151,7 +153,7 @@ interface Page {
 }
 
 /** The page of one kind of expenses to check, with one of them open. */
-function checkHref(d: ReviewData, href: Href, kind: ToCheck, edit?: string): string {
+export function checkHref(d: ReviewData, href: Href, kind: ToCheck, edit?: string): string {
   return `${href('/review/check', { month: d.review.month, kind, edit })}${edit ? `#${edit}` : ''}`;
 }
 
@@ -172,7 +174,7 @@ export function renderReview(d: ReviewData, href: Href): Html {
 
 // ---- Words
 
-function count(n: number, forms: readonly [string, string, string]): string {
+export function count(n: number, forms: readonly [string, string, string]): string {
   return `${n} ${plural(n, forms)}`;
 }
 
@@ -203,7 +205,7 @@ function sum(expenses: readonly Operation[]): number {
 // ---- Main column
 
 /** `tile` is what the open tile shows, if any. */
-function main(page: Page, tile: Html[] | null): Html[] {
+export function main(page: Page, tile: Html[] | null): Html[] {
   const { d, href, here } = page;
   const r = d.review;
   const over = r.inWeeks - r.limits;
@@ -352,7 +354,7 @@ function folded(part: WeekPart): { shown: WeekPiece[]; rest: WeekPiece[] } {
 }
 
 /** A part of the map as ?tile= names it: category-<id> or check-<kind>; a piece is <part>:<piece key>. */
-function partId(part: WeekPart): string {
+export function partId(part: WeekPart): string {
   return part.category ? `category-${part.category.id}` : `check-${part.kind}`;
 }
 
@@ -374,12 +376,12 @@ function hinted(hints: readonly Hint[]): Set<string> {
 }
 
 /** `tile` is what the open tile shows, if any, to open under its part on a narrow screen. */
-function weekMap(page: Page, tile: Html[] | null): Html {
+export function weekMap(page: Page, tile: Html[] | null): Html {
   const { d, here } = page;
   const open = tile ? opened(d) : null;
   const total = d.parts.reduce((s, p) => s + p.amount, 0);
   const unsorted = d.parts.filter((p) => !p.category).reduce((s, p) => s + p.amount, 0);
-  const moved = hinted(d.hints);
+  const moved = new Set([...hinted(d.hints), ...(d.aiHinted ?? [])]);
   const hasHint = (expenses: Operation[]) => expenses.some((o) => moved.has(o.id));
   const link = (id: string) => here({ tile: d.tile === id ? null : id });
   return panelCard({
@@ -423,7 +425,7 @@ function weekMap(page: Page, tile: Html[] | null): Html {
 }
 
 /** What ?tile= opens: a part, a piece of it, the pieces it folds into Ещё N (`rest`), or one expense, with its part. */
-type Opened =
+export type Opened =
   | { part: WeekPart; piece: WeekPiece | null; rest: WeekPiece[] | null; expense: null }
   | { part: WeekPart | null; piece: null; rest: null; expense: Operation };
 
@@ -431,7 +433,7 @@ type Opened =
  * The tile open on the side. A shop of a split category is no piece on the map, but opens as one from its
  * subcategory. A piece that is gone, as its expenses went elsewhere or its subcategory was deleted, opens its part.
  */
-function opened(d: ReviewData): Opened | null {
+export function opened(d: ReviewData): Opened | null {
   const tile = d.tile ?? '';
   if (tile.startsWith('spending-')) {
     const expense = d.parts.flatMap((p) => p.expenses).find((o) => `spending-${o.id}` === tile);
@@ -450,7 +452,7 @@ function opened(d: ReviewData): Opened | null {
 }
 
 /** The side with a tile open: what it holds, the hints about it, and where to put its expenses. */
-function tileSide(page: Page): Html[] {
+export function tileSide(page: Page): Html[] {
   const { d, here } = page;
   const back = toolbar({ items: [segmentedLinks({ label: 'Назад', items: [{ label: '← К выводам', href: here({ tile: null }) }] })] });
   const open = opened(d);
@@ -618,7 +620,7 @@ function subcategoryForm(page: Page, sub: Subcategory): Html {
   });
 }
 
-function hintItem(page: Page, h: Hint): { icon: IconName; tone: Tone; title: string; text: string; source: string; actions: Array<{ label: string; action: string }> } {
+export function hintItem(page: Page, h: Hint): { icon: IconName; tone: Tone; title: string; text: string; source: string; actions: Array<{ label: string; action: string }> } {
   const { d, href } = page;
   const s = d.symbol;
   const dismiss = { label: 'Не надо', action: href('/review/dismiss', { hints: hintKeys(h).join(',') }) };
@@ -740,7 +742,7 @@ export function submitReview(settings: Settings, data: EntityCollections, path: 
 
 // ---- The assistant
 
-function side(page: Page): Html[] {
+export function side(page: Page): Html[] {
   const { d, here } = page;
   const items = d.findings.map((f) => insight(page, f));
   return [
