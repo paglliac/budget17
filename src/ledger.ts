@@ -2,6 +2,7 @@ import { mainCurrency, mainCurrencyConverter } from './balances.ts';
 import { categoryFinder, NO_SETUP, type CategoryKind, type CategorySetup } from './categories.ts';
 import type { Categorization } from './categorization.ts';
 import { operationAmount, operationKind, type Category, type OperationKind } from './operations.ts';
+import { applyReturns } from './returns.prototype.ts';
 import type { RegularExpense } from './regular.ts';
 import type { Envelope, Purchase } from './week.ts';
 import type { DateString, EntityCollections, Instrument, TagId } from './zenmoney/types.ts';
@@ -76,6 +77,18 @@ const UNTITLED: Record<OperationKind, string> = { expense: 'Расход', incom
  * be found.
  */
 export function listOperations(
+  data: Pick<EntityCollections, 'instrument' | 'user' | 'account' | 'tag' | 'merchant' | 'transaction'>,
+  range: { from: DateString; to: DateString },
+  sorting?: Sorting,
+  options: { withIgnored?: boolean } = {},
+): Operation[] {
+  // PROTOTYPE (branch prototype/return-rules): spends with the money that came back for them, counted by the variant.
+  return applyReturns(plainOperations(data, range, sorting, options), data, () =>
+    plainOperations(data, { from: '0000-01-01', to: '9999-12-31' }, sorting, { withIgnored: true }),
+  );
+}
+
+function plainOperations(
   data: Pick<EntityCollections, 'instrument' | 'user' | 'account' | 'tag' | 'merchant' | 'transaction'>,
   range: { from: DateString; to: DateString },
   sorting?: Sorting,

@@ -50,6 +50,8 @@ import { loadSettingsPage, renderSettings, submitBudget, submitSettings } from '
 import { renderStoryboard } from './pages/storyboard.ts';
 import { loadUncategorized, renderUncategorized } from './pages/uncategorized.ts';
 import { WIDGET_DOCS } from './stories.ts';
+import { PROTOTYPE_WEEK_START, pickReturnsVariant } from '../returns.prototype.ts';
+import { withReturnsSwitcher } from './returns-switcher.prototype.ts';
 
 const DB_PATH = fileURLToPath(new URL('../../data/zenmoney.db', import.meta.url));
 const SETTINGS_PATH = fileURLToPath(new URL('../../data/settings.db', import.meta.url));
@@ -137,7 +139,8 @@ function savedMarking(settings: Settings): SavedMarking {
     marks: settings.spendingMarks(),
     descriptions: settings.spendingDescriptions(),
     categories: settings.categorySetup(),
-    weekStart: settings.weekStart(),
+    // PROTOTYPE (branch prototype/return-rules): the weeks of the VDS, from Saturday, whatever the Mac says.
+    weekStart: PROTOTYPE_WEEK_START,
     selfPayee: settings.selfPayee(),
     subcategories: settings.subcategorySetup(),
     dismissedHints: settings.dismissedHints(),
@@ -180,6 +183,7 @@ async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
 }
 
 function send(response: ServerResponse, status: number, type: string, body: string): void {
+  if (type === 'text/html') body = withReturnsSwitcher(body);
   response.writeHead(status, { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-store' }).end(body);
 }
 
@@ -345,6 +349,8 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   const url = new URL(request.url ?? '/', 'http://localhost');
   const params = url.searchParams;
   const isApi = url.pathname.startsWith('/api/');
+  // PROTOTYPE: a page asked with ?variant= sets how returns count, for the app's requests too.
+  pickReturnsVariant(params.get('variant'));
   const context: Context = {
     today: localDate(),
     demo: params.has('demo') || !existsSync(DB_PATH),
