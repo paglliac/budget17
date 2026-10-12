@@ -211,23 +211,27 @@ struct MarkingSheet: View {
 
     // MARK: - Parts
 
-    /// The icon and colour of what is picked: the payment, the category, or for neither an arrow coming in for an income
-    /// and a grey tag for an expense.
-    private func look(_ s: SpendingScreen) -> (icon: String, color: Color) {
-        if let payment = currentPayment(s) { return (payment.icon, Palette.color("violet")) }
-        if let category = currentCategory(s) { return (category.icon ?? "tag", Palette.color(category.color ?? "gray")) }
-        return s.isIncome ? ("arrowDownLeft", Palette.color("green")) : ("tag", Palette.color("gray"))
+    /// The icon, colour and photo of what is picked: the payment, the category, or for neither an arrow coming in for an
+    /// income and a grey tag for an expense.
+    private func look(_ s: SpendingScreen) -> (icon: String, color: Color, photo: String?) {
+        if let payment = currentPayment(s) { return (payment.icon, Palette.color("violet"), nil) }
+        if let category = currentCategory(s) { return (category.icon ?? "tag", Palette.color(category.color ?? "gray"), category.photo) }
+        return s.isIncome ? ("arrowDownLeft", Palette.color("green"), nil) : ("tag", Palette.color("gray"), nil)
     }
 
     /// The expense in the middle: what it is for on a large disc, the exact amount, whom it went to, when and from where,
     /// what else the bank said and what is suggested.
     private func header(_ s: SpendingScreen) -> some View {
-        let (icon, color) = look(s)
+        let (icon, color, photo) = look(s)
         return VStack(spacing: 6) {
             ZStack {
                 Circle().fill(Lilac.surface).frame(width: 108, height: 108).shadow(color: .black.opacity(0.07), radius: 16, y: 6)
-                Circle().fill(color.opacity(0.15)).frame(width: 60, height: 60)
-                Image(systemName: Icons.symbol(icon)).font(.system(size: 24, weight: .semibold)).foregroundStyle(color)
+                if let photo {
+                    CategoryDisc(icon: icon, color: color, photo: photo, size: 76)
+                } else {
+                    Circle().fill(color.opacity(0.15)).frame(width: 60, height: 60)
+                    Image(systemName: Icons.symbol(icon)).font(.system(size: 24, weight: .semibold)).foregroundStyle(color)
+                }
             }
             .padding(.bottom, 10)
             Text(Money.exact(s.amount, s.symbol)).font(.system(size: 38, weight: .bold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
@@ -280,16 +284,20 @@ struct MarkingSheet: View {
         let subtitle = payment != nil ? "оплатила платёж"
             : category != nil ? (category?.detail == "из ZenMoney" ? "категория из ZenMoney" : "категория")
             : s.isIncome ? "выберите категорию" : "выберите категорию или платёж"
-        let (icon, color) = look(s)
+        let (icon, color, photo) = look(s)
         let toggle = { withAnimation(.snappy) { picking = !open } }
         return HStack(spacing: 10) {
             Button(action: toggle) {
                 HStack(spacing: 12) {
-                    Image(systemName: Icons.symbol(icon))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(color)
-                        .frame(width: 42, height: 42)
-                        .background(color.opacity(0.15), in: Circle())
+                    if let photo {
+                        CategoryDisc(icon: icon, color: color, photo: photo, size: 42)
+                    } else {
+                        Image(systemName: Icons.symbol(icon))
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(color)
+                            .frame(width: 42, height: 42)
+                            .background(color.opacity(0.15), in: Circle())
+                    }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(title).font(.body.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(2)
                         Text(subtitle).font(.footnote).foregroundStyle(Lilac.muted)
@@ -517,11 +525,15 @@ struct CategoryTile: View {
         let color = Palette.color(choice.color ?? "gray")
         Button(action: action) {
             VStack(spacing: 8) {
-                Image(systemName: Icons.symbol(choice.icon ?? "tag"))
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(color)
-                    .frame(width: 44, height: 44)
-                    .background(color.opacity(0.15), in: Circle())
+                if let photo = choice.photo {
+                    CategoryDisc(icon: choice.icon ?? "tag", color: color, photo: photo, size: 44)
+                } else {
+                    Image(systemName: Icons.symbol(choice.icon ?? "tag"))
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(color)
+                        .frame(width: 44, height: 44)
+                        .background(color.opacity(0.15), in: Circle())
+                }
                 Text(choice.label)
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(Color.primary)

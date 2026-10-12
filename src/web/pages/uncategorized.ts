@@ -10,8 +10,9 @@ import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { dayMonth, money, monthName, plural } from '../format.ts';
 import type { Html } from '../html.ts';
-import { categoryIcon, entryIcon } from '../icons.ts';
-import { categoryColor, toneColor } from '../tones.ts';
+import { entryIcon } from '../icons.ts';
+import { categoryLook } from '../looks.ts';
+import { toneColor } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
 import { emptyState, footnote, pageIntro, section } from '../widgets/basics.ts';
 import { entryList, entryRow } from '../widgets/entries.ts';
@@ -138,8 +139,8 @@ function sortedItem({ d, href, here }: Page, o: Operation): Html {
     id: key,
     title: markingTitle(o),
     details: `${where(o)} · ${markingDetails(o)}`,
-    icon: regular ? entryIcon(regular.icon, regular.title) : o.category ? categoryIcon(o.category.title) : 'tag',
-    color: categoryColor(o.category?.id ?? null, o.category?.color ?? null),
+    ...categoryLook(o.category),
+    ...(regular ? { icon: entryIcon(regular.icon, regular.title), photo: null } : {}),
     mark: envelopeMark(d.marking, o),
     amount: o.amount,
     symbol: d.symbol,

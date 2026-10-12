@@ -64,7 +64,8 @@ import { pageDocument } from '../document.ts';
 import { capitalize, dayMonth, dayMonthYear, money, monthName, percent, plural } from '../format.ts';
 import type { Html } from '../html.ts';
 import { categoryIcon, entryIcon, type IconName } from '../icons.ts';
-import { categoryColor, toneColor, type Tone } from '../tones.ts';
+import { categoryLook } from '../looks.ts';
+import { toneColor, type Tone } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
 import { assistantAnswer, assistantHero, insightList, suggestionList } from '../widgets/assistant.ts';
 import { choiceGroup, emptyState, field, footnote, inlineForm, listHeading, pageIntro, section, segmentedLinks } from '../widgets/basics.ts';
@@ -396,8 +397,7 @@ function spendRow(page: Page, o: Operation): Html {
     title: markingTitle(o),
     // Nothing here has a category yet, so the row says the account and what the amount hints at instead.
     details: [o.account, hint === 'marketplace' ? 'похоже на Ozon или WB' : hint ? `сумма «${hint.regular}»` : null].filter(Boolean).join(' · '),
-    icon: o.category ? categoryIcon(o.category.title) : 'tag',
-    color: categoryColor(o.category?.id ?? null, o.category?.color ?? null),
+    ...categoryLook(o.category),
     kind: 'expense',
     amount: o.amount,
     symbol: d.symbol,
@@ -477,7 +477,7 @@ function weekMap(page: Page, tile: Html[] | null): Html {
             return {
               label: partLabel(part),
               amount: part.amount,
-              color: part.category ? categoryColor(part.category.id, part.category.color) : toneColor('gray'),
+              color: part.category ? categoryLook(part.category).color : toneColor('gray'),
               hatched: !part.category,
               href: link(id),
               active: d.tile === id,
@@ -631,7 +631,7 @@ function categoryChoices(page: Page, expenses: Operation[], current: TagId | nul
       .filter((c) => !c.hidden || c.id === current)
       .map((c) => ({
         label: c.title,
-        color: categoryColor(c.id, c.color),
+        color: categoryLook(c).color,
         current: c.id === current,
         suggested: c.id === suggested,
         action: href('/review/move', { spending: ids.join(','), category: c.id }),

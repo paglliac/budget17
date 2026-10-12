@@ -185,12 +185,9 @@ export function filterOperations(operations: Operation[], filter: OperationFilte
   });
 }
 
-export interface CategorySpending {
+export interface CategorySpending extends Omit<Category, 'id'> {
   /** Top-level category; null for operations without one. */
   id: TagId | null;
-  title: string;
-  /** '#rrggbb', or null when the category has no colour in ZenMoney. */
-  color: string | null;
   amount: number;
 }
 

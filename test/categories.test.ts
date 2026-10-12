@@ -39,6 +39,32 @@ describe('categories', () => {
     assert.equal(find('own-2'), undefined);
   });
 
+  it('gives categories the icon, colour and photo the user picked, a colour not picked staying ZenMoney’s', () => {
+    const blue = tag({ id: 'blue', title: 'Transport', color: 0xff3366cc });
+    const dressed: CategorySetup = {
+      ...setup,
+      looks: new Map([
+        [home.id, { icon: 'sofa', color: 'teal', photo: null }],
+        [blue.id, { icon: 'bus', color: null, photo: 'v1' }],
+        ['own-1', { icon: null, color: '#1E90FF', photo: 'v2' }],
+      ]),
+    };
+    const catalog = new Map(categoryCatalog([...tags, blue], dressed).map((c) => [c.id, c]));
+    const look = (id: string) => {
+      const c = catalog.get(id)!;
+      return [c.icon ?? null, c.color, c.zenmoneyColor, c.photo ?? null];
+    };
+
+    assert.deepEqual(look('home'), ['sofa', 'teal', null, null]);
+    assert.deepEqual(look('blue'), ['bus', '#3366cc', '#3366cc', 'v1'], 'ZenMoney’s colour until the user picks one');
+    assert.deepEqual(look('own-1'), [null, '#1E90FF', null, 'v2']);
+    assert.deepEqual(look('groceries'), [null, null, null, null]);
+
+    const find = categoryFinder(new Map([...tags, blue].map((t) => [t.id, t])), dressed);
+    assert.deepEqual(find('repair'), { id: 'home', title: 'Дом', color: 'teal', icon: 'sofa', photo: null }, 'an operation takes its top-level category’s');
+    assert.deepEqual(find('own-1'), { id: 'own-1', title: 'Дети', color: '#1E90FF', icon: null, photo: 'v2' });
+  });
+
   it('puts the categories with the most expenses over the last three months first, then over all time', () => {
     const today = '2026-10-06';
     const spent = (category: Category, ...dates: string[]) => dates.map((date) => ({ date, category }));

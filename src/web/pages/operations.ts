@@ -14,8 +14,8 @@ import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { money, monthName, plural } from '../format.ts';
 import type { Html } from '../html.ts';
-import { categoryIcon, type IconName } from '../icons.ts';
-import { categoryColor, toneColor } from '../tones.ts';
+import { categoryLook, type Look } from '../looks.ts';
+import { toneColor } from '../tones.ts';
 import { emptyState, filterTag, pageIntro, searchField, segmentedLinks } from '../widgets/basics.ts';
 import { categoryList, dayGroup, operationRow } from '../widgets/operations.ts';
 import { appShell, stack, toolbar, topBar } from '../widgets/shell.ts';
@@ -142,8 +142,7 @@ export function renderOperations(d: OperationsData, href: Href): Html {
               const active = d.filter.category === id;
               return {
                 title: c.title,
-                icon: categoryIcon(c.title),
-                color: categoryColor(c.id, c.color),
+                ...categoryLook(c),
                 amount: c.amount,
                 share: d.categoryTotal > 0 ? c.amount / d.categoryTotal : 0,
                 href: to({ category: active ? null : id }),
@@ -203,14 +202,12 @@ export function netOf(o: Operation): number {
   return o.kind === 'income' ? o.amount : -o.amount;
 }
 
-/** What an operation's row says under the payee: what it went for and from where, and its icon and colour. */
-export function operationLine(o: Operation): { details: string; icon: IconName; color: string } {
-  const isTransfer = o.kind === 'transfer';
-  return {
-    details: isTransfer ? `${o.account} → ${o.toAccount}` : `${operationCategory(o)}, ${o.account}`,
-    icon: isTransfer ? 'arrows' : o.category ? categoryIcon(o.category.title) : o.kind === 'income' ? 'arrowDownLeft' : 'tag',
-    color: isTransfer ? toneColor('gray') : o.kind === 'income' && !o.category ? toneColor('green') : categoryColor(o.category?.id ?? null, o.category?.color ?? null),
-  };
+/** What an operation's row says under the payee: what it went for and from where, and how it is drawn. */
+export function operationLine(o: Operation): { details: string } & Look {
+  const details = o.kind === 'transfer' ? `${o.account} → ${o.toAccount}` : `${operationCategory(o)}, ${o.account}`;
+  if (o.kind === 'transfer') return { details, icon: 'arrows', color: toneColor('gray'), photo: null };
+  if (o.kind === 'income' && !o.category) return { details, icon: 'arrowDownLeft', color: toneColor('green'), photo: null };
+  return { details, ...categoryLook(o.category) };
 }
 
 /** What an operation went for: what it paid, its category, or what kind it is when it has none. */
@@ -228,9 +225,7 @@ function row(d: OperationsData, o: Operation, href: Href, to: (changes: { edit?:
   return operationRow({
     id: markable ? key : undefined,
     title: o.payee,
-    details: line.details,
-    icon: line.icon,
-    color: line.color,
+    ...line,
     kind: o.kind,
     amount: o.amount,
     symbol: d.symbol,

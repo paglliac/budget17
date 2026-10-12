@@ -1,7 +1,8 @@
 // The JSON the iPhone app reads: each screen as the pages show it, its words included, so the app only lays it out
 // and the rules stay here. The sentences that explain a page are left out: on a phone the figures speak for
-// themselves, and so are the accounts money went from and the times. Rows carry an icon by name (see icons.ts), a colour as a tone's name or #rrggbb, and where an expense or
-// a purchase counts as `mark`. Built from the same loaders and phrases as the pages.
+// themselves, and so are the accounts money went from and the times. Rows carry an icon by name (see icons.ts), a colour as a tone's name or #rrggbb, a category's
+// photo as a path of the server (see looks.ts), and where an expense or a purchase counts as `mark`. Built from the
+// same loaders and phrases as the pages.
 
 import type { Suggestion } from '../categorization.ts';
 import { addDays, dateOf, daysInMonth, monthOf, shiftMonth, weekday, type MonthString } from '../dates.ts';
@@ -11,7 +12,7 @@ import { paymentDate, regularTotals, regularValues, type RegularExpense } from '
 import { adviceTarget, envelopeOf, MONTH_LIMIT, monthOfWeek, WEEK_LIMIT, type Envelope, type PurchaseStatus, type WeekSummary } from '../week.ts';
 import type { DateString, EntityCollections } from '../zenmoney/types.ts';
 import { capitalize, dayHeading, dayMonth, fromToday, money, monthName, plural, timeOn, weekLabel, WEEKDAYS, WEEKDAYS_FULL } from './format.ts';
-import { categoryIcon, ENTRY_ICONS, entryIcon, type IconName } from './icons.ts';
+import { CATEGORY_ICONS, categoryIcon, ENTRY_ICONS, entryIcon, type IconName } from './icons.ts';
 import { recentMonths } from './pages/chrome.ts';
 import {
   adviceText,
@@ -48,6 +49,7 @@ import { loadOperations, netOf, operationCategory, operationLine } from './pages
 import { loadRegular, regularLine, regularTotalNote, STATUS_TONE, timeline, type Placed } from './pages/regular.ts';
 import { categoryDetails, loadBudgetSetup, loadSettingsPage } from './pages/settings.ts';
 import { loadUncategorized, suggestedChoice, suggestionName } from './pages/uncategorized.ts';
+import { autoLook, CATEGORY_COLORS, categoryLook } from './looks.ts';
 import { categoryColor, toneColor, type Tone } from './tones.ts';
 
 /** A row of a list, as entryRow and operationRow draw it. */
@@ -59,6 +61,8 @@ export interface Row {
   icon: IconName;
   /** A tone's name, such as violet, or a category's own colour as #rrggbb. */
   color: string;
+  /** A category's photo, drawn instead of the icon on its colour: a path of the server; null when there is none. */
+  photo: string | null;
   amount: number | null;
   /** Where it counts, as the dot before the amount; null when it has none. */
   mark: Envelope | null;
@@ -92,7 +96,7 @@ export function colorOf(css: string): string {
 }
 
 function row(fields: Pick<Row, 'id' | 'title' | 'details' | 'icon' | 'color'> & Partial<Row>): Row {
-  return { amount: null, mark: null, muted: false, ...fields, color: colorOf(fields.color) };
+  return { photo: null, amount: null, mark: null, muted: false, ...fields, color: colorOf(fields.color) };
 }
 
 function byDay<T>(items: readonly T[], dateOf: (item: T) => DateString, today: DateString): Array<Day<T>> {
@@ -112,8 +116,7 @@ function expenseRow(m: Pick<Marking, 'marks' | 'purchases'>, o: Operation): Expe
       id: `spending-${o.id}`,
       title: markingTitle(o),
       details: markingDetails(o),
-      icon: o.category ? categoryIcon(o.category.title) : 'tag',
-      color: categoryColor(o.category?.id ?? null, o.category?.color ?? null),
+      ...categoryLook(o.category),
       amount: o.amount,
       mark: envelopeOf(m, o),
     }),
@@ -363,7 +366,7 @@ export function spendingScreen(data: EntityCollections, saved: SavedMarking, opt
       otherLabel: payments.choices.length > 0 ? PAYMENT_WORDS.other : PAYMENT_WORDS.otherAlone,
       empty: PAYMENT_WORDS.empty,
     },
-    categories: { choices: categories.choices.map((c) => ({ ...colored(c), icon: categoryIcon(c.label) })), empty: categories.empty },
+    categories: { choices: categories.choices.map(colored), empty: categories.empty },
     /** What the suggestion is, when there is one; its choice is marked as suggested. */
     hint: suggestion ? `Похоже на ${suggestionName(suggestion)}` : null,
     envelopes: envelopeOptions(marking, o).map((c) => ({ ...c, detail: hints[c.choice] })),
@@ -456,14 +459,17 @@ export function operationsScreen(
       : `В ${monthName(d.month, 'prepositional')} операций нет. Новые появятся после синхронизации ZenMoney.`,
     /** What the categories are: Расходы по категориям, or Доходы по категориям when only incomes are shown. */
     categoriesTitle: d.categoriesTitle,
-    categories: d.categories.map((c) => ({
-      id: c.id ?? 'none',
-      title: c.title,
-      icon: categoryIcon(c.title),
-      color: colorOf(categoryColor(c.id, c.color)),
-      amount: c.amount,
-      share: d.categoryTotal > 0 ? c.amount / d.categoryTotal : 0,
-    })),
+    categories: d.categories.map((c) => {
+      const look = categoryLook(c);
+      return {
+        id: c.id ?? 'none',
+        title: c.title,
+        ...look,
+        color: colorOf(look.color),
+        amount: c.amount,
+        share: d.categoryTotal > 0 ? c.amount / d.categoryTotal : 0,
+      };
+    }),
   };
 }
 
@@ -490,8 +496,8 @@ export function uncategorizedScreen(data: EntityCollections, saved: SavedMarking
         id: `spending-${o.id}`,
         title: markingTitle(o),
         details: markingDetails(o),
-        icon: regular ? entryIcon(regular.icon, regular.title) : o.category ? categoryIcon(o.category.title) : 'tag',
-        color: categoryColor(o.category?.id ?? null, o.category?.color ?? null),
+        ...categoryLook(o.category),
+        ...(regular ? { icon: entryIcon(regular.icon, regular.title), photo: null } : {}),
         amount: o.amount,
         mark: envelopeOf(d.marking, o),
       }),
@@ -687,23 +693,39 @@ export function budgetSettingsScreen(data: EntityCollections, saved: Pick<SavedM
 }
 
 /**
- * Categories in the order marking offers them, the hidden ones apart, and the income categories the same way. A new
- * income category posts to /api/categories with kind income.
+ * Categories in the order marking offers them, the hidden ones apart, and the income categories the same way, with the
+ * icons and colours to pick for one. A new income category posts to /api/categories with kind income; a category's
+ * form posts its icon and colour as icon and color, empty for its own, and a photo as photo (see submitSettings).
  */
 export function categoriesScreen(data: EntityCollections, saved: SavedMarking, options: { today: DateString }) {
   const d = loadSettingsPage(data, saved, options);
-  const item = ({ category: c, kind, count }: (typeof d.categories)[number]) => ({
-    ...row({
-      id: `${kind === 'income' ? 'income-' : ''}category-${c.id}`,
-      title: c.title,
-      details: categoryDetails(c, count, kind),
-      icon: categoryIcon(c.title),
-      color: c.hidden ? toneColor('gray') : categoryColor(c.id, c.color),
-      muted: c.hidden,
-    }),
-    category: { id: c.id, name: c.name, zenmoneyTitle: c.zenmoneyTitle, hidden: c.hidden, kind },
-  });
+  const item = ({ category: c, kind, count, picked }: (typeof d.categories)[number]) => {
+    const auto = autoLook(c);
+    return {
+      ...row({
+        id: `${kind === 'income' ? 'income-' : ''}category-${c.id}`,
+        title: c.title,
+        details: categoryDetails(c, count, kind),
+        ...categoryLook(c),
+        ...(c.hidden ? { color: toneColor('gray') } : {}),
+        muted: c.hidden,
+      }),
+      category: {
+        id: c.id,
+        name: c.name,
+        zenmoneyTitle: c.zenmoneyTitle,
+        hidden: c.hidden,
+        kind,
+        /** The icon and colour the user picked; null for the category's own, which `auto` gives. */
+        icon: picked?.icon ?? null,
+        color: picked?.color ?? null,
+        auto: { icon: auto.icon, color: colorOf(auto.color) },
+      },
+    };
+  };
   return {
+    icons: CATEGORY_ICONS,
+    colors: CATEGORY_COLORS,
     shown: d.categories.filter((c) => !c.category.hidden).map(item),
     hidden: d.categories.filter((c) => c.category.hidden).map(item),
     income: {

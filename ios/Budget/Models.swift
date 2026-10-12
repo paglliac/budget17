@@ -11,6 +11,8 @@ struct Row: Decodable, Hashable {
     let details: String
     let icon: String
     let color: String
+    /// A category's photo, drawn instead of the icon on its colour: a path of the server; nil when there is none.
+    let photo: String?
     let amount: Double?
     /// week, extra, outside or ignored; nil when the row has no dot.
     let mark: String?
@@ -19,7 +21,7 @@ struct Row: Decodable, Hashable {
 
 extension Row {
     func with(amount: Double) -> Row {
-        Row(id: id, title: title, details: details, icon: icon, color: color, amount: amount, mark: mark, muted: muted)
+        Row(id: id, title: title, details: details, icon: icon, color: color, photo: photo, amount: amount, mark: mark, muted: muted)
     }
 }
 
@@ -280,6 +282,8 @@ struct Choice: Decodable, Hashable, Identifiable {
     let color: String?
     /// Set for a category or a payment, as its tile shows it.
     let icon: String?
+    /// A category's photo, as a path of the server.
+    let photo: String?
     let current: Bool?
     let suggested: Bool?
     var id: String { choice }
@@ -405,6 +409,7 @@ struct OperationsScreen: Decodable {
         let title: String
         let icon: String
         let color: String
+        let photo: String?
         let amount: Double
         let share: Double
     }
@@ -468,6 +473,12 @@ struct RegularItem: Decodable, Hashable, Identifiable {
 
 struct IconChoice: Decodable, Hashable {
     let icon: String
+    let label: String
+}
+
+struct ColorChoice: Decodable, Hashable {
+    /// A tone's name, such as violet, or #rrggbb.
+    let value: String
     let label: String
 }
 
@@ -548,6 +559,15 @@ struct CategoryItem: Decodable, Hashable, Identifiable {
         let hidden: Bool
         /// expense or income: what the category sorts.
         let kind: String
+        /// The icon and colour the user picked; nil for the category's own, which `auto` gives.
+        let icon: String?
+        let color: String?
+        let auto: Look?
+    }
+
+    struct Look: Decodable, Hashable {
+        let icon: String
+        let color: String
     }
 
     init(from decoder: Decoder) throws {
@@ -557,6 +577,9 @@ struct CategoryItem: Decodable, Hashable, Identifiable {
 }
 
 struct CategoriesScreen: Decodable {
+    /// The icons and colours to pick for a category; a colour is a tone's name or #rrggbb.
+    let icons: [IconChoice]?
+    let colors: [ColorChoice]?
     let shown: [CategoryItem]
     let hidden: [CategoryItem]
     /// The income categories the same way.

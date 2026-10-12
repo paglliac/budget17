@@ -284,6 +284,25 @@ a { color: inherit; text-decoration: none; }
 .icon-choice input:checked + span { border-color: transparent; background: color-mix(in srgb, var(--color, var(--violet)) 12%, white); color: var(--color, var(--violet)); }
 .icon-choice input:focus-visible + span { outline: 2px solid var(--violet); outline-offset: 2px; }
 
+/* colorPicker */
+.color-picker { display: grid; gap: 5px; flex: 1 1 100%; min-width: 0; border: 0; }
+.color-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.color-choice { position: relative; cursor: pointer; }
+.color-choice > input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.color-choice > span { position: relative; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: #fff; font-size: 11px; }
+.color-choice > input:checked + span { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--ink); }
+.color-choice > input:focus-visible + span { outline: 2px solid var(--violet); outline-offset: 4px; }
+.color-wheel { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 50%; opacity: 0; cursor: pointer; }
+.color-choice.custom > span { background: conic-gradient(#E5484D, #F2BE45, #3FA46A, #5BB5EE, #8C6CEF, #E2678B, #E5484D); }
+.color-choice.custom > input:checked + span { background: var(--custom); }
+
+/* photoField */
+.photo-field { flex: 1 1 100%; }
+.photo-pick { position: relative; display: inline-flex; align-items: center; gap: 6px; width: fit-content; height: 32px; padding: 0 14px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--ink); cursor: pointer; }
+.photo-pick:hover { background: var(--fill); }
+.photo-pick > input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.photo-pick:focus-within { outline: 2px solid var(--violet); outline-offset: 2px; }
+
 /* factList */
 .facts { display: flex; flex-wrap: wrap; gap: 8px 22px; }
 .fact { display: grid; gap: 2px; min-width: 0; }
@@ -412,6 +431,9 @@ a.bar:hover .bar-fill { filter: brightness(.96); }
 .amount:has(.amount-go) { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
 a.amount:hover, a.amount[aria-current] { background: var(--fill); }
 .amount-dot { width: 9px; height: 9px; border-radius: 50%; }
+/* A category's photo fills its tile on the category's colour, which shows through a photo with a clear ground. */
+:is(.entry-icon, .operation-icon, .category-icon, .tile-icon):has(> .photo) { overflow: hidden; background: var(--color); }
+.photo { display: block; width: 100%; height: 100%; object-fit: cover; }
 .amount-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: color-mix(in srgb, var(--tone) 14%, white); color: var(--tone); }
 .amount-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .amount-bar { height: 6px; border-radius: 6px; background: #ECECEA; overflow: hidden; }

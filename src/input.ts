@@ -1,5 +1,6 @@
 // What the user types into forms, checked and turned into values; an error says what to fix.
 
+import type { CategoryPhoto } from './categories.ts';
 import { daysInMonth } from './dates.ts';
 import type { DateString } from './zenmoney/types.ts';
 
@@ -13,6 +14,21 @@ export function parseTitle(text: string): Parsed<string> {
   if (!title) return { error: 'Укажите название' };
   if (title.length > MAX_TITLE) return { error: `Не длиннее ${MAX_TITLE} символов` };
   return { value: title };
+}
+
+/** The most a category's photo may weigh. The app and the page shrink a photo well below it before sending it. */
+export const MAX_PHOTO = 400_000;
+
+/** A category's photo as a page or the app sends it: a data URL of a JPEG or a PNG. */
+export function parsePhoto(text: string): Parsed<CategoryPhoto> {
+  const match = /^data:(image\/(?:jpeg|png));base64,([A-Za-z0-9+/]+={0,2})$/.exec(text.trim());
+  if (!match) return { error: 'Нужна картинка JPEG или PNG' };
+  const type = match[1] === 'image/png' ? 'image/png' : 'image/jpeg';
+  const data = new Uint8Array(Buffer.from(match[2]!, 'base64'));
+  if (data.length > MAX_PHOTO) return { error: 'Фото слишком большое' };
+  const signature = type === 'image/png' ? [0x89, 0x50, 0x4e, 0x47] : [0xff, 0xd8, 0xff];
+  if (!signature.every((byte, i) => data[i] === byte)) return { error: 'Нужна картинка JPEG или PNG' };
+  return { value: { type, data } };
 }
 
 export const MAX_DESCRIPTION = 200;

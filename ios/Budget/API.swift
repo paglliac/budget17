@@ -47,6 +47,16 @@ struct APIClient {
         _ = try await load(request)
     }
 
+    /// A photo of the server, such as a category's, by its path from the server's JSON. The path carries the photo's
+    /// version, so one the phone has kept will do, even with the server away.
+    func photo(_ path: String) async throws -> Data {
+        guard let url = URL(string: path, relativeTo: base)?.absoluteURL else { throw APIError.server("Нет такого фото.") }
+        var request = request(url, timeout: 15)
+        request.cachePolicy = .returnCacheDataElseLoad
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        return try await load(request)
+    }
+
     private func load(_ request: URLRequest) async throws -> Data {
         let data: Data, response: URLResponse
         do {

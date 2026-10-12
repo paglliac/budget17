@@ -197,6 +197,7 @@ describe('Settings', () => {
         { id: 'own-2', title: 'Бассейн', hidden: false, kind: 'expense' },
         { id: 'own-1', title: 'Дети', hidden: false, kind: 'expense' },
       ],
+      looks: new Map(),
     });
 
     settings.renameCategory('groceries', null);
@@ -213,6 +214,34 @@ describe('Settings', () => {
     assert.equal(settings.deleteOwnCategory(kids.id), false);
     assert.equal(settings.deleteOwnCategory('groceries'), false, 'a ZenMoney category is not deleted');
     assert.equal(settings.addOwnCategory('Дети').id, 'own-3', 'ids are not reused');
+  });
+
+  it('dresses categories with an icon, a colour and a photo, and forgets them with an own category', () => {
+    using settings = new Settings(':memory:');
+    const kids = settings.addOwnCategory('Дети');
+    const png = (...bytes: number[]) => ({ type: 'image/png' as const, data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, ...bytes]) });
+
+    settings.dressCategory('groceries', { icon: 'basket', color: 'green' });
+    settings.dressCategory(kids.id, { icon: null, color: '#1E90FF' });
+    settings.setCategoryPhoto(kids.id, png(1));
+    const first = settings.categorySetup().looks!;
+    assert.deepEqual(first.get('groceries'), { icon: 'basket', color: 'green', photo: null });
+    assert.equal(first.get(kids.id)?.color, '#1E90FF');
+    assert.match(first.get(kids.id)?.photo ?? '', /^[0-9a-f]{12}$/, 'a photo has a version');
+    assert.deepEqual(settings.categoryPhoto(kids.id), png(1));
+
+    settings.dressCategory(kids.id, { icon: 'baby', color: null });
+    assert.deepEqual(settings.categoryPhoto(kids.id), png(1), 'an icon and a colour keep the photo');
+    settings.setCategoryPhoto(kids.id, png(2));
+    assert.notEqual(settings.categorySetup().looks!.get(kids.id)?.photo, first.get(kids.id)?.photo, 'another photo, another version');
+    settings.setCategoryPhoto(kids.id, null);
+    assert.equal(settings.categoryPhoto(kids.id), null);
+    assert.deepEqual(settings.categorySetup().looks!.get(kids.id), { icon: 'baby', color: null, photo: null }, 'without the photo the icon stays');
+
+    settings.setCategoryPhoto(kids.id, png(3));
+    settings.deleteOwnCategory(kids.id);
+    assert.equal(settings.categorySetup().looks!.has(kids.id), false);
+    assert.equal(settings.categoryPhoto(kids.id), null);
   });
 
   it('splits categories into subcategories, sends shops and expenses into them, and forgets them with the subcategory', () => {
@@ -360,6 +389,29 @@ describe('Settings', () => {
       assert.deepEqual([...settings.purchasePayments()], [['tx-1', 1]]);
       assert.equal(settings.categorySetup().changes.get('cafe')?.title, 'Кафе');
       assert.deepEqual([...settings.spendingDescriptions()], [['tx-1', 'Кофе с Машей']]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('dresses the categories of a file made before their looks, keeping their titles', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
+    try {
+      const path = join(dir, 'settings.db');
+      {
+        using db = new DatabaseSync(path);
+        db.exec(`CREATE TABLE category_change (
+          tag_id TEXT PRIMARY KEY,
+          title TEXT,
+          hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))
+        ) STRICT`);
+        db.exec(`INSERT INTO category_change (tag_id, title) VALUES ('groceries', 'Продукты')`);
+      }
+      using settings = new Settings(path);
+      assert.deepEqual(settings.categorySetup().looks, new Map());
+      settings.dressCategory('groceries', { icon: 'cart', color: 'green' });
+      assert.deepEqual(settings.categorySetup().changes.get('groceries'), { title: 'Продукты', hidden: false });
+      assert.deepEqual(settings.categorySetup().looks!.get('groceries'), { icon: 'cart', color: 'green', photo: null });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -36,7 +36,9 @@ settings.addPurchase({ title: 'Куртка', amount: 20_000, week: '2026-10-05'
 settings.addWish({ title: 'Укладка для волос', amount: 4_500 });
 settings.addIncome({ title: 'Зарплата', model: 'salary', params: { salary: 200_000, advanceDay: 20, payDay: 5 } });
 settings.addIncome({ title: 'Сдача квартиры', model: 'fixed', params: { amount: 30_000, day: 1 } });
-settings.addOwnCategory('Дети');
+const kids = settings.addOwnCategory('Дети');
+settings.dressCategory(kids.id, { icon: 'baby', color: '#1E90FF' });
+settings.setCategoryPhoto(kids.id, { type: 'image/jpeg', data: new Uint8Array([0xff, 0xd8, 0xff, 0xe0]) });
 settings.addOwnCategory('Кэшбэк', 'income');
 settings.setWeekLimit('2026-10-05', 30_000);
 

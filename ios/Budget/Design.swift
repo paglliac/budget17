@@ -273,6 +273,8 @@ enum LilacMarker: Hashable {
     case dot(Color)
     case ring(Color)
     case symbol(String, Color)
+    /// A category's photo by its path, on the category's colour.
+    case photo(String, Color)
 
     @ViewBuilder
     var view: some View {
@@ -293,6 +295,8 @@ enum LilacMarker: Hashable {
                 .foregroundStyle(color)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(color.opacity(0.16), in: Circle())
+        case .photo(let path, let color):
+            RemotePhoto(path: path).background(color).clipShape(Circle())
         }
     }
 }
@@ -367,9 +371,10 @@ extension LilacRow where Accessory == EmptyView {
 }
 
 extension LilacMarker {
-    /// A row's icon from the server on a halo of its colour.
+    /// A row's icon from the server on a halo of its colour, or its category's photo on the colour.
     static func icon(_ row: Row) -> LilacMarker {
-        .symbol(Icons.symbol(row.icon), Palette.color(row.color))
+        if let photo = row.photo { return .photo(photo, Palette.color(row.color)) }
+        return .symbol(Icons.symbol(row.icon), Palette.color(row.color))
     }
 }
 

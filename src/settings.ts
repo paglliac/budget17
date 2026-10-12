@@ -1,7 +1,17 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { OWN_CATEGORY_PREFIX, type CategoryKind, type CategorySetup, type OwnCategory, type Subcategory, type SubcategorySetup } from './categories.ts';
+import {
+  OWN_CATEGORY_PREFIX,
+  type CategoryKind,
+  type CategoryLook,
+  type CategoryPhoto,
+  type CategorySetup,
+  type OwnCategory,
+  type Subcategory,
+  type SubcategorySetup,
+} from './categories.ts';
 import type { Categorization } from './categorization.ts';
 import type { ClaudeAnswer, ClaudeDecision, ClaudeReview, ClaudeSaved } from './claude-review.ts';
 import type { MonthString } from './dates.ts';
@@ -93,6 +103,19 @@ const SCHEMA = `
     hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))
   ) STRICT;
 
+  -- How the user dressed a category in the app, ZenMoney's or their own, by its id: an icon by name, a colour as a
+  -- tone's name or #rrggbb, and a photo shown instead of the icon, a JPEG or PNG with its version, which changes with
+  -- it. A null keeps what the category would have.
+  CREATE TABLE IF NOT EXISTS category_look (
+    tag_id TEXT PRIMARY KEY,
+    icon TEXT,
+    color TEXT,
+    photo BLOB,
+    photo_type TEXT CHECK (photo_type IN ('image/jpeg', 'image/png')),
+    photo_version TEXT,
+    CHECK ((photo IS NULL) = (photo_type IS NULL) AND (photo IS NULL) = (photo_version IS NULL))
+  ) STRICT;
+
   -- Parts of a category the user made in the app, such as Продукты › Лента; ZenMoney has none. Ids are never reused.
   CREATE TABLE IF NOT EXISTS subcategory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,7 +197,7 @@ const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> 
 /**
  * What the user sets up in the app itself: regular expenses, incomes, the day a week begins on, what a week allows,
  * the weeks' purchases, wishes, where spending counts, what expenses paid or which category they go into, what the
- * user wrote about them, and the categories themselves. It lives in its own
+ * user wrote about them, and the categories themselves with their icons, colours and photos. It lives in its own
  * SQLite file, apart from the ZenMoney copy, so make resync never deletes it.
  */
 export class Settings {
@@ -518,7 +541,7 @@ export class Settings {
       .run(transactionId, description);
   }
 
-  /** ZenMoney categories the user renamed or hid, and their own categories by title. */
+  /** ZenMoney categories the user renamed or hid, their own categories by title, and how the user dressed them. */
   categorySetup(): CategorySetup {
     const changes = new Map(
       this.#db
@@ -538,7 +561,37 @@ export class Settings {
         }),
       )
       .sort((a, b) => a.title.localeCompare(b.title, 'ru'));
-    return { changes, own };
+    const text = (value: unknown) => (value === null ? null : String(value));
+    const looks = new Map(
+      this.#db
+        .prepare('SELECT tag_id, icon, color, photo_version FROM category_look')
+        .all()
+        .map((row) => [String(row.tag_id), { icon: text(row.icon), color: text(row.color), photo: text(row.photo_version) }] as const),
+    );
+    return { changes, own, looks };
+  }
+
+  /** Gives a category an icon and a colour; null leaves it the one it would have. */
+  dressCategory(id: TagId, look: Pick<CategoryLook, 'icon' | 'color'>): void {
+    this.#db
+      .prepare('INSERT INTO category_look (tag_id, icon, color) VALUES (?, ?, ?) ON CONFLICT (tag_id) DO UPDATE SET icon = excluded.icon, color = excluded.color')
+      .run(id, look.icon, look.color);
+  }
+
+  /** Puts a photo on a category instead of its icon, or takes it off with null. */
+  setCategoryPhoto(id: TagId, photo: CategoryPhoto | null): void {
+    const version = photo ? createHash('sha1').update(photo.data).digest('hex').slice(0, 12) : null;
+    this.#db
+      .prepare(
+        'INSERT INTO category_look (tag_id, photo, photo_type, photo_version) VALUES (?, ?, ?, ?) ON CONFLICT (tag_id) DO UPDATE SET photo = excluded.photo, photo_type = excluded.photo_type, photo_version = excluded.photo_version',
+      )
+      .run(id, photo?.data ?? null, photo?.type ?? null, version);
+  }
+
+  /** The photo put on a category; null when it has none. */
+  categoryPhoto(id: TagId): CategoryPhoto | null {
+    const row = this.#db.prepare('SELECT photo, photo_type FROM category_look WHERE tag_id = ? AND photo IS NOT NULL').get(id);
+    return row ? { type: row.photo_type === 'image/png' ? 'image/png' : 'image/jpeg', data: row.photo as Uint8Array } : null;
   }
 
   addOwnCategory(title: string, kind: CategoryKind = 'expense'): OwnCategory {
@@ -581,6 +634,7 @@ export class Settings {
     return this.#transaction(() => {
       this.#db.prepare('DELETE FROM categorization WHERE tag_id = ?').run(id);
       for (const sub of this.subcategorySetup().subcategories.filter((s) => s.category === id)) this.#deleteSubcategory(sub.id);
+      this.#db.prepare('DELETE FROM category_look WHERE tag_id = ?').run(id);
       return Number(this.#db.prepare('DELETE FROM own_category WHERE id = ?').run(own).changes) > 0;
     });
   }

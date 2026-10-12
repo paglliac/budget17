@@ -54,6 +54,45 @@ const ICONS = {
   more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  basket: '<path d="m15 11-1 9"/><path d="m19 11-4-7"/><path d="M2 11h20"/><path d="m3.5 11 1.6 7.4a2 2 0 0 0 2 1.6h9.8a2 2 0 0 0 2-1.6l1.7-7.4"/><path d="M4.5 15.5h15"/><path d="m5 11 4-7"/><path d="m9 11 1 9"/>',
+  carrot: '<path d="M2.27 21.7s9.87-3.5 12.73-6.36a4.5 4.5 0 0 0-6.36-6.37C5.77 11.84 2.27 21.7 2.27 21.7zM8.64 14l-2.05-2.04M15.34 15l-2.46-2.46"/><path d="M22 9s-1.33-2-3.5-2C16.86 7 15 9 15 9s1.33 2 3.5 2S22 9 22 9z"/><path d="M15 2s-2 1.33-2 3.5S15 9 15 9s2-1.84 2-3.5C17 3.33 15 2 15 2z"/>',
+  utensils: '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>',
+  pizza: '<path d="m12 14-1 1"/><path d="m13.75 18.25-1.25 1.42"/><path d="M17.775 5.654a15.68 15.68 0 0 0-12.121 12.12"/><path d="M18.8 9.3a1 1 0 0 0 2.1 7.7"/><path d="M21.964 20.732a1 1 0 0 1-1.232 1.232l-18-5a1 1 0 0 1-.695-1.232A19.68 19.68 0 0 1 15.732 2.037a1 1 0 0 1 1.232.695z"/>',
+  wine: '<path d="M8 22h8"/><path d="M7 10h10"/><path d="M12 15v7"/><path d="M12 15a5 5 0 0 0 5-5c0-2-.5-4-2-8H9c-1.5 4-2 6-2 8a5 5 0 0 0 5 5Z"/>',
+  cake: '<path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8"/><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1"/><path d="M2 21h20"/><path d="M7 8v3"/><path d="M12 8v3"/><path d="M17 8v3"/><path d="M7 4h.01"/><path d="M12 4h.01"/><path d="M17 4h.01"/>',
+  fuel: '<line x1="3" x2="15" y1="22" y2="22"/><line x1="4" x2="14" y1="9" y2="9"/><path d="M14 22V4a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v18"/><path d="M14 13h2a2 2 0 0 1 2 2v2a2 2 0 0 0 2 2a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 5"/>',
+  parking: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/>',
+  train: '<path d="M8 3.1V7a4 4 0 0 0 8 0V3.1"/><path d="m9 15-1-1"/><path d="m15 15 1-1"/><path d="M9 19c-2.8 0-5-2.2-5-5v-4a8 8 0 0 1 16 0v4c0 2.8-2.2 5-5 5Z"/><path d="m8 19-2 3"/><path d="m16 19 2 3"/>',
+  plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
+  bike: '<circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/>',
+  key: '<path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/>',
+  droplet: '<path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>',
+  flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+  wifi: '<path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/>',
+  sofa: '<path d="M20 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v3"/><path d="M2 16a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v1.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5V11a2 2 0 0 0-4 0z"/><path d="M4 18v2"/><path d="M20 18v2"/><path d="M12 4v9"/>',
+  wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  package: '<path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"/><path d="m7.5 4.27 9 5.15"/>',
+  laptop: '<path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"/>',
+  pill: '<path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/>',
+  stethoscope: '<path d="M11 2v2"/><path d="M5 2v2"/><path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1"/><path d="M8 15a6 6 0 0 0 12 0v-3"/><circle cx="20" cy="10" r="2"/>',
+  dumbbell: '<path d="M14.4 14.4 9.6 9.6"/><path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z"/><path d="m21.5 21.5-1.4-1.4"/><path d="M3.9 3.9 2.5 2.5"/><path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"/>',
+  scissors: '<circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/>',
+  baby: '<path d="M9 12h.01"/><path d="M15 12h.01"/><path d="M10 16c.5.3 1.2.5 2 .5s1.5-.2 2-.5"/><path d="M19 6.3a9 9 0 0 1 1.8 3.9 2 2 0 0 1 0 3.6 9 9 0 0 1-17.6 0 2 2 0 0 1 0-3.6A9 9 0 0 1 12 3c2 0 3.5 1.1 3.5 2.5s-.9 2.5-2 2.5c-.8 0-1.5-.4-1.5-1"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  paw: '<circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="20" cy="16" r="2"/><path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 17.48 4.46 16.84A3.5 3.5 0 0 1 5.5 10Z"/>',
+  partyPopper: '<path d="M5.8 11.3 2 22l10.7-3.79"/><path d="M4 3h.01"/><path d="M22 8h.01"/><path d="M15 2h.01"/><path d="M22 20h.01"/><path d="m22 2-2.24.75a2.9 2.9 0 0 0-1.96 3.12c.1.86-.57 1.63-1.45 1.63h-.38c-.86 0-1.6.6-1.76 1.44L14 10"/><path d="m22 13-.82-.33c-.86-.34-1.82.2-1.98 1.11c-.11.7-.72 1.22-1.43 1.22H17"/><path d="m11 2 .33.82c.34.86-.2 1.82-1.11 1.98C9.52 4.9 9 5.52 9 6.23V7"/><path d="M11 13c1.93 1.93 2.83 4.17 2 5-.83.83-3.07-.07-5-2-1.93-1.93-2.83-4.17-2-5 .83-.83 3.07.07 5 2Z"/>',
+  film: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/>',
+  gamepad: '<line x1="6" x2="10" y1="11" y2="11"/><line x1="8" x2="8" y1="9" y2="13"/><line x1="15" x2="15.01" y1="12" y2="12"/><line x1="18" x2="18.01" y1="10" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/>',
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  palette: '<circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>',
+  luggage: '<path d="M6 20a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2"/><path d="M8 18V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v14"/><path d="M10 20h4"/><circle cx="16" cy="20" r="2"/><circle cx="8" cy="20" r="2"/>',
+  tent: '<path d="M3.5 21 14 3"/><path d="M20.5 21 10 3"/><path d="M15.5 21 12 15l-3.5 6"/><path d="M2 21h20"/>',
+  umbrella: '<path d="M22 12a10.06 10.06 1 0 0-20 0Z"/><path d="M12 12v8a2 2 0 0 0 4 0"/><path d="M12 2v1"/>',
+  graduation: '<path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/>',
+  percent: '<line x1="19" x2="5" y1="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>',
+  landmark: '<line x1="3" x2="21" y1="22" y2="22"/><line x1="6" x2="6" y1="18" y2="11"/><line x1="10" x2="10" y1="18" y2="11"/><line x1="14" x2="14" y1="18" y2="11"/><line x1="18" x2="18" y1="18" y2="11"/><polygon points="12 2 20 7 4 7"/>',
+  plusMinus: '<path d="M12 3v14"/><path d="M5 10h14"/><path d="M5 21h14"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
 } as const;
 
 export type IconName = keyof typeof ICONS;
@@ -64,28 +103,113 @@ export function icon(name: IconName, size = 16): Html {
   return html`<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw(ICONS[name])}</svg>`;
 }
 
-/** ZenMoney category icons are not documented, so the icon is picked by the category title. */
-const CATEGORY_ICONS: Array<[RegExp, IconName]> = [
-  [/продукт|супермаркет|еда|магазин/i, 'cart'],
-  [/кафе|ресторан|кофе|обед|фастфуд/i, 'coffee'],
-  [/такси|транспорт|метро|проезд/i, 'bus'],
-  [/авто|бензин|машин|парков/i, 'car'],
-  [/коммун|жкх|электр|газ|вода/i, 'zap'],
-  [/жиль|аренд|квартир|ипотек|дом/i, 'home'],
-  [/связь|интернет|телефон|мобил/i, 'phone'],
-  [/подписк|сервис|регуляр/i, 'repeat'],
-  [/здоров|аптек|медиц|врач|спорт|бокс|фитнес|бассейн/i, 'heart'],
-  [/одежд|обув/i, 'shirt'],
-  [/покупк|маркетплейс|техник|товар/i, 'bag'],
-  [/развлеч|кино|отдых|хобби|досуг|путешеств/i, 'ticket'],
-  [/подар|благотвор/i, 'gift'],
-  [/образов|книг|курс|учёб|учеб|школ|художк|кружк|секци/i, 'book'],
-  [/зарплат|доход|аванс|преми|работ/i, 'briefcase'],
-  [/кредит|долг|банк|процент|комисс/i, 'card'],
+/** A category's photo instead of its icon when it has one; its tile then takes the category's colour (styles.css). */
+export function iconOrPhoto(name: IconName, photo: string | null | undefined, size = 16): Html {
+  return photo ? html`<img class="photo" src="${photo}" alt="" loading="lazy">` : icon(name, size);
+}
+
+/**
+ * What a category likely is by its title, since ZenMoney's category icons are not documented: its icon and its colour,
+ * a tone's name or #rrggbb. The first that matches wins. Titles may be ZenMoney's English ones until the user renames
+ * them.
+ */
+const TITLE_LOOKS: Array<[RegExp, IconName, string]> = [
+  [/продукт|супермаркет|еда|магазин|grocer/i, 'cart', 'green'],
+  [/кафе|ресторан|кофе|обед|фастфуд|eating out|restaurant/i, 'utensils', 'orange'],
+  [/такси|транспорт|метро|проезд/i, 'bus', 'teal'],
+  [/авто|бензин|машин|парков|transport/i, 'car', 'blue'],
+  [/коммун|жкх|электр|газ|вода/i, 'zap', 'yellow'],
+  [/жиль|аренд|квартир|ипотек|дом|home/i, 'home', 'teal'],
+  [/связь|интернет|телефон|мобил|phone/i, 'phone', '#5B6CF0'],
+  [/подписк|сервис|регуляр|subscription/i, 'repeat', '#8CB43C'],
+  [/уход за|красот|салон|парикмах|маникюр|косметик|personal care/i, 'scissors', 'violet'],
+  [/здоров|аптек|медиц|врач|спорт|бокс|фитнес|бассейн|health/i, 'heart', 'red'],
+  [/одежд|обув|clothes/i, 'shirt', '#C25BD6'],
+  [/шоппинг|покупк|маркетплейс|техник|товар|shopping/i, 'bag', '#C25BD6'],
+  [/путешеств|отпуск|travel/i, 'luggage', '#2FA7B8'],
+  [/развлеч|кино|отдых|хобби|досуг|entertainment/i, 'partyPopper', '#2FA7B8'],
+  [/подар|благотвор|gift/i, 'gift', 'pink'],
+  [/образов|книг|курс|учёб|учеб|школ|художк|кружк|секци|education/i, 'graduation', 'yellow'],
+  [/зарплат|доход|аванс|преми|работ|salary/i, 'briefcase', 'green'],
+  [/кредит|долг|банк|процент|комисс/i, 'card', 'gray'],
+  [/корректир|correction/i, 'plusMinus', 'gray'],
 ];
 
 export function categoryIcon(title: string): IconName {
-  return CATEGORY_ICONS.find(([pattern]) => pattern.test(title))?.[1] ?? 'tag';
+  return TITLE_LOOKS.find(([pattern]) => pattern.test(title))?.[1] ?? 'tag';
+}
+
+/** The colour of a category by its title, a tone's name or #rrggbb; null when its title says nothing. */
+export function titleColor(title: string): string | null {
+  return TITLE_LOOKS.find(([pattern]) => pattern.test(title))?.[2] ?? null;
+}
+
+/** Icons to pick for a category, with what each stands for, grouped as they show: food, transport, home and so on. */
+export const CATEGORY_ICONS: ReadonlyArray<{ icon: IconName; label: string }> = [
+  { icon: 'cart', label: 'Продукты' },
+  { icon: 'basket', label: 'Корзина' },
+  { icon: 'carrot', label: 'Овощи' },
+  { icon: 'utensils', label: 'Рестораны' },
+  { icon: 'coffee', label: 'Кофе' },
+  { icon: 'pizza', label: 'Фастфуд' },
+  { icon: 'wine', label: 'Вино' },
+  { icon: 'cake', label: 'Праздник' },
+  { icon: 'car', label: 'Машина' },
+  { icon: 'fuel', label: 'Бензин' },
+  { icon: 'parking', label: 'Парковка' },
+  { icon: 'bus', label: 'Транспорт' },
+  { icon: 'train', label: 'Поезд' },
+  { icon: 'plane', label: 'Самолёт' },
+  { icon: 'bike', label: 'Велосипед' },
+  { icon: 'home', label: 'Дом' },
+  { icon: 'key', label: 'Аренда' },
+  { icon: 'zap', label: 'Электричество' },
+  { icon: 'droplet', label: 'Вода' },
+  { icon: 'flame', label: 'Газ' },
+  { icon: 'wifi', label: 'Интернет' },
+  { icon: 'phone', label: 'Связь' },
+  { icon: 'sofa', label: 'Мебель' },
+  { icon: 'wrench', label: 'Ремонт' },
+  { icon: 'bag', label: 'Покупки' },
+  { icon: 'shirt', label: 'Одежда' },
+  { icon: 'package', label: 'Посылки' },
+  { icon: 'laptop', label: 'Техника' },
+  { icon: 'heart', label: 'Здоровье' },
+  { icon: 'pill', label: 'Аптека' },
+  { icon: 'stethoscope', label: 'Врачи' },
+  { icon: 'dumbbell', label: 'Спорт' },
+  { icon: 'scissors', label: 'Уход за собой' },
+  { icon: 'sparkles', label: 'Красота' },
+  { icon: 'baby', label: 'Дети' },
+  { icon: 'users', label: 'Люди' },
+  { icon: 'paw', label: 'Питомцы' },
+  { icon: 'gift', label: 'Подарки' },
+  { icon: 'partyPopper', label: 'Развлечения' },
+  { icon: 'ticket', label: 'Билеты' },
+  { icon: 'film', label: 'Кино' },
+  { icon: 'gamepad', label: 'Игры' },
+  { icon: 'music', label: 'Музыка' },
+  { icon: 'palette', label: 'Хобби' },
+  { icon: 'luggage', label: 'Путешествия' },
+  { icon: 'tent', label: 'Отдых на природе' },
+  { icon: 'book', label: 'Книги' },
+  { icon: 'graduation', label: 'Образование' },
+  { icon: 'repeat', label: 'Подписки' },
+  { icon: 'card', label: 'Кредит' },
+  { icon: 'percent', label: 'Проценты' },
+  { icon: 'landmark', label: 'Налоги' },
+  { icon: 'umbrella', label: 'Страховка' },
+  { icon: 'briefcase', label: 'Работа' },
+  { icon: 'banknote', label: 'Наличные' },
+  { icon: 'piggy', label: 'Накопления' },
+  { icon: 'trendingUp', label: 'Инвестиции' },
+  { icon: 'receipt', label: 'Счета' },
+  { icon: 'plusMinus', label: 'Корректировка' },
+  { icon: 'tag', label: 'Прочее' },
+];
+
+export function isCategoryIcon(name: string | null | undefined): name is IconName {
+  return CATEGORY_ICONS.some((c) => c.icon === name);
 }
 
 /** Icons to pick for an entry, such as a regular expense, with what each stands for. */

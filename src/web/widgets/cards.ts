@@ -5,7 +5,7 @@ import type { OperationKind } from '../../operations.ts';
 import type { DateString } from '../../zenmoney/types.ts';
 import { daysLeft, money, monthName, num } from '../format.ts';
 import { html, type Content, type Html } from '../html.ts';
-import { icon, type IconName } from '../icons.ts';
+import { icon, iconOrPhoto, type IconName } from '../icons.ts';
 import { toneColor, type Tone } from '../tones.ts';
 import { badge, iconBadge, progressBar } from './basics.ts';
 
@@ -32,9 +32,9 @@ export function statCard(options: {
 }
 
 /** Spending in a category, tinted with the category colour. With `href` it links to the category. */
-export function categoryTile(options: { icon: IconName; color: string; title: string; amount: number; symbol: string; href?: string }): Html {
+export function categoryTile(options: { icon: IconName; color: string; photo?: string | null; title: string; amount: number; symbol: string; href?: string }): Html {
   const inner = html`
-    <span class="tile-icon">${icon(options.icon, 16)}</span>
+    <span class="tile-icon">${iconOrPhoto(options.icon, options.photo)}</span>
     <span class="tile-text"><b>${money(options.amount, options.symbol)}</b><small>${options.title}</small></span>`;
   return options.href
     ? html`<a class="tile" href="${options.href}" style="--color:${options.color}">${inner}<span class="tile-go">${icon('chevronRight', 16)}</span></a>`

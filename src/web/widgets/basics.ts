@@ -199,6 +199,48 @@ export function iconPicker(options: {
 }
 
 /**
+ * A choice of a colour, such as a category's, as swatches. `auto`, the first, sends an empty value: the colour is then
+ * the one the thing would have. The last swatch is a colour wheel for any other colour: it sends `custom` and the
+ * colour as `<name>-custom`. A picked colour shows at once on the form's icon (see document.ts).
+ */
+export function colorPicker(options: {
+  label: string;
+  name: string;
+  /** The picked colour as the swatches give it, empty for `auto`, or any #rrggbb for the colour wheel. */
+  value: string;
+  colors: ReadonlyArray<{ value: string; label: string; css: string }>;
+  auto: { css: string; label: string };
+}): Html {
+  const same = (value: string) => value.toLowerCase() === options.value.toLowerCase();
+  const known = options.value === '' || options.colors.some((c) => same(c.value));
+  const custom = known ? '#8C6CEF' : options.value;
+  const swatch = (value: string, label: string, css: string, inner: Html | null = null) =>
+    html`<label class="color-choice" title="${label}"><input type="radio" name="${options.name}" value="${value}" data-color="${css}" aria-label="${label}"${
+      same(value) ? html` checked` : null
+    }><span style="background:${css}">${inner}</span></label>`;
+  return html`<fieldset class="color-picker">
+    <legend class="field-label">${options.label}</legend>
+    <span class="color-choices">${swatch('', options.auto.label, options.auto.css, html`<b>A</b>`)}${options.colors.map((c) => swatch(c.value, c.label, c.css))}<label
+        class="color-choice custom" title="Свой цвет" style="--custom:${custom}"><input type="radio" name="${options.name}" value="custom" data-color="${custom}" aria-label="Свой цвет"${
+          known ? null : html` checked`
+        }><span><input class="color-wheel" type="color" name="${options.name}-custom" value="${custom}" aria-label="Свой цвет"></span></label></span>
+  </fieldset>`;
+}
+
+/**
+ * A photo to pick on the device, such as a category's. The page shrinks it to a small square and sends it with the
+ * form as a data URL in `name`, showing it at once on the form's icon (see document.ts); without scripts nothing is
+ * sent. An error shows under it.
+ */
+export function photoField(options: { label: string; name: string; button: string; error?: string }): Html {
+  return html`<span class="field photo-field">
+    <span class="field-label">${options.label}</span>
+    <label class="photo-pick">${icon('camera', 15)}<span>${options.button}</span><input type="file" accept="image/*" data-photo="${options.name}"></label>
+    ${options.error ? html`<small class="field-error">${options.error}</small>` : null}
+  </span>`;
+}
+
+/**
  * Choices made in one click, under a label, such as the category to put an expense into: each choice posts a form to
  * its URL. The current one is highlighted and posts nothing; a suggested one is marked. `other` lists the rest, for a
  * choice that is not among the buttons; it posts the picked value as `name` with its own button.

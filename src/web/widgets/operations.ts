@@ -4,7 +4,7 @@ import type { OperationKind } from '../../operations.ts';
 import type { DateString } from '../../zenmoney/types.ts';
 import { dayHeading, money, num } from '../format.ts';
 import { html, type Content, type Html } from '../html.ts';
-import { icon, type IconName } from '../icons.ts';
+import { icon, iconOrPhoto, type IconName } from '../icons.ts';
 import { toneColor, type Tone } from '../tones.ts';
 import { badge } from './basics.ts';
 
@@ -22,6 +22,8 @@ export function operationRow(options: {
   details: string;
   icon: IconName;
   color: string;
+  /** A category's photo, shown instead of the icon. */
+  photo?: string | null;
   kind: OperationKind;
   amount: number;
   symbol: string;
@@ -45,7 +47,7 @@ export function operationRow(options: {
   const open = options.panel !== undefined;
   const value = kind === 'transfer' || options.unsigned ? money(amount, symbol) : money(kind === 'income' ? amount : -amount, symbol, { sign: true });
   const inner = html`
-      <span class="operation-icon" style="--color:${options.color}">${icon(options.icon, 16)}</span>
+      <span class="operation-icon" style="--color:${options.color}">${iconOrPhoto(options.icon, options.photo)}</span>
       <span class="operation-text">
         <b>${options.title}</b>
         <small>${options.details}</small>
@@ -93,13 +95,13 @@ export function dayGroup(options: { date: DateString; today: DateString; net?: {
 export function categoryList(options: {
   label: string;
   symbol: string;
-  items: Array<{ title: string; icon: IconName; color: string; amount: number; share: number; href: string; active?: boolean }>;
+  items: Array<{ title: string; icon: IconName; color: string; photo?: string | null; amount: number; share: number; href: string; active?: boolean }>;
 }): Html {
   return html`<ul class="categories" aria-label="${options.label}">${options.items.map(
     (item) => html`
       <li>
         <a class="category" href="${item.href}" style="--color:${item.color}"${item.active ? html` aria-current="true"` : null}>
-          <span class="category-icon">${icon(item.icon, 15)}</span>
+          <span class="category-icon">${iconOrPhoto(item.icon, item.photo, 15)}</span>
           <span class="category-text">
             <span class="category-line"><b>${item.title}</b><span>${money(item.amount, options.symbol)}</span></span>
             <span class="category-bar"><i style="width:${(Math.min(1, Math.max(0, item.share)) * 100).toFixed(1)}%"></i></span>

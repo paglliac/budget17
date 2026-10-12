@@ -1,6 +1,6 @@
 // Web UI and the JSON API of the iPhone app: the week's budget at /, operations at /operations, expenses without a
 // category at /uncategorized, incomes at /income, regular expenses at /regular, the day a week begins on and categories
-// at /settings, the widget
+// at /settings, the photos the user put on categories at /category-photo/:id, the widget
 // storyboard at /storyboard, and the same screens as JSON under /api (see api.ts), along with the month as Claude
 // reviews it and where its answer is posted (see src/claude/run.ts); with a Claude token in the settings the server
 // has Claude review what the user asks for by itself (see reviewRequested). Forms post to the same paths
@@ -175,9 +175,12 @@ async function readBody(request: IncomingMessage, limit: number): Promise<string
   return Buffer.concat(chunks).toString('utf8');
 }
 
-async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
-  return new URLSearchParams(await readBody(request, 65_536));
+async function readForm(request: IncomingMessage, limit = 65_536): Promise<URLSearchParams> {
+  return new URLSearchParams(await readBody(request, limit));
 }
+
+/** A category's form may carry its photo (see MAX_PHOTO), a third larger as base64 and larger still URL-encoded. */
+const CATEGORY_FORM_LIMIT = 1_048_576;
 
 function send(response: ServerResponse, status: number, type: string, body: string): void {
   response.writeHead(status, { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-store' }).end(body);
@@ -270,7 +273,7 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     if (result.status === 'missing') return { status: 'missing', message: 'Такой категории нет' };
     const page = () =>
       renderSettings(loadSettingsPage(collections, loadSettings(savedMarking), { today, form: result.form, claudeToken: loadSettings((s) => s.claudeToken()) }), href).toString();
-    return { status: 'invalid', errors: { title: result.form.error }, page };
+    return { status: 'invalid', errors: result.form.errors, page };
   }
   if (path.startsWith('/budget/')) {
     const saved = loadSettings((settings) => submitBudget(settings, path, body)).status === 'saved';
@@ -410,7 +413,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       sendJson(response, saved.status === 'saved' ? 200 : 422, saved);
       return;
     }
-    const result = submitForm(path, await readForm(request), request, context);
+    const result = submitForm(path, await readForm(request, path.startsWith('/categories') ? CATEGORY_FORM_LIMIT : undefined), request, context);
     if (result === null) {
       if (isApi) sendJson(response, 404, { error: 'Такого действия нет' });
       else send(response, 405, 'text/plain', 'Метод не поддерживается');
@@ -428,6 +431,14 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   }
   if (request.method !== 'GET') {
     send(response, 405, 'text/plain', 'Метод не поддерживается');
+    return;
+  }
+  const photo = /^\/category-photo\/([\w-]+)$/.exec(url.pathname);
+  if (photo) {
+    const found = loadSettings((s) => s.categoryPhoto(photo[1]!));
+    // The address carries the photo's version, so a photo once loaded never needs asking for again.
+    if (found) response.writeHead(200, { 'content-type': found.type, 'cache-control': 'private, max-age=31536000, immutable' }).end(found.data);
+    else send(response, 404, 'text/plain', 'Такого фото нет');
     return;
   }
   if (isApi) {

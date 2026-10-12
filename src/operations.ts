@@ -28,8 +28,15 @@ export function operationAmount(operation: OperationAmounts, kind: OperationKind
 export interface Category {
   id: TagId;
   title: string;
-  /** '#rrggbb', or null when the category has no colour in ZenMoney. */
+  /**
+   * The colour the user picked in the app, a tone's name such as green or #rrggbb, else ZenMoney's #rrggbb; null when
+   * it has neither.
+   */
   color: string | null;
+  /** The icon the user picked in the app, by name (see src/web/icons.ts); none is picked by its title. */
+  icon?: string | null;
+  /** The version of the photo the user put on it in the app, shown instead of the icon. */
+  photo?: string | null;
 }
 
 export function categoryOf(tag: Tag): Category {

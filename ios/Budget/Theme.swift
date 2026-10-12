@@ -15,6 +15,15 @@ enum Icons {
         "receipt": "doc.plaintext", "flag": "flag", "diamond": "diamond", "target": "target",
         "filter": "line.3.horizontal.decrease", "panel": "sidebar.left", "message": "message", "hourglass": "hourglass",
         "layers": "square.3.layers.3d", "more": "ellipsis", "check": "checkmark", "pencil": "pencil",
+        "basket": "basket", "carrot": "carrot", "utensils": "fork.knife", "pizza": "takeoutbag.and.cup.and.straw",
+        "wine": "wineglass", "cake": "birthday.cake", "fuel": "fuelpump", "parking": "parkingsign", "train": "tram",
+        "plane": "airplane", "bike": "bicycle", "key": "key", "droplet": "drop", "flame": "flame", "wifi": "wifi",
+        "sofa": "sofa", "wrench": "wrench.and.screwdriver", "package": "shippingbox", "laptop": "laptopcomputer",
+        "pill": "pills", "stethoscope": "stethoscope", "dumbbell": "dumbbell", "scissors": "scissors",
+        "baby": "figure.and.child.holdinghands", "users": "person.2", "paw": "pawprint", "partyPopper": "party.popper",
+        "film": "film", "gamepad": "gamecontroller", "music": "music.note", "palette": "paintpalette",
+        "luggage": "suitcase", "tent": "tent", "umbrella": "umbrella", "graduation": "graduationcap",
+        "percent": "percent", "landmark": "building.columns", "plusMinus": "plusminus", "camera": "camera",
     ]
 
     static func symbol(_ name: String) -> String { symbols[name] ?? "tag" }

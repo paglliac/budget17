@@ -77,6 +77,30 @@ describe('settings page', () => {
     const own = render(settings, { edit: kids.id });
     assert.ok(own.includes(`formaction="/categories/${kids.id}/delete"`));
   });
+
+  it('draws a category by its title until the user picks an icon, a colour or a photo, and offers them in its form', () => {
+    using settings = new Settings(':memory:');
+    const kids = settings.addOwnCategory('Дети');
+    settings.renameCategory(groceries.id, 'Продукты');
+    const tile = (page: string, id: string) => page.slice(page.indexOf(`id="category-${id}"`)).match(/--color:([^"]*)"/)?.[1];
+
+    const before = render(settings);
+    assert.equal(tile(before, groceries.id), 'var(--green)', 'Продукты are green by their title');
+
+    settings.dressCategory(groceries.id, { icon: 'basket', color: '#1E90FF' });
+    settings.setCategoryPhoto(kids.id, { type: 'image/jpeg', data: new Uint8Array([0xff, 0xd8, 0xff, 1]) });
+    const after = render(settings);
+    assert.equal(tile(after, groceries.id), '#1E90FF');
+    assert.match(after, new RegExp(`<img class="photo" src="/category-photo/${kids.id}\\?v=[0-9a-f]{12}"`));
+
+    const form = render(settings, { edit: groceries.id });
+    assert.ok(form.includes('name="icon" value="basket" aria-label="Корзина" checked'), 'the picked icon');
+    assert.ok(form.includes('name="color" value="custom" data-color="#1E90FF" aria-label="Свой цвет" checked'), 'a colour of the wheel');
+    assert.ok(form.includes('data-photo="photo"') && form.includes('Выбрать фото') && !form.includes('/photo/delete'));
+    const own = render(settings, { edit: kids.id });
+    assert.ok(own.includes('name="icon" value="" aria-label="По названию" checked') && own.includes('name="color" value="" data-color='));
+    assert.ok(own.includes(`formaction="/categories/${kids.id}/photo/delete"`) && own.includes('Другое фото'));
+  });
 });
 
 describe('settings page incomes', () => {
@@ -201,6 +225,7 @@ describe('submitSettings', () => {
         ['correction', { title: null, hidden: true }],
       ]),
       own: [{ id: 'own-1', title: 'Савва', hidden: false, kind: 'expense' }],
+      looks: new Map(),
     });
 
     submitSettings(settings, data, '/categories/groceries', form({ title: 'Groceries' }));
@@ -211,11 +236,49 @@ describe('submitSettings', () => {
     assert.deepEqual(settings.categorySetup().own, []);
   });
 
+  it('picks a category’s icon and colour, puts a photo on it and takes it off, keeping them when a form has none', () => {
+    using settings = new Settings(':memory:');
+    const jpeg = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2]).toString('base64')}`;
+    const look = (id: string) => settings.categorySetup().looks?.get(id);
+
+    assert.deepEqual(submitSettings(settings, data, '/categories', form({ title: 'Дети', icon: 'baby', color: 'orange', photo: jpeg })), { status: 'saved' });
+    assert.deepEqual(look('own-1'), { icon: 'baby', color: 'orange', photo: look('own-1')?.photo });
+    assert.deepEqual(settings.categoryPhoto('own-1'), { type: 'image/jpeg', data: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2]) });
+
+    submitSettings(settings, data, '/categories/groceries', form({ title: '', icon: 'basket', color: 'custom', 'color-custom': '#1e90ff' }));
+    assert.deepEqual(look('groceries'), { icon: 'basket', color: '#1E90FF', photo: null });
+    submitSettings(settings, data, '/categories/groceries', form({ title: 'Продукты' }));
+    assert.deepEqual(look('groceries'), { icon: 'basket', color: '#1E90FF', photo: null }, 'an older app sends only the title');
+    submitSettings(settings, data, '/categories/groceries', form({ title: 'Продукты', icon: '', color: '' }));
+    assert.deepEqual(look('groceries'), { icon: null, color: null, photo: null }, 'empty ones give the category’s own back');
+    submitSettings(settings, data, '/categories/groceries', form({ title: 'Продукты', icon: 'rocket', color: 'gold' }));
+    assert.deepEqual(look('groceries'), { icon: null, color: null, photo: null }, 'an icon or a colour the app does not know is none');
+
+    assert.deepEqual(submitSettings(settings, data, '/categories/own-1/photo/delete', form()), { status: 'saved' });
+    assert.equal(settings.categoryPhoto('own-1'), null);
+    submitSettings(settings, data, '/categories/own-1', form({ title: 'Дети', photo: jpeg }));
+    assert.ok(settings.categoryPhoto('own-1'));
+    submitSettings(settings, data, '/categories/own-1', form({ title: 'Дети', photo: '' }));
+    assert.equal(settings.categoryPhoto('own-1'), null, 'an empty photo takes it off');
+
+    const gif = `data:image/gif;base64,${Buffer.from('GIF89a').toString('base64')}`;
+    const fake = `data:image/png;base64,${Buffer.from('not a png').toString('base64')}`;
+    for (const photo of [gif, fake, `data:image/jpeg;base64,${Buffer.alloc(400_001, 0xff).toString('base64')}`]) {
+      const result = submitSettings(settings, data, '/categories/own-1', form({ title: 'Савва', icon: 'paw', photo }));
+      assert.equal(result.status, 'invalid');
+      assert.ok(result.status === 'invalid' && result.form.errors.photo, 'the photo is wrong');
+    }
+    assert.equal(settings.categorySetup().own[0]?.title, 'Дети', 'nothing is saved with a wrong photo');
+  });
+
   it('returns the form with an error, and refuses an unknown category or deleting a ZenMoney one', () => {
     using settings = new Settings(':memory:');
     settings.addOwnCategory('Дети');
 
-    assert.deepEqual(submitSettings(settings, data, '/categories', form({ title: ' ' })), { status: 'invalid', form: { id: null, kind: 'expense', title: ' ', error: 'Укажите название' } });
+    assert.deepEqual(submitSettings(settings, data, '/categories', form({ title: ' ' })), {
+      status: 'invalid',
+      form: { id: null, kind: 'expense', title: ' ', icon: '', color: '', errors: { title: 'Укажите название' } },
+    });
     assert.equal(submitSettings(settings, data, '/categories/own-1', form({ title: '' })).status, 'invalid');
     assert.deepEqual(submitSettings(settings, data, '/categories/nope', form({ title: 'Нет' })), { status: 'missing' });
     assert.deepEqual(submitSettings(settings, data, '/categories/groceries/delete', form()), { status: 'missing' });

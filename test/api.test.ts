@@ -95,6 +95,7 @@ describe('api', () => {
       details: 'Продукты',
       icon: 'cart',
       color: '#3fa46a',
+      photo: null,
       amount: 473,
       mark: 'week',
       muted: false,
@@ -207,9 +208,9 @@ describe('api', () => {
     assert.equal(spending.title, 'Александр А.');
     assert.deepEqual([spending.when, spending.account, spending.notes], ['5 октября', 'Основной', []]);
     const school = spending.payments.choices.find((c: { choice: string }) => c.choice === 'regular-7');
-    assert.equal(school.icon, 'book', 'a payment has an icon for its card');
+    assert.equal(school.icon, 'graduation', 'a payment has an icon for its card');
     assert.equal(spending.payments.otherLabel, 'Другой платёж');
-    assert.deepEqual(spending.categories.choices[0], { choice: 'tag-groceries', label: 'Продукты', color: '#3fa46a', current: false, suggested: false, icon: 'cart' });
+    assert.deepEqual(spending.categories.choices[0], { choice: 'tag-groceries', label: 'Продукты', color: '#3fa46a', current: false, suggested: false, icon: 'cart', photo: null });
     assert.deepEqual(
       spending.envelopes.map((c: { choice: string }) => c.choice),
       ['week', 'extra', 'outside', 'ignored'],
@@ -288,7 +289,7 @@ describe('api', () => {
     assert.equal(operations.pending, 2, 'the transfer and last week’s expense wait for a category');
     const moved = plain(operationsScreen(data(), saved([['pyaterochka', 'extra']]), { today })).days[0].items;
     assert.deepEqual(moved.find((o: { id: string }) => o.id === 'pyaterochka').chip, { label: 'Дополнительные', tone: 'violet' });
-    assert.deepEqual(operations.categories[0], { id: 'none', title: 'Без категории', icon: 'tag', color: 'gray', amount: 70_000, share: 70_000 / 70_473 });
+    assert.deepEqual(operations.categories[0], { id: 'none', title: 'Без категории', icon: 'tag', color: 'gray', photo: null, amount: 70_000, share: 70_000 / 70_473 });
 
     const filtered = plain(operationsScreen(data(), saved(), { today, kind: 'income', query: 'работа' }));
     assert.equal(filtered.kind, 'income');
@@ -441,6 +442,42 @@ describe('api', () => {
       ['income-category-own-1', 'своя · за три месяца доходов нет', 'income'],
     ]);
     assert.deepEqual(screen.income.hidden, []);
+  });
+
+  it('gives a category what the user picked for it, what it would have without, and the icons and colours to pick', () => {
+    const settings = {
+      ...saved(),
+      categories: {
+        changes: new Map(),
+        own: [{ id: 'own-1', title: 'Кэшбэк', hidden: false, kind: 'income' as const }],
+        looks: new Map([
+          ['groceries', { icon: 'basket', color: 'orange', photo: 'abc' }],
+          ['own-1', { icon: null, color: '#1E90FF', photo: null }],
+        ]),
+      },
+    };
+    const screen = plain(categoriesScreen(data(), settings, { today }));
+    const [groceries] = screen.shown;
+    const [cashback] = screen.income.shown;
+
+    assert.deepEqual([groceries.icon, groceries.color, groceries.photo], ['basket', 'orange', '/category-photo/groceries?v=abc']);
+    assert.deepEqual(groceries.category, {
+      id: 'groceries',
+      name: 'Продукты',
+      zenmoneyTitle: 'Продукты',
+      hidden: false,
+      kind: 'expense',
+      icon: 'basket',
+      color: 'orange',
+      auto: { icon: 'cart', color: '#3fa46a' },
+    });
+    assert.deepEqual([cashback.icon, cashback.color, cashback.category.icon, cashback.category.color], ['tag', '#1E90FF', null, '#1E90FF']);
+    assert.ok(screen.icons.some((i: { icon: string; label: string }) => i.icon === 'partyPopper' && i.label === 'Развлечения'));
+    assert.deepEqual(screen.colors[0], { value: 'violet', label: 'Фиолетовый' });
+
+    const week = plain(weekScreen(data(), { ...saved(), categories: settings.categories }, { ...budget, week: null }));
+    const [shop] = week.days[0].items;
+    assert.deepEqual([shop.icon, shop.color, shop.photo], ['basket', 'orange', '/category-photo/groceries?v=abc'], 'an expense is drawn as its category');
   });
 
   it('opens incomes from the operations, and leaves one not counted out of the sums with its chip', () => {

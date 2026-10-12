@@ -277,7 +277,8 @@ struct CategorySpendingSheet: View {
                     pick(c.id == selected ? nil : c.id)
                     dismiss()
                 } label: {
-                    LilacRow(marker: .symbol(Icons.symbol(c.icon), Palette.color(c.color)), title: c.title, details: "", amount: c.amount, symbol: symbol,
+                    LilacRow(marker: c.photo.map { .photo($0, Palette.color(c.color)) } ?? .symbol(Icons.symbol(c.icon), Palette.color(c.color)),
+                             title: c.title, details: "", amount: c.amount, symbol: symbol,
                              first: index == 0 && selected == nil, chevron: false) {
                         GeometryReader { geometry in
                             Capsule().fill(Palette.color(c.color)).frame(width: max(4, geometry.size.width * c.share))

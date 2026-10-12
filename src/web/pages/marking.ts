@@ -19,7 +19,9 @@ import { envelopeOf, purchaseStatus, weekOf, type Envelope, type Purchase, type 
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { dayMonth, money, timeOn, weekLabel } from '../format.ts';
 import type { Html } from '../html.ts';
-import { categoryColor, type Tone } from '../tones.ts';
+import type { IconName } from '../icons.ts';
+import { categoryLook } from '../looks.ts';
+import type { Tone } from '../tones.ts';
 import { choiceGroup, factList, inlineForm } from '../widgets/basics.ts';
 import type { Href } from './chrome.ts';
 
@@ -272,6 +274,9 @@ export interface MarkingChoice {
   detail?: string;
   /** A category's colour. */
   color?: string;
+  /** A category's icon and photo, as the app's tiles show them. */
+  icon?: IconName;
+  photo?: string | null;
   current?: boolean;
   suggested?: boolean;
 }
@@ -403,7 +408,7 @@ export function categoryOptions(m: Marking, o: Operation, suggestion: Suggestion
   const zenmoney = o.zenmoneyCategory?.id ?? null;
   const current = picked ?? zenmoney;
   const suggested = suggestion && 'category' in suggestion ? suggestion.category.id : null;
-  const catalog: Array<Pick<CategoryEntry, 'id' | 'title' | 'color' | 'hidden'>> = o.kind === 'income' ? m.incomeCategories : m.categories;
+  const catalog: Array<Pick<CategoryEntry, 'id' | 'title' | 'color' | 'icon' | 'photo' | 'hidden'>> = o.kind === 'income' ? m.incomeCategories : m.categories;
   // A refund comes as an income with the shop's spending category from ZenMoney, which is offered still to go back to.
   const own = o.zenmoneyCategory && !catalog.some((c) => c.id === zenmoney) ? [{ ...o.zenmoneyCategory, hidden: false }] : [];
   return {
@@ -413,7 +418,7 @@ export function categoryOptions(m: Marking, o: Operation, suggestion: Suggestion
         choice: c.id === zenmoney ? 'uncategorize' : `tag-${c.id}`,
         label: c.title,
         detail: c.id === zenmoney ? 'из ZenMoney' : undefined,
-        color: categoryColor(c.id, c.color),
+        ...categoryLook(c),
         current: c.id === current,
         suggested: c.id === suggested,
       })),

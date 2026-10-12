@@ -4,7 +4,7 @@
 
 import { money } from '../format.ts';
 import { html, type Content, type Html } from '../html.ts';
-import { icon, type IconName } from '../icons.ts';
+import { icon, iconOrPhoto, type IconName } from '../icons.ts';
 import { toneColor, type Tone } from '../tones.ts';
 import { button } from './basics.ts';
 
@@ -29,6 +29,8 @@ export function entryRow(options: {
   details: string;
   icon: IconName;
   color: string;
+  /** A category's photo, shown instead of the icon. */
+  photo?: string | null;
   /** Left out for an entry that is not about money, such as a category. */
   amount?: number;
   symbol?: string;
@@ -55,7 +57,7 @@ export function entryRow(options: {
               open ? html` aria-expanded="true"` : null
             }></a>`
           : null}
-        <span class="entry-icon">${icon(options.icon, 16)}</span>
+        <span class="entry-icon">${iconOrPhoto(options.icon, options.photo)}</span>
         <span class="entry-text"><b>${options.title}</b><small>${options.details}</small></span>
         ${iconActions.map(
           (a) =>
@@ -99,6 +101,7 @@ export function entryForm(options: {
   submitLabel: string;
   icon: IconName;
   color: string;
+  photo?: string | null;
   fields: Content;
   /** `open` unfolds them, such as when one of them has an error. */
   more?: { label: string; fields: Content; open?: boolean };
@@ -111,7 +114,7 @@ export function entryForm(options: {
     <li${options.id ? html` id="${options.id}"` : null}>
       <form class="entry-form" method="post" action="${options.action}" style="--color:${options.color}">
         ${Object.entries(options.hidden ?? {}).map(([name, value]) => html`<input type="hidden" name="${name}" value="${value}">`)}
-        <span class="entry-icon">${icon(options.icon, 16)}</span>
+        <span class="entry-icon">${iconOrPhoto(options.icon, options.photo)}</span>
         <span class="entry-fields">${options.fields}${
           options.more
             ? html`<details class="entry-more"${options.more.open ? html` open` : null}><summary class="entry-quiet">${options.more.label}${icon('chevronDown', 14)}</summary><span class="entry-more-fields">${options.more.fields}</span></details>`

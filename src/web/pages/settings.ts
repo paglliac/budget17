@@ -11,35 +11,40 @@
 // submitSettings).
 
 import { mainCurrency } from '../../balances.ts';
-import { byPopularity, categoryCatalog, recentCount, type CategoryEntry, type CategoryKind } from '../../categories.ts';
-import { parseTitle } from '../../input.ts';
+import { byPopularity, categoryCatalog, recentCount, type CategoryEntry, type CategoryKind, type CategoryLook, type CategoryPhoto } from '../../categories.ts';
+import { parsePhoto, parseTitle } from '../../input.ts';
 import type { Settings } from '../../settings.ts';
 import { WEEK_LIMIT, type WeekStart } from '../../week.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { money, plural, WEEKDAYS, WEEKDAYS_ON } from '../format.ts';
 import type { Html } from '../html.ts';
-import { categoryIcon } from '../icons.ts';
+import { CATEGORY_ICONS, isCategoryIcon } from '../icons.ts';
+import { autoLook, CATEGORY_COLORS, categoryLook, isCategoryColor } from '../looks.ts';
 import { categoryColor, toneColor } from '../tones.ts';
-import { choiceGroup, emptyState, field, pageIntro, section } from '../widgets/basics.ts';
+import { choiceGroup, colorPicker, emptyState, field, iconPicker, pageIntro, photoField, section } from '../widgets/basics.ts';
 import { entryForm, entryList, entryRow } from '../widgets/entries.ts';
 import { appShell, stack, topBar } from '../widgets/shell.ts';
 import { appRail, userName, type Href } from './chrome.ts';
 import { allExpenses, allIncomes, type SavedMarking } from './marking.ts';
 
-/** A category form shown again with its error after a submission failed; id is null for a new category. */
+/** A category form shown again with its errors after a submission failed; id is null for a new category. */
 export interface CategoryForm {
   id: string | null;
   kind: CategoryKind;
   title: string;
-  error: string;
+  /** The icon and colour as picked; empty for the ones the category would have. */
+  icon: string;
+  color: string;
+  errors: Partial<Record<'title' | 'photo', string>>;
 }
 
-/** A category with how many operations went into it lately. */
+/** A category with how many operations went into it lately, and the icon and colour the user picked for it. */
 export interface CategoryCount {
   category: CategoryEntry;
   kind: CategoryKind;
   count: number;
+  picked: Pick<CategoryLook, 'icon' | 'color'> | null;
 }
 
 /** What the budget is set up with. */
@@ -78,6 +83,7 @@ export function loadSettingsPage(
       category,
       kind,
       count: recentCount(category, operations, options.today),
+      picked: saved.categories.looks?.get(category.id) ?? null,
     }));
   const form = options.form;
   return {
@@ -125,21 +131,34 @@ export type SettingsSubmission = { status: 'saved' } | { status: 'missing' } | {
 
 /**
  * Applies a form posted to /categories (add one of the user's own, for incomes with `kind` income), /categories/:id
- * (rename), /categories/:id/hide, /categories/:id/show or /categories/:id/delete (only the user's own). A ZenMoney
- * category saved with ZenMoney's title or none takes ZenMoney's title back. `kind` says which list a form came from,
- * so an error shows there.
+ * (rename and dress), /categories/:id/hide, /categories/:id/show, /categories/:id/photo/delete or
+ * /categories/:id/delete (only the user's own). A ZenMoney category saved with ZenMoney's title or none takes
+ * ZenMoney's title back. `kind` says which list a form came from, so an error shows there. The icon and colour change
+ * only when the form has them, so an older app that sends just the title keeps them; an empty one takes the category's
+ * own back. `color` custom takes the colour from `color-custom`. A `photo` puts a photo on the category, an empty one
+ * takes it off.
  */
 export function submitSettings(settings: Settings, data: EntityCollections, path: string, body: URLSearchParams): SettingsSubmission {
-  const match = /^\/categories(?:\/([\w-]+)(?:\/(hide|show|delete))?)?$/.exec(path);
+  const match = /^\/categories(?:\/([\w-]+)(?:\/(hide|show|delete|photo\/delete))?)?$/.exec(path);
   if (!match) return { status: 'missing' };
   const [, id, action] = match;
   const text = body.get('title') ?? '';
   const kind: CategoryKind = body.get('kind') === 'income' ? 'income' : 'expense';
+  const look = lookForm(body);
+  const invalid = (category: string | null, errors: CategoryForm['errors']): SettingsSubmission => ({
+    status: 'invalid',
+    form: { id: category, kind, title: text, icon: look.look?.icon ?? '', color: look.look?.color ?? '', errors },
+  });
+  const dress = (category: string) => {
+    if (look.look) settings.dressCategory(category, look.look);
+    if (look.photo !== undefined) settings.setCategoryPhoto(category, look.photo);
+  };
+  const photoError = look.photoError ? { photo: look.photoError } : {};
 
   if (id === undefined) {
     const title = parseTitle(text);
-    if ('error' in title) return { status: 'invalid', form: { id: null, kind, title: text, error: title.error } };
-    settings.addOwnCategory(title.value, kind);
+    if ('error' in title || 'photo' in photoError) return invalid(null, { ...('error' in title ? { title: title.error } : {}), ...photoError });
+    dress(settings.addOwnCategory(title.value, kind).id);
     return { status: 'saved' };
   }
 
@@ -152,16 +171,35 @@ export function submitSettings(settings: Settings, data: EntityCollections, path
     settings.hideCategory(category.id, action === 'hide');
     return { status: 'saved' };
   }
-  if (action === 'delete') return category.zenmoneyTitle === null && settings.deleteOwnCategory(category.id) ? { status: 'saved' } : { status: 'missing' };
-
-  if (category.zenmoneyTitle !== null && (text.trim() === '' || text.trim() === category.zenmoneyTitle)) {
-    settings.renameCategory(category.id, null);
+  if (action === 'photo/delete') {
+    settings.setCategoryPhoto(category.id, null);
     return { status: 'saved' };
   }
-  const title = parseTitle(text);
-  if ('error' in title) return { status: 'invalid', form: { id: category.id, kind, title: text, error: title.error } };
+  if (action === 'delete') return category.zenmoneyTitle === null && settings.deleteOwnCategory(category.id) ? { status: 'saved' } : { status: 'missing' };
+
+  const original = category.zenmoneyTitle !== null && (text.trim() === '' || text.trim() === category.zenmoneyTitle);
+  const title = original ? { value: null } : parseTitle(text);
+  if ('error' in title || 'photo' in photoError) return invalid(category.id, { ...('error' in title ? { title: title.error } : {}), ...photoError });
   settings.renameCategory(category.id, title.value);
+  dress(category.id);
   return { status: 'saved' };
+}
+
+/**
+ * The icon, colour and photo a category form asks for: `look` when the form has an icon or a colour, null of either
+ * for the category's own; `photo` when it has a photo, null to take it off, and what is wrong with a photo that will
+ * not do.
+ */
+function lookForm(body: URLSearchParams): { look: Pick<CategoryLook, 'icon' | 'color'> | null; photo?: CategoryPhoto | null; photoError?: string } {
+  const icon = body.get('icon');
+  const picked = body.get('color') === 'custom' ? body.get('color-custom') : body.get('color');
+  const color = picked && isCategoryColor(picked) ? (picked.startsWith('#') ? picked.toUpperCase() : picked) : null;
+  const look = body.has('icon') || body.has('color') ? { icon: isCategoryIcon(icon) ? icon : null, color } : null;
+  if (!body.has('photo')) return { look };
+  const text = body.get('photo') ?? '';
+  if (text === '') return { look, photo: null };
+  const photo = parsePhoto(text);
+  return 'error' in photo ? { look, photoError: photo.error } : { look, photo: photo.value };
 }
 
 /** Which category a row is, for ?edit=: its id, or income-<id> in the income list. */
@@ -198,7 +236,7 @@ export function renderSettings(d: SettingsData, href: Href): Html {
               placeholder: income ? 'Например, кэшбэк' : 'Например, дети',
               maxLength: 80,
               required: true,
-              error: form?.error,
+              error: form?.errors.title,
             }),
           }),
         ],
@@ -324,32 +362,47 @@ function categoryRow({ category: c, kind, count }: CategoryCount, href: Href): H
     id: `${kind === 'income' ? 'income-' : ''}category-${c.id}`,
     title: c.title,
     details: categoryDetails(c, count, kind),
-    icon: categoryIcon(c.title),
-    color: c.hidden ? toneColor('gray') : categoryColor(c.id, c.color),
+    ...categoryLook(c),
+    ...(c.hidden ? { color: toneColor('gray') } : {}),
     href: href('/settings', { edit: categoryKey(c.id, kind) }),
     muted: c.hidden,
   });
 }
 
-function categoryForm(d: SettingsData, { category: c, kind }: CategoryCount, href: Href): Html {
+function categoryForm(d: SettingsData, { category: c, kind, picked }: CategoryCount, href: Href): Html {
   const form = d.form?.id === c.id && d.form.kind === kind ? d.form : null;
+  const look = categoryLook(c);
+  const auto = autoLook(c);
   return entryForm({
     id: `${kind === 'income' ? 'income-' : ''}category-${c.id}`,
     action: href(`/categories/${c.id}`),
     submitLabel: 'Сохранить',
-    icon: categoryIcon(c.title),
-    color: categoryColor(c.id, c.color),
+    ...look,
     hidden: kind === 'income' ? { kind } : undefined,
-    fields: field({
-      label: c.zenmoneyTitle === null ? 'Название' : `Название, в ZenMoney «${c.zenmoneyTitle}»`,
-      name: 'title',
-      value: form?.title ?? c.name,
-      placeholder: c.zenmoneyTitle ?? '',
-      maxLength: 80,
-      required: c.zenmoneyTitle === null,
-      error: form?.error,
-    }),
-    extraActions: [{ label: c.hidden ? 'Показать' : 'Скрыть', action: href(`/categories/${c.id}/${c.hidden ? 'show' : 'hide'}`) }],
+    fields: [
+      field({
+        label: c.zenmoneyTitle === null ? 'Название' : `Название, в ZenMoney «${c.zenmoneyTitle}»`,
+        name: 'title',
+        value: form?.title ?? c.name,
+        placeholder: c.zenmoneyTitle ?? '',
+        maxLength: 80,
+        required: c.zenmoneyTitle === null,
+        error: form?.errors.title,
+      }),
+      iconPicker({ label: 'Иконка', name: 'icon', value: form?.icon ?? picked?.icon ?? '', icons: CATEGORY_ICONS, auto: { icon: auto.icon, label: 'По названию' } }),
+      colorPicker({
+        label: 'Цвет',
+        name: 'color',
+        value: form?.color ?? picked?.color ?? '',
+        colors: CATEGORY_COLORS.map((color) => ({ ...color, css: categoryColor(null, color.value) })),
+        auto: { css: auto.color, label: 'Как у категории' },
+      }),
+      photoField({ label: 'Фото вместо иконки', name: 'photo', button: look.photo ? 'Другое фото' : 'Выбрать фото', error: form?.errors.photo }),
+    ],
+    extraActions: [
+      { label: c.hidden ? 'Показать' : 'Скрыть', action: href(`/categories/${c.id}/${c.hidden ? 'show' : 'hide'}`) },
+      ...(look.photo ? [{ label: 'Убрать фото', action: href(`/categories/${c.id}/photo/delete`) }] : []),
+    ],
     deleteAction: c.zenmoneyTitle === null ? href(`/categories/${c.id}/delete`) : undefined,
     cancelHref: href('/settings'),
   });

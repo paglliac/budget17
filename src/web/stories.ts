@@ -2,7 +2,9 @@
 // A new widget gets its stories here; test/storyboard.test.ts fails while any widget has none.
 
 import { Html } from './html.ts';
-import { ENTRY_ICONS } from './icons.ts';
+import { CATEGORY_ICONS, ENTRY_ICONS } from './icons.ts';
+import { CATEGORY_COLORS } from './looks.ts';
+import { categoryColor } from './tones.ts';
 import { accountList, balanceTotal } from './widgets/accounts.ts';
 import {
   avatar,
@@ -16,8 +18,10 @@ import {
   filterTag,
   footnote,
   iconBadge,
+  colorPicker,
   iconPicker,
   inlineForm,
+  photoField,
   listHeading,
   pageIntro,
   progressBar,
@@ -34,6 +38,14 @@ import { categoryMap, flowChart, weekBars } from './widgets/charts.ts';
 import { entryDivider, entryForm, entryList, entryRow } from './widgets/entries.ts';
 import { amountList, categoryList, dayGroup, operationRow } from './widgets/operations.ts';
 import { appShell, grid, rail, screenOnly, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
+
+/** Colours of a category's picker as the settings page gives them. */
+const STORY_COLORS = CATEGORY_COLORS.map((c) => ({ ...c, css: categoryColor(null, c.value) }));
+
+/** A picture with a clear ground, standing in for a photo the user put on a category. */
+const STORY_PHOTO = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><circle cx="20" cy="16" r="7" fill="#fff"/><path d="M8 36c2-8 7-11 12-11s10 3 12 11" fill="#fff"/></svg>',
+)}`;
 
 export interface Story {
   name: string;
@@ -396,6 +408,35 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       width: 520,
       props: { label: 'Иконка', name: 'icon', value: '', icons: ENTRY_ICONS.slice(0, 6), auto: { icon: 'phone', label: 'По названию' } },
     },
+    {
+      name: 'Иконки категорий',
+      width: 520,
+      props: { label: 'Иконка', name: 'icon', value: 'utensils', icons: CATEGORY_ICONS, auto: { icon: 'coffee', label: 'По названию' } },
+    },
+  ]),
+  doc(colorPicker, {
+    group: 'Формы',
+    description:
+      'Выбор цвета кружками. Первый, «A», отправляет пустое значение: цвет остаётся тем, что у записи был бы сам. Последний — круг цветов: в нём выбирают любой другой. Выбранный цвет сразу видно на значке формы.',
+  }, [
+    {
+      name: 'Цвет из набора',
+      width: 520,
+      props: { label: 'Цвет', name: 'color', value: 'orange', colors: STORY_COLORS, auto: { css: 'var(--green)', label: 'Как у категории' } },
+    },
+    {
+      name: 'Свой цвет',
+      width: 520,
+      // Radios of one name are one choice across the page, so the second story has its own.
+      props: { label: 'Цвет', name: 'other-color', value: '#1E90FF', colors: STORY_COLORS, auto: { css: 'var(--green)', label: 'Как у категории' } },
+    },
+  ]),
+  doc(photoField, {
+    group: 'Формы',
+    description: 'Фото с устройства. Страница уменьшает его до маленького квадрата, сразу показывает на значке формы и отправляет вместе с формой.',
+  }, [
+    { name: 'Без фото', width: 520, props: { label: 'Фото вместо иконки', name: 'photo', button: 'Выбрать фото' } },
+    { name: 'С ошибкой', width: 520, props: { label: 'Фото вместо иконки', name: 'photo', button: 'Другое фото', error: 'Нужна картинка JPEG или PNG' } },
   ]),
 
   doc(statCard, { group: 'Карточки', description: 'Одна цифра месяца и полоска прогресса.' }, [
@@ -759,6 +800,11 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       name: 'Доход',
       width: 520,
       props: { title: 'Зарплата', details: 'аванс 20-го, остальное 5-го · через 15 дней', icon: 'briefcase', color: 'var(--teal)', amount: 200_000, symbol: '₽', href: '#' },
+    },
+    {
+      name: 'Категория с фото',
+      width: 520,
+      props: { title: 'Савва', details: 'своя · 4 траты за три месяца', icon: 'baby', color: 'var(--orange)', photo: STORY_PHOTO, href: '#' },
     },
     {
       name: 'Покупка с действием-значком',

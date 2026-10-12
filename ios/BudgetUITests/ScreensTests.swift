@@ -160,6 +160,16 @@ final class ScreensTests: XCTestCase {
         pill("Категории").tap()
         sleep(1)
         shot("categories")
+        let category = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "category-")).firstMatch
+        if category.waitForExistence(timeout: 5) {
+            category.tap()
+            if app.buttons["form-save"].waitForExistence(timeout: 5) {
+                shot("category")
+                app.swipeUp()
+                shot("category-colors")
+                app.buttons["Отмена"].firstMatch.tap()
+            }
+        }
         app.buttons["Настройки"].tap()
         if sheet("settings").waitForExistence(timeout: 5) {
             sleep(1)
