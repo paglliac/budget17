@@ -608,11 +608,14 @@ struct CategoriesScreen: Decodable {
     }
 }
 
-/// The day a week begins on, which posts to /api/budget/week-start/:day.
+/// The day a week begins on, which posts to /api/budget/week-start/:day, and round figures on the main page, which post
+/// to /api/budget/round-figures/on or /off.
 struct BudgetSettingsScreen: Decodable {
     let symbol: String
     /// 0 for Monday to 6 for Sunday.
     let weekStart: Int
+    /// The main page shows its figures to the hundred; nil from a server that cannot.
+    let roundFigures: Bool?
     /// The days to pick from, Monday first.
     let weekdays: [Weekday]
     /// What a week allows unless it has an amount of its own.

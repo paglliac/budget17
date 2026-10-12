@@ -157,6 +157,29 @@ describe('api', () => {
     assert.deepEqual([past.home.free.label, past.home.spent], ['Итог недели', { label: 'Потрачено за неделю', amount: 30_000 }]);
   });
 
+  it('rounds the figures on top to the hundred when asked, adding up to what the week allows', () => {
+    const paid = { ...saved(), purchasePayments: new Map([['pyaterochka', 1]]), roundFigures: true };
+    const week = plain(weekScreen(data(), paid, { ...budget, today: '2026-10-05' }));
+
+    // 40 473 spent, 7 527 reserved and 3 000 over make 45 000, and so do 40 500, 7 500 and 3 000.
+    assert.deepEqual(week.home.free, { label: 'Свободно', amount: -3_000, state: 'over', share: 0.067 });
+    assert.deepEqual(week.home.reserved, {
+      label: 'Зарезервировано',
+      amount: 7_500,
+      required: { label: 'обязательное', amount: 7_500 },
+      flexible: { label: 'гибкое', amount: 0 },
+    });
+    assert.deepEqual(week.home.spent, { label: 'Сегодня потрачено', amount: 40_500 });
+    assert.deepEqual([week.total.amount, week.total.parts.map((p: { value: number }) => p.value)], [-3_000, [40_500, 7_500, -3_000]]);
+    assert.deepEqual(week.limit, { amount: 45_000, usual: 45_000 }, 'what the week allows is the user’s own figure');
+    assert.deepEqual(week.days[0].items.map((o: { amount: number }) => o.amount), [473, 40_000], 'expenses keep their amounts');
+    assert.deepEqual(week.plan, plain(weekScreen(data(), { ...paid, roundFigures: false }, { ...budget, today: '2026-10-05' })).plan, 'and so do purchases');
+
+    const later = plain(weekScreen(data(), { ...saved(), roundFigures: true }, { ...budget, today: '2026-10-06' }));
+    assert.deepEqual(later.home.spent, { label: 'Сегодня потрачено', amount: 0 });
+    assert.equal(later.home.free.amount, -3_500, '45 000 − 40 473 − 8 000');
+  });
+
   it('tells how full the week is for the wave on the circle', () => {
     assert.deepEqual(weekLevel(27_000, 45_000), { state: 'enough', share: 0.6 });
     assert.deepEqual(weekLevel(6_500, 45_000), { state: 'enough', share: 0.144 }, 'a day’s share of the week is still enough');
@@ -201,6 +224,32 @@ describe('api', () => {
     const short = plain(monthScreen(data(), saved(), { ...budget, month: '2026-11', incomes: [{ ...rent, params: { amount: 200_000, day: 5 } }] }));
     assert.equal(short.flow.income.note, 'в ноябре');
     assert.deepEqual(short.flow.parts.at(-1), { label: 'Не хватает', amount: 200_000 - 45_000 - 4 * 45_000 - 100_000, share: -125_000 / 200_000 });
+  });
+
+  it('rounds the month to the hundred when asked: its income with the parts, its weeks and its extras', () => {
+    const income = { id: 1, title: 'Зарплата', model: 'fixed' as const, params: { amount: 456_789, day: 5 } };
+    const phone = regular({ id: 8, title: 'Связь', amount: 649.9, day: 10 });
+    const round = { ...saved([['pyaterochka', 'extra']]), regular: [...saved().regular, phone], roundFigures: true };
+    const month = plain(monthScreen(data(), round, { ...budget, incomes: [income] }));
+
+    assert.deepEqual(month.flow.income, { label: 'Доход', amount: 456_800, note: 'в этом месяце' });
+    assert.deepEqual(
+      month.flow.parts.map((p: { label: string; amount: number }) => [p.label, p.amount]),
+      [
+        ['Обязательные расходы', 45_700],
+        ['Недельные бюджеты', 225_000],
+        ['Доп. бюджет', 100_000],
+        ['В накопления', 86_100],
+      ],
+      '45 649,90 rounds up and 86 139,10 down, so the parts still make the income',
+    );
+    assert.equal(month.flow.parts[0].share, 45_700 / 456_800);
+    assert.deepEqual([month.total.amount, month.total.parts.map((p: { value: number }) => p.value)], [79_500, [500, 20_000, 79_500]]);
+    assert.deepEqual(month.spending[0].items.map((o: { amount: number }) => o.amount), [473]);
+    assert.equal(month.total.note, 'осталось из 100 000 ₽ в октябре');
+
+    const weeks = plain(monthScreen(data(), { ...saved(), roundFigures: true }, budget)).weeks;
+    assert.deepEqual([weeks[1].details, weeks[1].amount], ['идёт · потрачено 40 500 ₽ · перерасход', 3_500]);
   });
 
   it('opens an expense with what is known of it and the choices to mark it', () => {
@@ -453,6 +502,8 @@ describe('api', () => {
       { value: 2, label: 'Среда' },
     ]);
     assert.equal(screen.limit, 45_000);
+    assert.equal(screen.roundFigures, false);
+    assert.equal(plain(budgetSettingsScreen(data(), { weekStart: 0, roundFigures: true })).roundFigures, true);
   });
 
   it('gives categories with the hidden ones apart, and the income ones', () => {

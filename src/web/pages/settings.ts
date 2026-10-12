@@ -1,9 +1,9 @@
-// Settings: the day a week begins on, the user's own name in transfers to themselves, the token Claude signs in by,
-// and the categories expenses and incomes are sorted into. The day is picked in one click and posts to
-// /budget/week-start/:day; the name opens by ?edit=self-payee and posts to /budget/self-payee, the token by
-// ?edit=claude-token to /budget/claude-token, and only its last characters are ever shown (see submitBudget). The
-// amount of one week is changed on the week
-// itself (see dashboard.ts). ZenMoney's categories can be renamed or hidden, and the user adds their own; ZenMoney
+// Settings: the day a week begins on, round figures on the app's main page, the user's own name in transfers to
+// themselves, the token Claude signs in by, and the categories expenses and incomes are sorted into. The day is picked
+// in one click and posts to /budget/week-start/:day, round figures to /budget/round-figures/on or /off; the name opens
+// by ?edit=self-payee and posts to /budget/self-payee, the token by ?edit=claude-token to /budget/claude-token, and
+// only its last characters are ever shown (see submitBudget). The amount of one week is changed on the week itself
+// (see dashboard.ts). ZenMoney's categories can be renamed or hidden, and the user adds their own; ZenMoney
 // itself is never changed. They are listed in the order marking offers them, the most popular first, the incomes'
 // apart; hidden ones go together under «Скрытые». A row opens for editing by ?edit=<category id>, or
 // income-<category id> for an income category, since one ZenMoney category may sort both; forms post to /categories
@@ -50,6 +50,8 @@ export interface CategoryCount {
 /** What the budget is set up with. */
 export interface BudgetSetup {
   weekStart: WeekStart;
+  /** The app's main page shows its figures to the hundred, its parts still adding up to the whole (see roundParts). */
+  roundFigures: boolean;
   /** The user's own name in transfers to their accounts in other banks; the month review sets those apart. */
   selfPayee: string | null;
   symbol: string;
@@ -69,8 +71,8 @@ export interface SettingsData {
   userName: string | null;
 }
 
-export function loadBudgetSetup(data: EntityCollections, saved: Pick<SavedMarking, 'weekStart' | 'selfPayee'>): BudgetSetup {
-  return { weekStart: saved.weekStart, selfPayee: saved.selfPayee ?? null, symbol: mainCurrency(data).symbol };
+export function loadBudgetSetup(data: EntityCollections, saved: Pick<SavedMarking, 'weekStart' | 'selfPayee' | 'roundFigures'>): BudgetSetup {
+  return { weekStart: saved.weekStart, roundFigures: saved.roundFigures ?? false, selfPayee: saved.selfPayee ?? null, symbol: mainCurrency(data).symbol };
 }
 
 export function loadSettingsPage(
@@ -102,7 +104,8 @@ const TOKEN_SHOWN = 4;
 const TOKEN_MAX = 500;
 
 /**
- * Applies a form posted to /budget/week-start/:day, 0 for Monday to 6 for Sunday, to /budget/self-payee with the
+ * Applies a form posted to /budget/week-start/:day, 0 for Monday to 6 for Sunday, to /budget/round-figures/on or
+ * /budget/round-figures/off, to /budget/self-payee with the
  * user's name in `name`, an empty name forgetting it, or to /budget/claude-token with the token in `token`, spaces and
  * line breaks of a paste taken out; an empty one changes nothing, and /budget/claude-token/delete forgets it.
  */
@@ -119,6 +122,11 @@ export function submitBudget(settings: Settings, path: string, body: URLSearchPa
   }
   if (path === '/budget/claude-token/delete') {
     settings.setClaudeToken(null);
+    return { status: 'saved' };
+  }
+  const round = /^\/budget\/round-figures\/(on|off)$/.exec(path);
+  if (round) {
+    settings.setRoundFigures(round[1] === 'on');
     return { status: 'saved' };
   }
   const start = /^\/budget\/week-start\/([0-6])$/.exec(path);
@@ -255,6 +263,7 @@ export function renderSettings(d: SettingsData, href: Href): Html {
           gap: 16,
           items: [
             weekStartChoice(d.budget, href),
+            roundFiguresChoice(d.budget, href),
             entryList({ label: 'Переводы себе', items: [d.edit === 'self-payee' ? selfPayeeForm(d.budget, href) : selfPayeeRow(d.budget, href)] }),
           ],
         }),
@@ -291,6 +300,14 @@ function weekStartChoice(b: BudgetSetup, href: Href): Html {
   return choiceGroup({
     label: 'Неделя начинается',
     choices: WEEKDAYS.map((label, day) => ({ label, current: day === b.weekStart, action: href(`/budget/week-start/${day}`) })),
+  });
+}
+
+/** Round figures on the app's main page, a switch: clicking it again turns it off. */
+function roundFiguresChoice(b: BudgetSetup, href: Href): Html {
+  return choiceGroup({
+    label: 'Главная приложения',
+    choices: [{ label: 'Круглые цифры', detail: 'до сотен', current: b.roundFigures, toggle: true, action: href(`/budget/round-figures/${b.roundFigures ? 'off' : 'on'}`) }],
   });
 }
 

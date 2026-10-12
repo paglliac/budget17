@@ -99,6 +99,16 @@ describe('Settings', () => {
     assert.equal(settings.selfPayee(), null);
   });
 
+  it('turns round figures on and off', () => {
+    using settings = new Settings(':memory:');
+    assert.equal(settings.roundFigures(), false);
+    settings.setRoundFigures(true);
+    settings.setRoundFigures(true);
+    assert.equal(settings.roundFigures(), true);
+    settings.setRoundFigures(false);
+    assert.equal(settings.roundFigures(), false);
+  });
+
   it('sets what a week allows and gives the usual back', () => {
     using settings = new Settings(':memory:');
     settings.setWeekLimit('2026-10-12', 30_000);

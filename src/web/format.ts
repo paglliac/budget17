@@ -27,6 +27,28 @@ export function moneyParts(amount: number, symbol: string): { whole: string; res
   return { whole, rest: `,${fraction} ${symbol}` };
 }
 
+/** What figures are rounded to when the user wants round ones. */
+export const ROUND_STEP = 100;
+
+/**
+ * Parts of a whole, each rounded to the step so that they still add up to the whole rounded: every part goes down to
+ * its step first, then the steps still missing go to the parts that lost the most. So 4 111 spent, 46 700 planned and
+ * −5 811 free of 45 000 become 4 100, 46 700 and −5 800, where rounding each would leave 44 900 in all.
+ */
+export function roundParts(parts: readonly number[], step = ROUND_STEP): number[] {
+  const steps = parts.map((p) => p / step);
+  // A hair over, so that 466.99999 from a sum of kopecks counts as 467 whole steps.
+  const down = steps.map((s) => Math.floor(s + 1e-9));
+  let missing = Math.round(steps.reduce((sum, s) => sum + s, 0)) - down.reduce((sum, d) => sum + d, 0);
+  const byLoss = steps.map((s, i) => ({ i, loss: s - down[i]! })).sort((a, b) => b.loss - a.loss);
+  for (const { i } of byLoss) {
+    if (missing <= 0) break;
+    down[i] = down[i]! + 1;
+    missing -= 1;
+  }
+  return down.map((d) => d * step);
+}
+
 export function percent(ratio: number): string {
   return `${Math.round(ratio * 100)}%`;
 }

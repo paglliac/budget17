@@ -37,6 +37,7 @@ function saved(settings: Settings): SavedMarking {
     categories: settings.categorySetup(),
     weekStart: settings.weekStart(),
     selfPayee: settings.selfPayee(),
+    roundFigures: settings.roundFigures(),
   };
 }
 
@@ -154,6 +155,17 @@ describe('settings page budget', () => {
     assert.ok(!page.includes('Изменить бюджет недели'), 'the amount of a week is changed on the week');
   });
 
+  it('turns round figures on the app’s main page on and off in one click', () => {
+    using settings = new Settings(':memory:');
+    const off = /aria-label="Главная приложения".*?<\/div>/s.exec(render(settings))?.[0] ?? '';
+    assert.ok(off.includes('action="/budget/round-figures/on"') && off.includes('aria-pressed="false"'));
+    assert.ok(off.includes('<span>Круглые цифры <small>до сотен</small></span>'));
+
+    settings.setRoundFigures(true);
+    const on = /aria-label="Главная приложения".*?<\/div>/s.exec(render(settings))?.[0] ?? '';
+    assert.ok(on.includes('action="/budget/round-figures/off"') && on.includes('aria-pressed="true"'));
+  });
+
   it('keeps the user’s own name in transfers to themselves, opening a form to change it', () => {
     using settings = new Settings(':memory:');
     assert.ok(render(settings).includes('<b>Переводы себе</b><small>имя не указано</small>'));
@@ -186,6 +198,16 @@ describe('submitBudget', () => {
     assert.deepEqual(submitBudget(settings, '/budget/week-start/7'), { status: 'missing' });
     assert.deepEqual(submitBudget(settings, '/budget/weeks'), { status: 'missing' });
     assert.equal(settings.weekStart(), 4);
+  });
+
+  it('turns round figures on and off', () => {
+    using settings = new Settings(':memory:');
+
+    assert.deepEqual(submitBudget(settings, '/budget/round-figures/on'), { status: 'saved' });
+    assert.equal(settings.roundFigures(), true);
+    assert.deepEqual(submitBudget(settings, '/budget/round-figures/off'), { status: 'saved' });
+    assert.equal(settings.roundFigures(), false);
+    assert.deepEqual(submitBudget(settings, '/budget/round-figures/yes'), { status: 'missing' });
   });
 
   it('saves the user’s own name trimmed, and forgets it when sent empty', () => {

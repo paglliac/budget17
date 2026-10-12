@@ -140,6 +140,7 @@ function savedMarking(settings: Settings): SavedMarking {
     categories: settings.categorySetup(),
     weekStart: settings.weekStart(),
     selfPayee: settings.selfPayee(),
+    roundFigures: settings.roundFigures(),
     subcategories: settings.subcategorySetup(),
     dismissedHints: settings.dismissedHints(),
   };

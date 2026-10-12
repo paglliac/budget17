@@ -9,9 +9,9 @@ import { addDays, dateOf, daysInMonth, monthOf, shiftMonth, weekday, type MonthS
 import { INCOME_MODEL_IDS, incomeModel, incomeValues, monthlyIncome, type Income, type IncomeModelId } from '../income.ts';
 import { listOperations, type Operation } from '../ledger.ts';
 import { paymentDate, regularTotals, regularValues, type RegularExpense } from '../regular.ts';
-import { adviceTarget, envelopeOf, MONTH_LIMIT, monthOfWeek, WEEK_LIMIT, type Envelope, type PurchaseStatus, type WeekSummary } from '../week.ts';
+import { adviceTarget, envelopeOf, MONTH_LIMIT, monthOfWeek, WEEK_LIMIT, type Envelope, type ExtrasSummary, type PurchaseStatus, type WeekSummary } from '../week.ts';
 import type { DateString, EntityCollections } from '../zenmoney/types.ts';
-import { capitalize, dayHeading, dayMonth, fromToday, money, monthName, plural, timeOn, weekLabel, WEEKDAYS, WEEKDAYS_FULL } from './format.ts';
+import { capitalize, dayHeading, dayMonth, fromToday, money, monthName, plural, ROUND_STEP, roundParts, timeOn, weekLabel, WEEKDAYS, WEEKDAYS_FULL } from './format.ts';
 import { CATEGORY_ICONS, categoryIcon, ENTRY_ICONS, entryIcon, type IconName } from './icons.ts';
 import { recentMonths } from './pages/chrome.ts';
 import {
@@ -199,14 +199,30 @@ export function weekLevel(free: number, limit: number): { state: 'enough' | 'low
 }
 
 /**
+ * A week's figures to the hundred, adding up to what the week allows as the exact ones do: spent, required, flexible and
+ * free. Its expenses and purchases keep their own amounts.
+ */
+function roundWeek(w: WeekSummary): WeekSummary {
+  const [spent, required, flexible, free] = roundParts([w.spent, w.required, w.planned - w.required, w.free]) as [number, number, number, number];
+  return { ...w, spent, required, planned: required + flexible, free };
+}
+
+/** The extras of a month to the hundred, spent, planned and free adding up to the month's extras. */
+function roundExtras(m: ExtrasSummary): ExtrasSummary {
+  const [spent, planned, free] = roundParts([m.spent, m.planned, m.free]) as [number, number, number];
+  return { ...m, spent, planned, free };
+}
+
+/**
  * The top of the week in the app: what is free with how full the week is, what the plan holds by kind, what was spent
  * today (in a past week, in all of it), how many expenses wait for a category, and when the data came from ZenMoney.
+ * With round figures the week comes rounded, and so does today.
  */
-function weekHome(d: ReturnType<typeof loadDashboard>, data: EntityCollections, saved: SavedBudget, options: BudgetOptions) {
+function weekHome(d: ReturnType<typeof loadDashboard>, w: WeekSummary, data: EntityCollections, saved: SavedBudget, options: BudgetOptions) {
   const { today } = options;
-  const w = d.week;
   const phase = w.week > d.current ? 'ahead' : w.week < d.current ? 'past' : 'current';
-  const todaySpent = w.spending.filter((o) => o.date === today && envelopeOf(d.marking, o) === 'week').reduce((sum, o) => sum + o.amount, 0);
+  const spentToday = w.spending.filter((o) => o.date === today && envelopeOf(d.marking, o) === 'week').reduce((sum, o) => sum + o.amount, 0);
+  const todaySpent = saved.roundFigures ? Math.round(spentToday / ROUND_STEP) * ROUND_STEP : spentToday;
   const pending = loadUncategorized(data, saved, { today }).pending.length;
   return {
     free: { label: phase === 'current' ? 'Свободно' : phase === 'past' ? 'Итог недели' : 'Будет свободно', amount: w.free, ...weekLevel(w.free, w.limit) },
@@ -227,12 +243,15 @@ function weekHome(d: ReturnType<typeof loadDashboard>, data: EntityCollections, 
   };
 }
 
-/** The week tab: what is left, the spending by days, the plan and, in the current week, the wishes. */
+/**
+ * The week tab: what is left, the spending by days, the plan and, in the current week, the wishes. With round figures
+ * the totals are to the hundred and still add up to what the week allows; expenses and purchases keep their amounts.
+ */
 export function weekScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { week?: string | null }) {
   const { today } = options;
   const d = loadDashboard(data, saved, { ...options, week: options.week });
   const { current } = d;
-  const w = d.week;
+  const w = saved.roundFigures ? roundWeek(d.week) : d.week;
   const phase = w.week > current ? 'ahead' : w.week < current ? 'past' : 'current';
   const next = addDays(w.week, 7);
   return {
@@ -245,7 +264,7 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
     prev: addDays(w.week, -7),
     next: next <= addDays(current, 7 * PLAN_AHEAD) ? next : null,
     total: weekTotal(w, current, d.symbol),
-    home: weekHome(d, data, saved, options),
+    home: weekHome(d, w, data, saved, options),
     /** What the week allows and the usual amount; another amount posts to /api/week-limits/:week, the usual one back to /api/week-limits/:week/delete. */
     limit: { amount: w.limit, usual: WEEK_LIMIT },
     days: expenseDays(d.marking, w.spending, today),
@@ -267,34 +286,44 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
 /**
  * Where a month's income goes, as the app's month tab draws it: the month's regular payments, the budgets of its weeks,
  * the extras, and what is left over for savings (short of money when it is below zero). The income is what the incomes
- * bring a month, as /income counts it; null without incomes.
+ * bring a month, as /income counts it; null without incomes. With round figures the parts are to the hundred and add up
+ * to the income rounded.
  */
 function monthFlow(d: ReturnType<typeof loadDashboard>, saved: SavedBudget, incomes: Income[], thisMonth: MonthString) {
-  const income = monthlyIncome(incomes);
-  if (income <= 0) return null;
+  const exact = monthlyIncome(incomes);
+  if (exact <= 0) return null;
   const month = d.extras.month;
-  const regular = saved.regular.filter((e) => paymentDate(e, month) !== null).reduce((sum, e) => sum + e.amount, 0);
-  const weeks = d.weeks.reduce((sum, w) => sum + w.limit, 0);
-  const savings = income - regular - weeks - MONTH_LIMIT;
+  const exactParts = [
+    saved.regular.filter((e) => paymentDate(e, month) !== null).reduce((sum, e) => sum + e.amount, 0),
+    d.weeks.reduce((sum, w) => sum + w.limit, 0),
+    MONTH_LIMIT,
+  ];
+  exactParts.push(exact - exactParts.reduce((sum, p) => sum + p, 0));
+  const [regular, weeks, extras, savings] = (saved.roundFigures ? roundParts(exactParts) : exactParts) as [number, number, number, number];
+  const income = regular + weeks + extras + savings;
   const part = (label: string, amount: number) => ({ label, amount, share: amount / income });
   return {
     income: { label: 'Доход', amount: income, note: month === thisMonth ? 'в этом месяце' : `в ${monthName(month, 'prepositional')}` },
     parts: [
       part('Обязательные расходы', regular),
       part('Недельные бюджеты', weeks),
-      part('Доп. бюджет', MONTH_LIMIT),
+      part('Доп. бюджет', extras),
       part(savings >= 0 ? 'В накопления' : 'Не хватает', savings),
     ],
   };
 }
 
-/** The month tab: where its income goes, its weeks, and its extras with what is left of them. */
+/**
+ * The month tab: where its income goes, its weeks, and its extras with what is left of them. With round figures the
+ * totals of each are to the hundred and add up as the exact ones do; purchases and expenses keep their amounts.
+ */
 export function monthScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { month?: string | null; incomes?: Income[] }) {
   const { today } = options;
   const d = loadDashboard(data, saved, { ...options, view: 'month', month: options.month });
   const { current } = d;
   const thisMonth = monthOfWeek(current);
-  const m = d.extras;
+  const round = saved.roundFigures ?? false;
+  const m = round ? roundExtras(d.extras) : d.extras;
   const prev = shiftMonth(m.month, -1);
   const next = shiftMonth(m.month, 1);
   const total: Total = extrasTotal(m, d.symbol);
@@ -306,7 +335,7 @@ export function monthScreen(data: EntityCollections, saved: SavedBudget, options
     prev: { value: prev, label: capitalize(monthName(prev)) },
     next: next <= monthOfWeek(addDays(current, 7 * PLAN_AHEAD)) ? { value: next, label: capitalize(monthName(next)) } : null,
     weeks: d.weeks.map((w) => {
-      const line = monthWeekLine(w, current, d.symbol);
+      const line = monthWeekLine(round ? roundWeek(w) : w, current, d.symbol);
       // The date beside the card says it is a week, so the title is only its days.
       return { ...row({ id: `week-${w.week}`, title: weekLabel(w.week), details: line.details, icon: 'calendar', color: toneColor(line.tone), amount: line.amount }), week: w.week };
     }),
@@ -694,12 +723,16 @@ function nextPayment(data: EntityCollections, saved: SavedMarking, today: DateSt
   return { title: next.expense.title, amount: next.expense.amount - next.status.covered, date: dayMonth(next.status.date), when: fromToday(next.status.date, today) };
 }
 
-/** The day a week begins on, to pick from the days Monday first; it posts to /api/budget/week-start/:day. */
-export function budgetSettingsScreen(data: EntityCollections, saved: Pick<SavedMarking, 'weekStart'>) {
+/**
+ * The day a week begins on, to pick from the days Monday first; it posts to /api/budget/week-start/:day. Round figures
+ * on the main page post to /api/budget/round-figures/on or /off.
+ */
+export function budgetSettingsScreen(data: EntityCollections, saved: Pick<SavedMarking, 'weekStart' | 'roundFigures'>) {
   const b = loadBudgetSetup(data, saved);
   return {
     symbol: b.symbol,
     weekStart: b.weekStart,
+    roundFigures: b.roundFigures,
     weekdays: WEEKDAYS_FULL.map((day, value) => ({ value, label: capitalize(day) })),
     limit: WEEK_LIMIT,
   };

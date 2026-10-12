@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { pageDocument } from '../src/web/document.ts';
 import { appRail, createHref } from '../src/web/pages/chrome.ts';
-import { daysLeft, money, moneyParts, monthName, plural } from '../src/web/format.ts';
+import { daysLeft, money, moneyParts, monthName, plural, roundParts } from '../src/web/format.ts';
 import { html, raw } from '../src/web/html.ts';
 import { rail } from '../src/web/widgets/shell.ts';
 
@@ -33,6 +33,18 @@ describe('format', () => {
   it('splits kopecks off a total', () => {
     assert.deepEqual(moneyParts(606472.4, '₽'), { whole: '606 472', rest: ',40 ₽' });
     assert.deepEqual(moneyParts(-5, '₽'), { whole: '−5', rest: ',00 ₽' });
+  });
+
+  it('rounds parts to the hundred so that they add up to the whole rounded', () => {
+    assert.deepEqual(roundParts([4_111, 0, 46_700, -5_811]), [4_100, 0, 46_700, -5_800]);
+    assert.deepEqual(roundParts([45_246.01, 22_000, -22_246.01]), [45_200, 22_000, -22_200]);
+    // Each rounded alone they would make 44 900 and 45 100: the steps go to the parts that lost the most.
+    assert.deepEqual(roundParts([15_040, 15_040, 14_920]), [15_100, 15_000, 14_900]);
+    assert.deepEqual(roundParts([15_060, 15_060, 14_880]), [15_100, 15_000, 14_900]);
+    assert.deepEqual(roundParts([45_649.9, 225_000, 100_000, 86_139.1]), [45_700, 225_000, 100_000, 86_100]);
+    assert.deepEqual(roundParts([0.1 + 0.2, 4_499.7]), [0, 4_500]);
+    assert.deepEqual(roundParts([473]), [500]);
+    assert.deepEqual(roundParts([1_234], 1_000), [1_000]);
   });
 
   it('picks Russian plural forms', () => {

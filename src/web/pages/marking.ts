@@ -43,6 +43,8 @@ export interface SavedMarking {
   weekStart: WeekStart;
   /** The user's own name as banks write it in transfers to their accounts in other banks, when they gave it. */
   selfPayee?: string | null;
+  /** The app's main page shows its figures to the hundred; off when not given. */
+  roundFigures?: boolean;
   /** How the user split categories; none when not given. */
   subcategories?: SubcategorySetup;
   /** Suggestions of the month review the user turned down. */

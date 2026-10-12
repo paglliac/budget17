@@ -151,8 +151,8 @@ const SCHEMA = `
   ) STRICT;
 
   -- Single values the user picked, such as week_start, the day a week begins on (0 for Monday), self_payee, the
-  -- user's own name as banks write it in transfers to their accounts in other banks, or claude_token, the token Claude
-  -- signs in by on the user's subscription.
+  -- user's own name as banks write it in transfers to their accounts in other banks, claude_token, the token Claude
+  -- signs in by on the user's subscription, or round_figures, 1 when the app's main page shows round figures.
   CREATE TABLE IF NOT EXISTS preference (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -313,6 +313,16 @@ export class Settings {
   setSelfPayee(name: string | null): void {
     if (name === null) this.#db.prepare("DELETE FROM preference WHERE key = 'self_payee'").run();
     else this.#db.prepare("INSERT INTO preference (key, value) VALUES ('self_payee', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(name);
+  }
+
+  /** Whether the app's main page shows its figures to the hundred; off unless the user turned it on. */
+  roundFigures(): boolean {
+    return this.#db.prepare("SELECT value FROM preference WHERE key = 'round_figures'").get()?.value === '1';
+  }
+
+  setRoundFigures(on: boolean): void {
+    if (on) this.#db.prepare("INSERT INTO preference (key, value) VALUES ('round_figures', '1') ON CONFLICT (key) DO UPDATE SET value = excluded.value").run();
+    else this.#db.prepare("DELETE FROM preference WHERE key = 'round_figures'").run();
   }
 
   /** The token Claude signs in by on the user's subscription, from `claude setup-token`; null when none is set. */
