@@ -1,21 +1,26 @@
 import SwiftUI
 
-/// The main tab: the week or the month, as «Неделя» and «Месяц» switch them, each stepping back and forth.
+/// The main tab: the week or the month, as «Неделя» and «Месяц» switch them, each stepping back and forth. A return
+/// brings back the main page: the current week with nothing opened over it.
 struct BudgetView: View {
     enum Mode: Hashable { case week, month }
 
     /// Opens the expenses that wait for a category, among the operations.
     let openPending: () -> Void
+    /// Counts the returns to the main page.
+    let returns: Int
     @State private var mode = Mode.week
     /// nil is the current week or month.
     @State private var week: String?
     @State private var month: String?
+    /// The pages opened from the week.
+    @State private var path: [HomeRoute] = []
     @State private var sheet: BudgetSheet?
 
     var body: some View {
         Group {
             switch mode {
-            case .week: HomeView(mode: $mode, week: $week, sheet: $sheet, openPending: openPending)
+            case .week: HomeView(mode: $mode, week: $week, path: $path, sheet: $sheet, openPending: openPending)
             case .month: MonthView(mode: $mode, month: $month, sheet: $sheet) { opened in
                 week = opened
                 mode = .week
@@ -23,6 +28,13 @@ struct BudgetView: View {
             }
         }
         .budgetSheets($sheet)
+        .onChange(of: returns) {
+            path = []
+            withAnimation(.snappy) {
+                mode = .week
+                week = nil
+            }
+        }
     }
 }
 

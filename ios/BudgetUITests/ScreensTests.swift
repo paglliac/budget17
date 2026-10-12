@@ -62,7 +62,20 @@ final class ScreensTests: XCTestCase {
         }
         app.swipeUp()
         shot("reserved-more")
-        back()
+        // The open «Главная» brings the main page back from a page opened over it.
+        tab("Главная")
+        XCTAssert(reserved.waitForExistence(timeout: 5), "«Главная» returns to the main page")
+
+        app.buttons["tab-add"].tap()
+        let toExtras = app.buttons["В дополнительные"]
+        if toExtras.waitForExistence(timeout: 5) {
+            shot("add-menu")
+            toExtras.tap()
+            if sheet("purchase-sheet").waitForExistence(timeout: 10) { shot("add-purchase") }
+            app.buttons["Отмена"].tap()
+        } else {
+            XCTFail("the «+» of the tab bar opens its menu")
+        }
 
         // A week just begun has no spending yet, so the expense's sheet waits for a later walk.
         let expense = openWeekSpending()

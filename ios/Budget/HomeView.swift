@@ -14,11 +14,11 @@ enum HomeRoute: Hashable {
 struct HomeView: View {
     @Binding var mode: BudgetView.Mode
     @Binding var week: String?
+    @Binding var path: [HomeRoute]
     @Binding var sheet: BudgetSheet?
     let openPending: () -> Void
     @Environment(Session.self) private var session
     @Environment(\.tabBarHeight) private var tabBarHeight
-    @State private var path: [HomeRoute] = []
     @State private var picking = false
 
     var body: some View {
