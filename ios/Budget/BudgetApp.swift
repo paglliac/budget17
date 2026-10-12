@@ -31,6 +31,8 @@ struct RootView: View {
     @State private var barHeight: CGFloat = 0
     /// Counts the returns to the main page: a tap on the open «Главная» and a link from the week's widget.
     @State private var homeReturns = 0
+    /// The week the plan shows; nil is the current one. The main page's «Зарезервировано» opens the plan on its week.
+    @State private var planWeek: String?
     /// A purchase or a wish added from the «+» of the tab bar.
     @State private var sheet: BudgetSheet?
 
@@ -39,9 +41,9 @@ struct RootView: View {
             LoginView()
         } else {
             ZStack {
-                screen(.home) { BudgetView(openPending: openPending, returns: homeReturns) }
+                screen(.home) { BudgetView(openPending: openPending, openPlan: openPlan, returns: homeReturns) }
                 screen(.operations) { OperationsView(filter: $filter) }
-                screen(.plan) { PlanView() }
+                screen(.plan) { PlanView(week: $planWeek) }
                 screen(.more) { MoreView() }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -76,6 +78,12 @@ struct RootView: View {
     private func openPending() {
         filter = .pending
         tab = .operations
+    }
+
+    /// The plan of a week, from the main page.
+    private func openPlan(_ week: String?) {
+        planWeek = week
+        tab = .plan
     }
 
     private func reselect(_ value: Tab) {

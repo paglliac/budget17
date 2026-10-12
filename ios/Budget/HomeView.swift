@@ -1,22 +1,21 @@
 import SwiftUI
 
-/// Where the main page goes from its circle, its days and its footer.
+/// Where the main page goes from its days and its footer.
 enum HomeRoute: Hashable {
-    /// What the plan holds: the purchases by kind, the regular payments and the wishes.
-    case reserved
     /// The spending of the week, or of one day of it.
     case spending(String?)
 }
 
 /// The main page, the week: the days of the week, a large circle with what is free on its lilac lens and what is
 /// reserved beside it, then what was spent today and how many expenses wait for a category. It fits the screen: the
-/// reserved part opens the plan, and a day or today's spending opens the spending.
+/// reserved part opens the plan tab on the shown week, and a day or today's spending opens the spending.
 struct HomeView: View {
     @Binding var mode: BudgetView.Mode
     @Binding var week: String?
     @Binding var path: [HomeRoute]
     @Binding var sheet: BudgetSheet?
     let openPending: () -> Void
+    let openPlan: (String?) -> Void
     @Environment(Session.self) private var session
     @Environment(\.tabBarHeight) private var tabBarHeight
     @State private var picking = false
@@ -33,7 +32,6 @@ struct HomeView: View {
             .hiddenNavigationBar()
             .navigationDestination(for: HomeRoute.self) { route in
                 switch route {
-                case .reserved: ReservedView(week: week, sheet: $sheet)
                 case .spending(let day): WeekSpendingView(week: week, day: day, sheet: $sheet)
                 }
             }
@@ -58,7 +56,7 @@ struct HomeView: View {
                     Spacer(minLength: 8)
                     HomeHero(home: s.home, limit: s.limit, symbol: s.symbol, editLimit: {
                         sheet = .weekLimit(WeekLimitDraft(week: s.week, title: s.title, limit: s.limit, symbol: s.symbol))
-                    }, openReserved: { path.append(.reserved) })
+                    }, openReserved: { openPlan(week) })
                     .padding(.top, 16)
                     .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { drag in step(drag, s) })
                     Spacer(minLength: 8)
@@ -369,27 +367,6 @@ struct WeekSpendingView: View {
     }
 }
 
-/// The plan of the week opened on the main page, as «Зарезервировано».
-struct ReservedView: View {
-    let week: String?
-    @Binding var sheet: BudgetSheet?
-    @Environment(\.tabBarHeight) private var tabBarHeight
-
-    var body: some View {
-        Screen(path: "week", query: ["week": week]) { (s: WeekScreen) in
-            ScrollView {
-                PlanContent(screen: s, sheet: $sheet)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 24)
-            }
-            .scrollIndicators(.hidden)
-        }
-        .safeAreaPadding(.bottom, tabBarHeight)
-        .background(LilacBackground())
-        .lilacTitle("Зарезервировано")
-    }
-}
-
 /// What a week's plan holds: what is reserved, required and flexible, with the purchases from the week's money, then the
 /// ones from the extras, the regular payments of the week and, in the current week, the wishes. «+» adds a purchase to
 /// the week or to the extras, or a wish.
@@ -526,9 +503,10 @@ struct PlanRow: View {
     }
 }
 
-/// The «План» tab: the plan of a week, stepping back and forth from the current one.
+/// The «План» tab: the plan of a week, stepping back and forth from the current one. The main page's «Зарезервировано»
+/// opens it on the week the main page shows.
 struct PlanView: View {
-    @State private var week: String?
+    @Binding var week: String?
     @State private var sheet: BudgetSheet?
 
     var body: some View {

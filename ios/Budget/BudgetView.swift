@@ -7,6 +7,8 @@ struct BudgetView: View {
 
     /// Opens the expenses that wait for a category, among the operations.
     let openPending: () -> Void
+    /// Opens the plan tab on a week.
+    let openPlan: (String?) -> Void
     /// Counts the returns to the main page.
     let returns: Int
     @State private var mode = Mode.week
@@ -20,7 +22,7 @@ struct BudgetView: View {
     var body: some View {
         Group {
             switch mode {
-            case .week: HomeView(mode: $mode, week: $week, path: $path, sheet: $sheet, openPending: openPending)
+            case .week: HomeView(mode: $mode, week: $week, path: $path, sheet: $sheet, openPending: openPending, openPlan: openPlan)
             case .month: MonthView(mode: $mode, month: $month, sheet: $sheet) { opened in
                 week = opened
                 mode = .week

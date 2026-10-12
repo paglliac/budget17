@@ -38,15 +38,23 @@ final class ScreensTests: XCTestCase {
             XCTAssert(app.buttons["Сейчас"].waitForExistence(timeout: 10), "the week before opens")
             sleep(2)
             shot("home-past")
-            app.buttons["Сейчас"].tap()
+            // The plan opens on the week the main page shows.
+            reserved.tap()
+            XCTAssert(app.buttons["tab-План"].wait(for: \.isSelected, toEqual: true, timeout: 5), "«Зарезервировано» opens the plan tab")
+            sleep(2)
+            shot("plan-past")
+            // Both pages have «Сейчас» now, so the one on screen.
+            pill("Сейчас").tap()
+            tab("Главная")
+            pill("Сейчас").tap()
             sleep(2)
         } else {
             XCTFail("the week picker opens")
         }
 
         reserved.tap()
-        XCTAssert(app.staticTexts["Зарезервировано"].waitForExistence(timeout: 10), "the plan opens")
-        shot("reserved")
+        XCTAssert(app.buttons["tab-План"].wait(for: \.isSelected, toEqual: true, timeout: 5), "«Зарезервировано» opens the plan tab")
+        shot("plan")
         let purchase = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'purchase-'")).firstMatch
         if purchase.waitForExistence(timeout: 5) {
             purchase.tap()
@@ -61,10 +69,9 @@ final class ScreensTests: XCTestCase {
             app.buttons["Отмена"].tap()
         }
         app.swipeUp()
-        shot("reserved-more")
-        // The open «Главная» brings the main page back from a page opened over it.
+        shot("plan-more")
         tab("Главная")
-        XCTAssert(reserved.waitForExistence(timeout: 5), "«Главная» returns to the main page")
+        XCTAssert(reserved.waitForExistence(timeout: 5), "«Главная» shows the main page")
 
         app.buttons["tab-add"].tap()
         let toExtras = app.buttons["В дополнительные"]
@@ -96,7 +103,9 @@ final class ScreensTests: XCTestCase {
                 XCTFail("the expense opens")
             }
         }
-        back()
+        // The open «Главная» brings the main page back from a page opened over it.
+        tab("Главная")
+        XCTAssert(reserved.wait(for: \.isHittable, toEqual: true, timeout: 5), "«Главная» returns to the main page")
 
         app.buttons["Месяц"].firstMatch.tap()
         sleep(2)
@@ -142,12 +151,6 @@ final class ScreensTests: XCTestCase {
             app.buttons["Готово"].tap()
         }
         app.buttons["filter-Все"].tap()
-
-        tab("План")
-        sleep(1)
-        shot("plan")
-        app.swipeUp()
-        shot("plan-more")
 
         tab("Ещё")
         shot("regular")
@@ -307,12 +310,6 @@ final class ScreensTests: XCTestCase {
     /// A sheet or a part of a screen by its identifier.
     private func sheet(_ identifier: String) -> XCUIElement {
         app.descendants(matching: .any)[identifier].firstMatch
-    }
-
-    /// Back from a pushed page of the main page.
-    private func back() {
-        app.navigationBars.buttons.firstMatch.tap()
-        sleep(1)
     }
 
     private func tab(_ title: String) {
