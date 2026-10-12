@@ -100,6 +100,7 @@ describe('api', () => {
       mark: 'week',
       muted: false,
       spending: 'pyaterochka',
+      optional: false,
     });
 
     const [boots, gift, jacket, school] = week.plan;
@@ -216,6 +217,7 @@ describe('api', () => {
       ['week', 'extra', 'outside', 'ignored'],
     );
     assert.equal(spending.envelopes[0].detail, 'Учесть в текущей неделе', 'the app says what each place means');
+    assert.deepEqual(spending.optional, { label: 'Необязательная', current: false });
     assert.equal(spending.hint, null, 'nothing to suggest for a transfer to a person');
     assert.deepEqual(spending.undo, []);
     assert.equal(spending.description, null);
@@ -232,10 +234,34 @@ describe('api', () => {
     assert.equal(week.find((o: { spending: string }) => o.spending === 'pyaterochka').details, 'Продукты · Торт на день рождения');
   });
 
+  it('tells the expenses that could have been done without, beside their chips, and gives them a view of their own and what they cost', () => {
+    const optional = { ...saved([['transfer', 'extra']]), optionalSpending: new Set(['pyaterochka', 'transfer']) };
+    const operations = plain(operationsScreen(data(), optional, { today }));
+
+    assert.deepEqual(operations.kinds.at(-1), { value: 'optional', label: 'Необязательные', count: 2 });
+    assert.equal(operations.totals.optional, 40_473);
+    const [monday] = operations.days;
+    const shop = monday.items.find((o: { id: string }) => o.id === 'pyaterochka');
+    assert.deepEqual([shop.optional, shop.chip], [true, null], 'an ordinary expense of the week still has no chip');
+    assert.deepEqual(monday.items.find((o: { id: string }) => o.id === 'transfer').chip, { label: 'Ждёт разбора', tone: 'red' }, 'the chip stays what it was');
+    assert.equal(monday.items.find((o: { id: string }) => o.id === 'salary').optional, false);
+
+    const view = plain(operationsScreen(data(), optional, { today, kind: 'optional' }));
+    assert.equal(view.kind, 'optional');
+    assert.deepEqual(view.days.flatMap((d: { items: Array<{ id: string }> }) => d.items.map((o) => o.id)), ['pyaterochka', 'transfer']);
+    assert.deepEqual(view.totals, { expense: 40_473, income: 0, optional: 40_473, count: 2 });
+    assert.equal(view.categoriesTitle, 'Необязательные по категориям');
+
+    const week = plain(weekScreen(data(), optional, budget)).days.flatMap((d: { items: unknown[] }) => d.items);
+    assert.equal(week.find((o: { spending: string }) => o.spending === 'pyaterochka').optional, true);
+    assert.deepEqual(spendingScreen(data(), optional, { today, id: 'pyaterochka' })?.optional, { label: 'Необязательная', current: true });
+  });
+
   it('opens an expense that does not count, and nothing that is neither an expense nor an income', () => {
     const ignored = spendingScreen(data(), saved([['transfer', 'ignored']]), { today, id: 'transfer' });
     assert.equal(ignored?.envelopes.find((c) => c.current)?.choice, 'ignored');
     assert.equal(ignored?.kind, 'expense');
+    assert.equal(ignored?.optional, null, 'nothing could be saved on what is not counted');
     const moved = { ...data(), transaction: [transaction({ id: 'cash', date: '2026-10-05', income: 1_000, outcome: 1_000, incomeAccount: 'cash' })] };
     assert.equal(spendingScreen(moved, saved(), { today, id: 'cash' }), null, 'a transfer');
     assert.equal(spendingScreen(data(), saved(), { today, id: 'nope' }), null);
@@ -249,6 +275,7 @@ describe('api', () => {
 
     assert.equal(income.kind, 'income');
     assert.equal(income.title, 'ООО Работа');
+    assert.equal(income.optional, null);
     assert.deepEqual(income.payments.choices, []);
     assert.deepEqual(income.payments.others, []);
     assert.deepEqual(
@@ -295,8 +322,8 @@ describe('api', () => {
     assert.equal(filtered.kind, 'income');
     assert.equal(filtered.query, 'работа');
     assert.equal(filtered.days.length, 1);
-    assert.deepEqual(filtered.totals, { expense: 0, income: 150_000, count: 1 });
-    assert.deepEqual(operations.totals, { expense: 70_473, income: 150_000, count: 4 });
+    assert.deepEqual(filtered.totals, { expense: 0, income: 150_000, optional: 0, count: 1 });
+    assert.deepEqual(operations.totals, { expense: 70_473, income: 150_000, optional: 0, count: 4 });
     assert.equal(plain(operationsScreen(data(), saved(), { today, query: 'нет такого' })).empty, 'Ничего не нашлось. Попробуйте другой запрос или уберите фильтры.');
   });
 
@@ -487,7 +514,7 @@ describe('api', () => {
     assert.equal(salary.spending, 'salary');
     assert.deepEqual(salary.chip, { label: 'Не учитывается', tone: 'gray' });
     assert.equal(salary.muted, true);
-    assert.deepEqual(operations.totals, { expense: 70_473, income: 0, count: 4 });
+    assert.deepEqual(operations.totals, { expense: 70_473, income: 0, optional: 0, count: 4 });
     assert.equal(operations.days[0].net, -473 - 40_000);
     assert.equal(operations.categoriesTitle, 'Расходы по категориям');
     assert.equal(plain(operationsScreen(data(), saved(), { today, kind: 'income' })).categoriesTitle, 'Доходы по категориям');

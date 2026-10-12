@@ -150,6 +150,18 @@ final class ScreensTests: XCTestCase {
             shot("categories-income")
             app.buttons["Готово"].tap()
         }
+        // The expenses that could have been done without have a filter once one is marked so.
+        let optional = app.buttons["filter-Необязательные"]
+        if optional.exists {
+            // It is the last of the filters, past the edge of the screen.
+            let from = app.buttons["filter-Доходы"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: -240, dy: 0)))
+            optional.tap()
+            sleep(2)
+            shot("operations-optional")
+            let back = optional.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            back.press(forDuration: 0.05, thenDragTo: back.withOffset(CGVector(dx: 240, dy: 0)))
+        }
         app.buttons["filter-Все"].tap()
 
         tab("Ещё")
@@ -221,11 +233,26 @@ final class ScreensTests: XCTestCase {
         description.typeText("Проверка описания\n")
         sleep(2)
         shot("marking-description")
+        // Could it have been done without: the switch turns at once, and the server keeps it.
+        let optional = app.switches["optional"]
+        // The switch is at the end of its card; its name before it does not turn it.
+        let flip = { optional.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap() }
+        // The expense may be marked so already; the test turns it and back.
+        XCTAssert(optional.waitForExistence(timeout: 5))
+        let before = optional.value as? String == "1" ? "1" : "0"
+        let after = before == "1" ? "0" : "1"
+        flip()
+        XCTAssertEqual(switched(optional, to: after), .completed, "the switch turns")
+        sleep(1)
+        shot("marking-optional")
         app.buttons["Готово"].tap()
         XCTAssert(sheet("marking").waitForNonExistence(timeout: 5))
         expense.tap()
         XCTAssert(description.waitForExistence(timeout: 10))
         XCTAssertEqual(description.value as? String, "Проверка описания", "the description is kept")
+        XCTAssertEqual(switched(optional, to: after), .completed, "the server kept it")
+        flip()
+        XCTAssertEqual(switched(optional, to: before), .completed, "and it turns back")
         // At the end of the text, so the deletes take all of it.
         description.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
         description.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Проверка описания".count) + "\n")
@@ -239,6 +266,11 @@ final class ScreensTests: XCTestCase {
         shot("marking-extra")
         let week = countIn("Неделя")
         XCTAssert(week.wait(for: \.isSelected, toEqual: true, timeout: 5))
+    }
+
+    /// Waits for a switch to show on (1) or off (0).
+    private func switched(_ element: XCUIElement, to value: String) -> XCTWaiter.Result {
+        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: element)], timeout: 5)
     }
 
     /// Picks where the open expense counts, unfolding the places first.

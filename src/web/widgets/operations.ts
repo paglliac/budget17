@@ -13,7 +13,9 @@ import { badge } from './basics.ts';
  * Expenses get a minus, incomes a plus and green, transfers stay quiet; `unsigned` drops the sign in a list of
  * expenses only.
  * With `href` the row links to its marking; with `panel` it is open: the panel shows under the row, `actions` next
- * to it, and the row's link closes it. `mark` is a dot before the amount telling where it counts, named on hover.
+ * to it, and the row's link closes it. `mark` is a dot before the amount telling where it counts, named on hover;
+ * `tint` draws the amount in a tone, named on hover too, for what else the user marked it as, such as an expense that
+ * could have been done without.
  */
 export function operationRow(options: {
   /** Keeps the row in place on the screen when the page comes back, as entries do. */
@@ -32,6 +34,7 @@ export function operationRow(options: {
   comment?: string;
   /** The bank has not settled it yet. */
   hold?: boolean;
+  tint?: { label: string; tone: Tone };
   /** Quieter, for an operation that counts nowhere, such as cash only taken out. */
   muted?: boolean;
   href?: string;
@@ -59,7 +62,9 @@ export function operationRow(options: {
             options.mark.tone ? html` style="--tone:${toneColor(options.mark.tone)}"` : null
           } role="img" title="${options.mark.label}" aria-label="${options.mark.label}"></span>`
         : null}
-      <span class="operation-amount ${kind}">
+      <span class="operation-amount ${kind}${options.tint ? ' tinted' : ''}"${
+        options.tint ? html` style="--tone:${toneColor(options.tint.tone)}" title="${options.tint.label}"` : null
+      }>
         <b>${value}</b>
         ${options.original ? html`<small>${money(options.original.amount, options.original.symbol, { cents: true })}</small>` : null}
       </span>`;

@@ -41,7 +41,7 @@ describe('operations page', () => {
   it('filters by kind, category and text, keeping the other filters in links', () => {
     const expenses = loadOperations(data, sorting, { today, kind: 'expense' });
     assert.deepEqual(expenses.operations.map((o) => o.payee), ['<i>Лавка</i>', 'Киоск']);
-    assert.deepEqual(expenses.counts, { all: 4, expense: 2, income: 1, transfer: 1 });
+    assert.deepEqual(expenses.counts, { all: 4, expense: 2, income: 1, transfer: 1, optional: 0 });
 
     const page = render({ today, month: '2026-10', category: food.id, query: 'лав' });
     assert.ok(page.includes(`href="/operations?category=${food.id}"`), 'removing the text filter keeps the category');
@@ -60,7 +60,7 @@ describe('operations page', () => {
     const sorted = { ...sorting, categorizations: new Map([[data.transaction![2]!.id, { tag: food.id }]]) };
     const operations = loadOperations(tbank, sorted, { today });
 
-    assert.deepEqual(operations.counts, { all: 3, expense: 2, income: 1, transfer: 0 });
+    assert.deepEqual(operations.counts, { all: 3, expense: 2, income: 1, transfer: 0, optional: 0 });
     assert.deepEqual(operations.categories.map((c) => [c.title, c.amount]), [['Продукты', 1_500]]);
     const page = String(renderOperations(operations, createHref()));
     assert.ok(!page.includes('>Переводы<'));
@@ -109,6 +109,37 @@ describe('operations page', () => {
     const again = String(renderOperations(described, createHref()));
     assert.ok(again.includes('name="description" value="На ремонт"'));
     assert.ok(again.includes('На ремонт · Снял в банкомате</small>'), 'the row shows it before the bank’s comment');
+  });
+
+  it('shows the expenses that could have been done without as a view of their own, with what could have been saved and on what', () => {
+    const marked = {
+      ...data,
+      transaction: [
+        ...data.transaction!,
+        transaction({ id: 'cafe', date: '2026-10-04', outcome: 1_797, tag: [food.id], payee: 'Khofenberg' }),
+        transaction({ id: 'taxi', date: '2026-10-04', outcome: 560, payee: 'Яндекс Go' }),
+      ],
+    };
+    const optional = { ...sorting, optionalSpending: new Set(['cafe', 'taxi']) };
+    const all = loadOperations(marked, optional, { today, edit: 'spending-cafe' });
+    const page = String(renderOperations(all, createHref())).replaceAll('\u00a0', ' ');
+
+    assert.equal(all.counts.optional, 2);
+    assert.ok(page.includes('6 операций: потрачено 3 857 ₽, получено 50 000 ₽. На необязательных тратах можно было сэкономить 2 357 ₽.'));
+    assert.ok(page.includes('href="/operations?kind=optional"'), 'a tab of their own');
+    assert.equal(page.split('title="Необязательная"').length - 1, 2, 'their amounts are tinted');
+    assert.ok(page.includes('aria-label="Тип траты"') && page.includes('aria-pressed="true"><svg'), 'switched on on the open one');
+    assert.ok(page.includes('<form method="post" action="/spending/cafe/required"><button class="choice current"'), 'and switched off by the same button');
+
+    const view = loadOperations(marked, optional, { today, kind: 'optional' });
+    const viewPage = String(renderOperations(view, createHref())).replaceAll('\u00a0', ' ');
+    assert.deepEqual(view.operations.map((o) => o.id), ['cafe', 'taxi']);
+    assert.deepEqual(view.categories.map((c) => [c.title, c.amount]), [['Продукты', 1_797], ['Без категории', 560]]);
+    assert.ok(viewPage.includes('2 необязательные траты на 2 357 ₽: столько можно было сэкономить.'));
+    assert.ok(viewPage.includes('Необязательные по категориям'));
+
+    assert.ok(!render({ today }).includes('kind=optional'), 'no tab until an expense is marked');
+    assert.ok(render({ today, kind: 'optional' }).includes('В октябре необязательных трат нет'));
   });
 
   it('opens an income in place with the income categories and whether it counts, and nothing to pay', () => {

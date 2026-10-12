@@ -68,6 +68,19 @@ describe('submitMarking', () => {
     assert.deepEqual([...settings.spendingMarks()], [], 'a linked payment counts again');
   });
 
+  it('says an expense could have been done without, and takes it back, keeping where it counts', () => {
+    using settings = new Settings(':memory:');
+    settings.markSpending('kiosk', 'extra');
+
+    assert.deepEqual(submitMarking(settings, data, '/spending/kiosk/optional', form()), { status: 'saved' });
+    assert.deepEqual(submitMarking(settings, data, '/spending/rent/optional', form()), { status: 'saved' });
+    assert.deepEqual([...settings.optionalSpending()], ['kiosk', 'rent']);
+    assert.deepEqual([...settings.spendingMarks()], [['kiosk', 'extra']]);
+
+    assert.deepEqual(submitMarking(settings, data, '/spending/rent/required', form()), { status: 'saved' });
+    assert.deepEqual([...settings.optionalSpending()], ['kiosk']);
+  });
+
   it('gives an expense a description in one line, and takes it away with an empty one', () => {
     using settings = new Settings(':memory:');
 
@@ -107,9 +120,11 @@ describe('submitMarking', () => {
     const rent = settings.addRegularExpense(regularInput({ title: 'Мастерская аренда', amount: 40_000, day: 10 }));
     const kids = settings.addOwnCategory('Дети');
 
-    for (const choice of ['tag-cafe', `tag-${kids.id}`, 'week', 'extra', 'outside', 'unlink', `regular-${rent.id}`]) {
+    for (const choice of ['tag-cafe', `tag-${kids.id}`, 'week', 'extra', 'outside', 'unlink', `regular-${rent.id}`, 'optional', 'required']) {
       assert.deepEqual(submitMarking(settings, data, `/spending/refund/${choice}`, form()), { status: 'missing' }, choice);
     }
+    assert.deepEqual(submitMarking(settings, data, '/spending/move/optional', form()), { status: 'missing' });
+    assert.deepEqual([...settings.optionalSpending()], []);
     assert.deepEqual(submitMarking(settings, data, '/spending/kiosk/counted', form()), { status: 'missing' }, 'an expense counts in an envelope');
     assert.deepEqual(submitMarking(settings, data, '/spending/move/ignored', form()), { status: 'missing' });
     assert.deepEqual([...settings.categorizations()], []);

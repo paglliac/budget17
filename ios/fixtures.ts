@@ -49,6 +49,7 @@ const saved = (): SavedBudget => ({
   purchases: settings.purchases(),
   marks: settings.spendingMarks(),
   descriptions: settings.spendingDescriptions(),
+  optionalSpending: settings.optionalSpending(),
   categories: settings.categorySetup(),
   weekStart: settings.weekStart(),
   weekLimits: settings.weekLimits(),
@@ -56,11 +57,13 @@ const saved = (): SavedBudget => ({
 });
 const budget = { today, source: 'demo' as const, canSync: false };
 
-// One expense of the week pays the groceries, another moves to the extras, so their rows and choices show up.
+// One expense of the week pays the groceries, another moves to the extras and could have been done without, so their
+// rows and choices show up.
 const [paying, moved] = weekScreen(data, saved(), budget).days.flatMap((d) => d.items);
 if (!paying || !moved) throw new Error('В демо-данных у недели нет трат');
 settings.linkPurchase(paying.spending, groceries.id);
 settings.markSpending(moved.spending, 'extra');
+settings.markOptional(moved.spending, true);
 // An income opens to be marked too, with its categories and whether it counts.
 const income = operationsScreen(data, saved(), { today, kind: 'income' }).days.flatMap((d) => d.items)[0];
 if (!income?.spending) throw new Error('В демо-данных нет доходов');
@@ -76,6 +79,7 @@ const screens: Record<string, unknown> = {
   'spending-income': spendingScreen(data, saved(), { today, id: income.spending }),
   operations: operationsScreen(data, saved(), { today }),
   'operations-income': operationsScreen(data, saved(), { today, kind: 'income' }),
+  'operations-optional': operationsScreen(data, saved(), { today, kind: 'optional' }),
   uncategorized: uncategorizedScreen(data, saved(), { today }),
   regular: regularScreen(data, saved(), { today }),
   income: incomeScreen(data, settings.incomes(), { today }),

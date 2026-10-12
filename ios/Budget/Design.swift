@@ -541,6 +541,7 @@ struct LilacFigures: View {
         var sign = false
         var color: Color = .primary
         var note: String?
+        var noteColor: Color = Lilac.muted
     }
 
     let items: [Item]
@@ -558,7 +559,7 @@ struct LilacFigures: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
                     Text(item.label).font(.subheadline).foregroundStyle(Lilac.muted)
-                    if let note = item.note { Text(note).font(.footnote).foregroundStyle(Lilac.muted) }
+                    if let note = item.note { Text(note).font(.footnote).foregroundStyle(item.noteColor) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

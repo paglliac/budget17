@@ -136,6 +136,7 @@ function savedMarking(settings: Settings): SavedMarking {
     purchases: settings.purchases(),
     marks: settings.spendingMarks(),
     descriptions: settings.spendingDescriptions(),
+    optionalSpending: settings.optionalSpending(),
     categories: settings.categorySetup(),
     weekStart: settings.weekStart(),
     selfPayee: settings.selfPayee(),

@@ -42,6 +42,8 @@ export function entryRow(options: {
   panel?: Content;
   /** Without a tone the dot is an empty ring, for an amount that goes nowhere in particular. */
   mark?: { label: string; tone?: Tone };
+  /** The amount in a tone, named on hover, for what else the user marked it as, such as an expense that could have been done without. */
+  tint?: { label: string; tone: Tone };
 }): Html {
   const open = options.panel !== undefined;
   const actions = options.actions ?? [];
@@ -71,7 +73,11 @@ export function entryRow(options: {
               options.mark.tone ? html` style="--tone:${toneColor(options.mark.tone)}"` : null
             } role="img" title="${options.mark.label}" aria-label="${options.mark.label}"></span>`
           : null}
-        ${options.amount === undefined ? null : html`<b class="entry-amount">${money(options.amount, options.symbol ?? '')}</b>`}
+        ${options.amount === undefined
+          ? null
+          : options.tint
+            ? html`<b class="entry-amount tinted" style="--tone:${toneColor(options.tint.tone)}" title="${options.tint.label}">${money(options.amount, options.symbol ?? '')}</b>`
+            : html`<b class="entry-amount">${money(options.amount, options.symbol ?? '')}</b>`}
         ${options.href ? html`<span class="entry-edit">${icon(open ? 'x' : 'pencil', 14)}</span>` : null}
       </div>
       ${textActions.length > 0

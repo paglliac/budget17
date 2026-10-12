@@ -240,6 +240,7 @@ a { color: inherit; text-decoration: none; }
 .operation-amount { display: grid; justify-items: end; flex: none; font-variant-numeric: tabular-nums; }
 .operation-amount b { font-weight: 500; white-space: nowrap; }
 .operation-amount small { font-size: 11px; color: var(--muted); }
+.operation-amount.tinted b, .entry-amount.tinted { color: var(--tone); }
 .operation-amount.income b { color: var(--green); }
 .operation-amount.transfer b { color: var(--muted); }
 
@@ -321,6 +322,7 @@ button.choice:hover { border-color: var(--soft); color: var(--ink); }
 .choice.suggested { border-color: color-mix(in srgb, var(--violet) 45%, white); background: color-mix(in srgb, var(--violet) 7%, white); }
 .choice.suggested .icon { color: var(--violet); }
 .choice.current { border-color: var(--ink); background: var(--ink); color: #fff; }
+button.choice.current:hover { border-color: var(--ink); color: #fff; opacity: .85; }
 .choice.current small { color: rgb(255 255 255 / .65); }
 .choices-empty { padding: 6px 2px; font-size: 12px; color: var(--muted); }
 .choices-other { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }

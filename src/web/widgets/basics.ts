@@ -254,6 +254,8 @@ export function choiceGroup(options: {
     /** Where the choice posts; a current choice needs none. */
     action?: string;
     current?: boolean;
+    /** Stays a button when current, as a switch does: clicking it again posts its action, which turns it off. */
+    toggle?: boolean;
     suggested?: boolean;
     /** A dot in this colour, such as the category's. */
     color?: string;
@@ -276,11 +278,11 @@ export function choiceGroup(options: {
   return html`<div class="choices" role="group" aria-label="${options.label}">
     <span class="choices-label">${options.label}</span>
     <span class="choices-list">${options.choices.map((c) =>
-      c.current || !c.action
+      (c.current && !c.toggle) || !c.action
         ? html`<span class="choice${c.current ? ' current' : ''}"${c.current ? html` aria-current="true"` : null}>${inner(c)}</span>`
-        : html`<form method="post" action="${c.action}"><button class="choice${c.suggested ? ' suggested' : ''}" type="submit"${
+        : html`<form method="post" action="${c.action}"><button class="choice${c.current ? ' current' : ''}${c.suggested ? ' suggested' : ''}" type="submit"${
             c.suggested ? html` title="Подсказка"` : null
-          }>${inner(c)}</button></form>`,
+          }${c.toggle ? html` aria-pressed="${c.current ? 'true' : 'false'}"` : null}>${inner(c)}</button></form>`,
     )}${options.choices.length === 0 && options.empty ? html`<span class="choices-empty">${options.empty}</span>` : null}</span>
     ${options.other
       ? html`<form class="choices-other" method="post" action="${options.other.action}">${selectField({

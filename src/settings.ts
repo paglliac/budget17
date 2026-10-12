@@ -82,6 +82,12 @@ const SCHEMA = `
     transaction_id TEXT PRIMARY KEY
   ) STRICT;
 
+  -- ZenMoney expenses the user said could have been done without, to see what could have been saved; the others were
+  -- needed. Only the user marks them: a purchase being flexible says it can move, not that it was not needed.
+  CREATE TABLE IF NOT EXISTS optional_spending (
+    transaction_id TEXT PRIMARY KEY
+  ) STRICT;
+
   -- What the user wrote about ZenMoney expenses and incomes in the app, such as whom a present was for.
   CREATE TABLE IF NOT EXISTS spending_description (
     transaction_id TEXT PRIMARY KEY,
@@ -196,8 +202,8 @@ const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> 
 
 /**
  * What the user sets up in the app itself: regular expenses, incomes, the day a week begins on, what a week allows,
- * the weeks' purchases, wishes, where spending counts, what expenses paid or which category they go into, what the
- * user wrote about them, and the categories themselves with their icons, colours and photos. It lives in its own
+ * the weeks' purchases, wishes, where spending counts, what expenses paid or which category they go into, which could
+ * have been done without, what the user wrote about them, and the categories themselves with their icons, colours and photos. It lives in its own
  * SQLite file, apart from the ZenMoney copy, so make resync never deletes it.
  */
 export class Settings {
@@ -460,6 +466,17 @@ export class Settings {
       if (envelope === 'ignored') this.#db.prepare('INSERT INTO ignored_spending (transaction_id) VALUES (?)').run(transactionId);
       else if (envelope !== 'week') this.#db.prepare('INSERT INTO spending_mark (transaction_id, envelope) VALUES (?, ?)').run(transactionId, envelope);
     });
+  }
+
+  /** Expenses the user said could have been done without, by ZenMoney transaction id. */
+  optionalSpending(): Set<string> {
+    return new Set(this.#db.prepare('SELECT transaction_id FROM optional_spending').all().map((row) => String(row.transaction_id)));
+  }
+
+  /** Says an expense could have been done without, or takes that back. */
+  markOptional(transactionId: string, optional: boolean): void {
+    if (optional) this.#db.prepare('INSERT OR IGNORE INTO optional_spending (transaction_id) VALUES (?)').run(transactionId);
+    else this.#db.prepare('DELETE FROM optional_spending WHERE transaction_id = ?').run(transactionId);
   }
 
   /** Where the user put expenses and incomes: a category or the regular expense they paid, by ZenMoney transaction id. */

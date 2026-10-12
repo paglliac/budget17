@@ -56,6 +56,7 @@ describe('listOperations', () => {
       toAccount: null,
       hold: true,
       ignored: false,
+      optional: false,
     });
   });
 
@@ -261,6 +262,23 @@ describe('listOperations with banks and the user’s sorting', () => {
       listOperations(transactions, october, sorting, { withIgnored: true }).map((o) => [o.id, o.ignored]),
       [['cash', true], ['debt', true], ['shop', false], ['same', false]],
     );
+  });
+
+  it('tells the expenses the user said could have been done without, but not an income or what is not counted at all', () => {
+    const transactions = {
+      ...data,
+      transaction: [
+        transaction({ id: 'cash', created: 3, outcome: 120_000 }),
+        transaction({ id: 'debt', created: 2, income: 22_000 }),
+        transaction({ id: 'cafe', created: 1, outcome: 1_797 }),
+        transaction({ id: 'shop', created: 0, outcome: 473 }),
+      ],
+    };
+    const sorting = { categorizations: new Map(), regular: [], marks: new Map([['cash', 'ignored' as const]]), optionalSpending: new Set(['cash', 'debt', 'cafe']) };
+
+    const operations = listOperations(transactions, october, sorting, { withIgnored: true });
+    assert.deepEqual(operations.map((o) => [o.id, o.optional]), [['cash', false], ['debt', false], ['cafe', true], ['shop', false]]);
+    assert.deepEqual(filterOperations(operations, { optional: true }).map((o) => o.id), ['cafe']);
   });
 
   it('sums expenses by category, largest first', () => {

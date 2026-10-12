@@ -317,7 +317,8 @@ struct WeekSpendingList: View {
                             chip: Self.chip(expense.row.mark),
                             muted: expense.row.muted,
                             first: index == 0,
-                            chevron: false
+                            chevron: false,
+                            amountColor: expense.optional ? Palette.optional : .primary
                         )
                     }
                     .buttonStyle(.card)

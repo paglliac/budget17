@@ -42,6 +42,8 @@ export interface Operation {
   hold: boolean;
   /** The user said not to count this expense or income at all; such operations are listed only when asked for. */
   ignored: boolean;
+  /** An expense the user said could have been done without; never one that is not counted at all. */
+  optional: boolean;
 }
 
 /**
@@ -60,6 +62,8 @@ export interface Sorting {
   marks?: ReadonlyMap<string, Envelope>;
   /** What the user wrote about expenses and incomes, by ZenMoney transaction id. */
   descriptions?: ReadonlyMap<string, string>;
+  /** Expenses the user said could have been done without, by ZenMoney transaction id. */
+  optionalSpending?: ReadonlySet<string>;
 }
 
 /** Payments of regular expenses go together under this category when they have no other. */
@@ -153,6 +157,7 @@ export function listOperations(
       toAccount,
       hold: Boolean(t.hold),
       ignored,
+      optional: kind === 'expense' && !ignored && Boolean(sorting?.optionalSpending?.has(t.id)),
     });
   }
   return operations.sort((a, b) => b.date.localeCompare(a.date) || b.created - a.created);
@@ -169,12 +174,15 @@ export interface OperationFilter {
   category?: TagId | 'none';
   /** Text to find in the payee, comment, description, category or account, in any case. */
   query?: string;
+  /** Only the expenses the user said could have been done without. */
+  optional?: boolean;
 }
 
 export function filterOperations(operations: Operation[], filter: OperationFilter): Operation[] {
   const query = filter.query?.trim().toLocaleLowerCase('ru') ?? '';
   return operations.filter((o) => {
     if (filter.kind && o.kind !== filter.kind) return false;
+    if (filter.optional && !o.optional) return false;
     if (filter.category === 'none' && (o.category !== null || o.kind === 'transfer')) return false;
     if (filter.category && filter.category !== 'none' && o.category?.id !== filter.category) return false;
     if (query) {

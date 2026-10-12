@@ -41,11 +41,7 @@ struct OperationsView: View {
                         if searching { searchField }
                         controls(s).padding(.top, 10)
                         if filter != .pending {
-                            LilacFigures(items: [
-                                .init(label: "потрачено", amount: s.totals.expense),
-                                .init(label: "получено", amount: s.totals.income, sign: true, color: Palette.color("green")),
-                            ], symbol: s.symbol)
-                            .padding(.top, 16)
+                            LilacFigures(items: figures(s), symbol: s.symbol).padding(.top, 16)
                         }
                         LilacFilterChips(items: chips(s), selection: $filter).padding(.top, 16)
                         if filter == .pending {
@@ -122,6 +118,17 @@ struct OperationsView: View {
         }
     }
 
+    /// What the operations spent, with what of it could have been done without, and what they brought; the expenses
+    /// that could have been done without, alone, are what they cost.
+    private func figures(_ s: OperationsScreen) -> [LilacFigures.Item] {
+        if s.kind == "optional" { return [.init(label: "необязательные", amount: s.totals.expense, color: Palette.optional)] }
+        let optional = s.totals.optional.flatMap { $0 >= 0.5 ? "\(Money.text($0, s.symbol)) необязательные" : nil }
+        return [
+            .init(label: "потрачено", amount: s.totals.expense, note: optional, noteColor: Palette.optional),
+            .init(label: "получено", amount: s.totals.income, sign: true, color: Palette.color("green")),
+        ]
+    }
+
     private func chipLabel(_ text: String, systemImage: String, highlighted: Bool = false) -> some View {
         HStack(spacing: 6) {
             Text(text)
@@ -158,7 +165,8 @@ struct OperationsView: View {
 }
 
 /// An operation: whom it went to or came from with what it went for, a minus for an expense and green for an income,
-/// what else the bank said, and a chip when an expense is not an ordinary one of the week.
+/// orange for an expense that could have been done without, what else the bank said, and a chip when an expense is not
+/// an ordinary one of the week.
 struct OperationLine: View {
     let operation: OperationRow
     let symbol: String
@@ -180,7 +188,7 @@ struct OperationLine: View {
                 first: first,
                 chevron: false,
                 signed: operation.kind != "transfer",
-                amountColor: operation.kind == "income" ? Palette.color("green") : .primary
+                amountColor: operation.kind == "income" ? Palette.color("green") : operation.optional ? Palette.optional : .primary
             ) {
                 if !notes.isEmpty {
                     Text(notes.joined(separator: " · ")).font(.caption).foregroundStyle(Lilac.muted).lineLimit(2)
@@ -231,7 +239,7 @@ struct PendingList: View {
                             Button { sheet = .spending(expense.spending) } label: {
                                 LilacRow(marker: .dot(Palette.color(expense.row.color)), title: expense.row.title, details: expense.row.details,
                                          amount: expense.row.amount, symbol: s.symbol, chip: WeekSpendingList.chip(expense.row.mark), first: index == 0,
-                                         chevron: false)
+                                         chevron: false, amountColor: expense.optional ? Palette.optional : .primary)
                             }
                             .buttonStyle(.card)
                         }

@@ -180,6 +180,17 @@ describe('Settings', () => {
     assert.deepEqual([...settings.spendingDescriptions()], [['tx-1', 'Подарок на день рождения']]);
   });
 
+  it('keeps the expenses that could have been done without, and takes one back', () => {
+    using settings = new Settings(':memory:');
+
+    settings.markOptional('tx-1', true);
+    settings.markOptional('tx-2', true);
+    settings.markOptional('tx-1', true);
+    settings.markOptional('tx-2', false);
+    settings.markOptional('tx-3', false);
+    assert.deepEqual([...settings.optionalSpending()], ['tx-1']);
+  });
+
   it('renames and hides ZenMoney categories, and keeps the user’s own', () => {
     using settings = new Settings(':memory:');
 
@@ -362,6 +373,25 @@ describe('Settings', () => {
       assert.equal(settings.purchases()[0]?.kind, 'flexible', 'a purchase from before kinds is flexible');
       settings.updatePurchase(settings.purchases()[0]!.id, { kind: 'required' });
       assert.equal(settings.purchases()[0]?.kind, 'required');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps expenses that could have been done without in a file made before them, keeping its descriptions', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
+    try {
+      const path = join(dir, 'settings.db');
+      {
+        using db = new DatabaseSync(path);
+        db.exec('CREATE TABLE spending_description (transaction_id TEXT PRIMARY KEY, description TEXT NOT NULL) STRICT');
+        db.exec(`INSERT INTO spending_description (transaction_id, description) VALUES ('tx-1', 'Кофе с Машей')`);
+      }
+      using settings = new Settings(path);
+      assert.deepEqual([...settings.optionalSpending()], []);
+      settings.markOptional('tx-1', true);
+      assert.deepEqual([...settings.optionalSpending()], ['tx-1']);
+      assert.deepEqual([...settings.spendingDescriptions()], [['tx-1', 'Кофе с Машей']]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -1,5 +1,6 @@
 // Marking an expense, the same on every page that lists expenses: what it paid (a payment of a regular expense or a
-// purchase planned in a week), its category, which wins over ZenMoney's, and where it counts in the budget, if at all.
+// purchase planned in a week), its category, which wins over ZenMoney's, whether it could have been done without, and
+// where it counts in the budget, if at all.
 // An open expense shows under its row when and how it was paid, then these as choices made in one click, the
 // likeliest payments and the most popular categories first, and what the user wrote about it. An income is marked the
 // same way, only it pays nothing, its categories are the income ones, and it either counts among the incomes or not
@@ -36,6 +37,8 @@ export interface SavedMarking {
   marks: ReadonlyMap<string, Envelope>;
   /** What the user wrote about expenses and incomes, by ZenMoney transaction id. */
   descriptions: ReadonlyMap<string, string>;
+  /** Expenses the user said could have been done without, by ZenMoney transaction id; none when not given. */
+  optionalSpending?: ReadonlySet<string>;
   categories: CategorySetup;
   weekStart: WeekStart;
   /** The user's own name as banks write it in transfers to their accounts in other banks, when they gave it. */
@@ -102,8 +105,9 @@ const ENVELOPES: Envelope[] = ['week', 'extra', 'outside', 'ignored'];
 /**
  * Applies a form posted to /spending/:id/:choice, or to /spending/:id with the choice as `target`. A choice is a
  * category (tag-<id>), the regular expense or purchase the expense paid (regular-<id>, purchase-<id>), unlink,
- * uncategorize, or where it counts (week, extra, outside, ignored for nowhere). A payment counts where what it paid
- * counts, so linking one drops where the expense was moved, and counts it again if it was not counted. The expense and what it is put into must exist.
+ * uncategorize, could have been done without or not (optional, required), or where it counts (week, extra, outside,
+ * ignored for nowhere). A payment counts where what it paid counts, so linking one drops where the expense was moved,
+ * and counts it again if it was not counted. The expense and what it is put into must exist.
  * `description` gives the expense the `description` of the form, and an empty one takes it away. An income takes an
  * income category, uncategorize, counted or ignored, and a description.
  */
@@ -122,6 +126,10 @@ export function submitMarking(settings: Settings, data: EntityCollections, path:
     return { status: 'saved' };
   }
   if (operation === 'income') return markIncome(settings, data, id, choice);
+  if (choice === 'optional' || choice === 'required') {
+    settings.markOptional(id, choice === 'optional');
+    return { status: 'saved' };
+  }
   const envelope = ENVELOPES.find((e) => e === choice);
   if (envelope) {
     settings.markSpending(id, envelope);
@@ -182,6 +190,12 @@ const LIST_WEEKS_BEFORE = 4;
 /** …to this many after it. */
 const LIST_WEEKS_AFTER = 13;
 
+/**
+ * An expense that could have been done without, as the user says, by its name and the colour its amount is drawn in
+ * on rows; an expense was needed unless said otherwise.
+ */
+export const OPTIONAL_MARK: { label: string; tone: Tone } = { label: 'Необязательная', tone: 'orange' };
+
 const ENVELOPE_CHOICE: Record<Envelope, string> = { week: 'Неделя', extra: 'Дополнительные', outside: 'Вне бюджета', ignored: 'Не учитывать' };
 /** Whether an income counts: among the incomes, or not at all. */
 const INCOME_CHOICE = { counted: 'В доходах', ignored: ENVELOPE_CHOICE.ignored };
@@ -220,6 +234,11 @@ export function writtenAbout(o: Pick<Operation, 'description' | 'comment'>): str
   return [o.description, o.comment].filter(Boolean).join(' · ') || null;
 }
 
+/** The colour of the amount of an expense that could have been done without, named on hover. */
+export function markingTint(o: Pick<Operation, 'optional'>): { label: string; tone: Tone } | undefined {
+  return o.optional ? OPTIONAL_MARK : undefined;
+}
+
 /** Where an expense counts, for the mark on its row. */
 export function envelopeMark(m: Pick<Marking, 'marks' | 'purchases'>, o: Operation): { label: string; tone?: Tone } {
   return ENVELOPE_MARK[envelopeOf(m, o)];
@@ -232,6 +251,7 @@ export function markingPanel(m: Marking, o: Operation, href: Href): Html[] {
     facts(m, o),
     o.kind === 'expense' ? paymentGroup(m, o, href, suggestion) : null,
     categoryGroup(m, o, href, suggestion),
+    optionalGroup(o, href),
     envelopeGroup(m, o, href),
     descriptionForm(o, href),
   ].filter((part) => part !== null);
@@ -429,6 +449,21 @@ export function categoryOptions(m: Marking, o: Operation, suggestion: Suggestion
 function categoryGroup(m: Marking, o: Operation, href: Href, suggestion: Suggestion | null): Html {
   const { choices, empty } = categoryOptions(m, o, suggestion);
   return choiceGroup({ label: 'Категория', choices: choices.map((c) => ({ ...c, action: href(`/spending/${o.id}/${c.choice}`) })), empty });
+}
+
+/**
+ * Whether the expense could have been done without, as a switch that is on or off: on posts optional, off required.
+ * An income, or an expense not counted at all, has none: nothing could be saved on it.
+ */
+export function optionalSwitch(o: Operation): { label: string; current: boolean } | null {
+  return o.kind === 'expense' && !o.ignored ? { label: OPTIONAL_MARK.label, current: o.optional } : null;
+}
+
+function optionalGroup(o: Operation, href: Href): Html | null {
+  const option = optionalSwitch(o);
+  if (!option) return null;
+  const action = href(`/spending/${o.id}/${option.current ? 'required' : 'optional'}`);
+  return choiceGroup({ label: 'Тип траты', choices: [{ ...option, action, toggle: true }] });
 }
 
 /**

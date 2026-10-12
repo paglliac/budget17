@@ -76,7 +76,7 @@ import { amountList, dayGroup, operationRow } from '../widgets/operations.ts';
 import { appShell, grid, screenOnly, stack, toolbar, topBar } from '../widgets/shell.ts';
 import { appRail, monthTabs, parseMonth, userName, type Href } from './chrome.ts';
 import { budgetOf, type SavedBudget } from './dashboard.ts';
-import { allExpenses, allIncomes, envelopeMark, loadMarking, markingActions, markingPanel, markingTitle, type Marking } from './marking.ts';
+import { allExpenses, allIncomes, envelopeMark, loadMarking, markingActions, markingTint, markingPanel, markingTitle, type Marking } from './marking.ts';
 import { STATUS_TONE } from './regular.ts';
 
 /** Questions to the assistant, as its chips offer them. */
@@ -403,6 +403,7 @@ function spendRow(page: Page, o: Operation): Html {
     symbol: d.symbol,
     unsigned: true,
     mark: envelopeMark(d.marking, o),
+    tint: markingTint(o),
     href: here({ edit: open ? null : key }),
     panel: open ? markingPanel(d.marking, o, href) : undefined,
     actions: open ? markingActions(d.marking, o, href) : undefined,

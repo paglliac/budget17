@@ -3,8 +3,9 @@ import SwiftUI
 /// An expense opened to mark it. On top what it is: whom it went to, how much and when, what the bank said and what is
 /// suggested. Then what it was for — a category, or the payment of a regular expense or a purchase it made — alone on a
 /// card; a tap on it unfolds all of them as tiles and cards to pick another, and a pick folds them back. While nothing
-/// is picked they are unfolded. Under it what the user wrote about the expense, and at the bottom where it counts: the
-/// place picked alone on a large card, which unfolds the others the same way. Opened from the expenses that wait for a category, it steps through them: «1 из 4». An income
+/// is picked they are unfolded. Under it whether the expense was needed or could have been done without, what the user
+/// wrote about it, and at the bottom where it counts: the place picked alone on a large card, which unfolds the others
+/// the same way. Opened from the expenses that wait for a category, it steps through them: «1 из 4». An income
 /// opens the same way, only it pays nothing, so it takes just a category, and it counts among the incomes or not at all.
 /// Choices post to /api/spending/:id/:choice, the description to /api/spending/:id/description when its field is left.
 struct MarkingSheet: View {
@@ -45,6 +46,7 @@ struct MarkingSheet: View {
                     VStack(alignment: .leading, spacing: 18) {
                         header(s)
                         choice(s)
+                        optional(s)
                         description(s)
                         envelopes(s)
                     }
@@ -336,6 +338,26 @@ struct MarkingSheet: View {
         .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
         .id(title)
         .transition(.asymmetric(insertion: .scale(scale: 0.95).combined(with: .opacity), removal: .opacity))
+    }
+
+    /// Whether the expense could have been done without, as a switch on a card; it shows turned at once.
+    @ViewBuilder
+    private func optional(_ s: SpendingScreen) -> some View {
+        if let option = s.optional {
+            let on = applying == "optional" ? true : applying == "required" ? false : option.current
+            Toggle(isOn: Binding(get: { on }, set: { choose($0 ? "optional" : "required") })) {
+                HStack(spacing: 12) {
+                    Image(systemName: "cart.badge.minus").font(.subheadline).foregroundStyle(on ? Palette.optional : Lilac.muted)
+                    Text(option.label).foregroundStyle(Color.primary)
+                }
+            }
+            .tint(Palette.optional)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Lilac.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
+            .accessibilityIdentifier("optional")
+        }
     }
 
     /// What the user wrote about the expense, in a field that grows to four lines; return or leaving it sends it.

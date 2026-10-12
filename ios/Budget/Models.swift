@@ -82,11 +82,15 @@ private extension KeyedDecodingContainer where Key == Extra {
 struct Expense: Decodable, Hashable, Identifiable {
     let row: Row
     let spending: String
+    /// The user said it could have been done without; a server before this says nothing.
+    let optional: Bool
     var id: String { row.id }
 
     init(from decoder: Decoder) throws {
         row = try Row(from: decoder)
-        spending = try decoder.extra().value("spending")
+        let c = try decoder.extra()
+        spending = try c.value("spending")
+        optional = try c.optional("optional") ?? false
     }
 }
 
@@ -310,6 +314,14 @@ struct SpendingScreen: Decodable, Hashable {
     let categories: Categories
     /// What is suggested, such as Похоже на «Продукты».
     let hint: String?
+    /// Whether the expense could have been done without, as a switch that posts optional or required; nil for an
+    /// income, an expense not counted, or from a server before this.
+    let optional: OptionalSwitch?
+
+    struct OptionalSwitch: Decodable, Hashable {
+        let label: String
+        let current: Bool
+    }
     let envelopes: [Choice]
     let undo: [Choice]
 
@@ -339,6 +351,8 @@ struct OperationRow: Decodable, Hashable, Identifiable {
     let spending: String?
     /// What an expense is when it is not an ordinary one of the week, such as Ждёт разбора.
     let chip: Chip?
+    /// An expense the user said could have been done without; a server before this says nothing.
+    let optional: Bool
     var id: String { row.id }
 
     struct Original: Decodable, Hashable {
@@ -360,6 +374,7 @@ struct OperationRow: Decodable, Hashable, Identifiable {
         original = try c.optional("original")
         spending = try c.optional("spending")
         chip = try c.optional("chip")
+        optional = try c.optional("optional") ?? false
     }
 }
 
@@ -385,16 +400,18 @@ struct OperationsScreen: Decodable {
     let totals: Totals
     let days: [OperationDay]
     let empty: String
-    /// Расходы по категориям, or Доходы по категориям when only incomes are shown.
+    /// Расходы по категориям, Доходы по категориям, or Необязательные по категориям when only those are shown.
     let categoriesTitle: String
     let categories: [CategorySpending]
     /// Expenses of the month that wait for a category.
     let pending: Int
 
-    /// What the operations that pass the filter spent and brought, and how many there are.
+    /// What the operations that pass the filter spent and brought, how many there are, and how much of what they spent
+    /// could have been done without (nil from a server before this).
     struct Totals: Decodable, Hashable {
         let expense: Double
         let income: Double
+        let optional: Double?
         let count: Int
     }
 

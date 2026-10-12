@@ -18,7 +18,7 @@ import { emptyState, footnote, pageIntro, section } from '../widgets/basics.ts';
 import { entryList, entryRow } from '../widgets/entries.ts';
 import { appShell, topBar } from '../widgets/shell.ts';
 import { appRail, monthTabs, parseMonth, userName, type Href } from './chrome.ts';
-import { allExpenses, envelopeMark, loadMarking, markingActions, markingDetails, markingPanel, markingTitle, type Marking, type SavedMarking } from './marking.ts';
+import { allExpenses, envelopeMark, loadMarking, markingActions, markingTint, markingDetails, markingPanel, markingTitle, type Marking, type SavedMarking } from './marking.ts';
 
 export interface UncategorizedData {
   today: DateString;
@@ -142,6 +142,7 @@ function sortedItem({ d, href, here }: Page, o: Operation): Html {
     ...categoryLook(o.category),
     ...(regular ? { icon: entryIcon(regular.icon, regular.title), photo: null } : {}),
     mark: envelopeMark(d.marking, o),
+    tint: markingTint(o),
     amount: o.amount,
     symbol: d.symbol,
     href: open ? here() : here({ edit: key }),

@@ -37,6 +37,7 @@ import {
   loadMarking,
   markingDetails,
   markingTitle,
+  optionalSwitch,
   PAYMENT_WORDS,
   paymentOptions,
   undoChoices,
@@ -45,7 +46,7 @@ import {
   type MarkingChoice,
   type SavedMarking,
 } from './pages/marking.ts';
-import { loadOperations, netOf, operationCategory, operationLine } from './pages/operations.ts';
+import { loadOperations, netOf, operationCategory, operationLine, operationsEmpty } from './pages/operations.ts';
 import { loadRegular, regularLine, regularTotalNote, STATUS_TONE, timeline, type Placed } from './pages/regular.ts';
 import { categoryDetails, loadBudgetSetup, loadSettingsPage } from './pages/settings.ts';
 import { loadUncategorized, suggestedChoice, suggestionName } from './pages/uncategorized.ts';
@@ -72,6 +73,8 @@ export interface Row {
 /** An expense that opens to be marked by its ZenMoney id. */
 export interface ExpenseRow extends Row {
   spending: string;
+  /** The user said it could have been done without. */
+  optional: boolean;
 }
 
 /** A day of a list, under its heading. */
@@ -121,6 +124,7 @@ function expenseRow(m: Pick<Marking, 'marks' | 'purchases'>, o: Operation): Expe
       mark: envelopeOf(m, o),
     }),
     spending: o.id,
+    optional: o.optional,
   };
 }
 
@@ -369,6 +373,11 @@ export function spendingScreen(data: EntityCollections, saved: SavedMarking, opt
     categories: { choices: categories.choices.map(colored), empty: categories.empty },
     /** What the suggestion is, when there is one; its choice is marked as suggested. */
     hint: suggestion ? `Похоже на ${suggestionName(suggestion)}` : null,
+    /**
+     * Whether the expense could have been done without, as a switch: on posts optional, off required. Null for an
+     * income or what is not counted.
+     */
+    optional: optionalSwitch(o),
     envelopes: envelopeOptions(marking, o).map((c) => ({ ...c, detail: hints[c.choice] })),
     undo: undoChoices(marking, o),
   };
@@ -391,7 +400,8 @@ const INCOME_HINTS: Record<string, string> = {
 /**
  * What an expense is in the app's list of operations, as a chip under its amount: waiting for a category, paying a
  * regular expense, in the extras, outside the budget or not counted. An ordinary expense of the week has none, and
- * neither have transfers and incomes, unless an income is not counted.
+ * neither have transfers and incomes, unless an income is not counted. That an expense could have been done without
+ * is told by the colour of its amount instead (`optional`).
  */
 function operationChip(m: Pick<SavedMarking, 'marks' | 'purchases'>, o: Operation): { label: string; tone: Tone } | null {
   if (o.ignored) return { label: 'Не учитывается', tone: 'gray' };
@@ -416,22 +426,25 @@ export function operationsScreen(
     { value: 'expense', label: 'Расходы', count: d.counts.expense },
     { value: 'income', label: 'Доходы', count: d.counts.income },
     // Transfers within one bank are left out, so often there are none to show.
-    ...(d.counts.transfer > 0 || d.filter.kind === 'transfer' ? [{ value: 'transfer', label: 'Переводы', count: d.counts.transfer }] : []),
+    ...(d.counts.transfer > 0 || d.view === 'transfer' ? [{ value: 'transfer', label: 'Переводы', count: d.counts.transfer }] : []),
+    ...(d.counts.optional > 0 || d.view === 'optional' ? [{ value: 'optional', label: 'Необязательные', count: d.counts.optional }] : []),
   ];
-  const filtered = Boolean(d.filter.kind || d.filter.category || d.filter.query);
-  const sum = (kind: Operation['kind']) => d.operations.filter((o) => o.kind === kind && !o.ignored).reduce((total, o) => total + o.amount, 0);
+  const sum = (kept: (o: Operation) => boolean) => d.operations.filter((o) => kept(o) && !o.ignored).reduce((total, o) => total + o.amount, 0);
   return {
     symbol: d.symbol,
     month: d.month,
     months: months(options.today),
     title: `Операции за ${monthName(d.month)}`,
     kinds,
-    kind: d.filter.kind ?? null,
+    kind: d.view,
     category: d.filter.category ?? null,
     categoryTitle: d.categoryTitle,
     query: d.filter.query ?? null,
-    /** What the operations that pass the filter spent and brought, and how many there are. */
-    totals: { expense: sum('expense'), income: sum('income'), count: d.operations.length },
+    /**
+     * What the operations that pass the filter spent and brought, how many there are, and how much of what they spent
+     * could have been done without.
+     */
+    totals: { expense: sum((o) => o.kind === 'expense'), income: sum((o) => o.kind === 'income'), optional: sum((o) => o.optional), count: d.operations.length },
     days: byDay(d.operations, (o) => o.date, options.today).map((day) => ({
       ...day,
       net: day.items.reduce((s, o) => s + netOf(o), 0),
@@ -450,14 +463,13 @@ export function operationsScreen(
         original: o.original ? { amount: o.original.amount, symbol: o.original.instrument.symbol } : null,
         spending: o.kind !== 'transfer' ? o.id : null,
         chip: operationChip(saved, o),
+        optional: o.optional,
       })),
     })),
     /** Expenses of the month that wait for a category, as «Ждут разбора» counts them. */
     pending: loadUncategorized(data, saved, { today: options.today, month: d.month }).pending.length,
-    empty: filtered
-      ? 'Ничего не нашлось. Попробуйте другой запрос или уберите фильтры.'
-      : `В ${monthName(d.month, 'prepositional')} операций нет. Новые появятся после синхронизации ZenMoney.`,
-    /** What the categories are: Расходы по категориям, or Доходы по категориям when only incomes are shown. */
+    empty: operationsEmpty(d),
+    /** What the categories are: Расходы по категориям, Доходы по категориям or Необязательные по категориям. */
     categoriesTitle: d.categoriesTitle,
     categories: d.categories.map((c) => {
       const look = categoryLook(c);
@@ -502,6 +514,7 @@ export function uncategorizedScreen(data: EntityCollections, saved: SavedMarking
         mark: envelopeOf(d.marking, o),
       }),
       spending: o.id,
+      optional: o.optional,
     };
   };
   const month = monthName(d.month, 'prepositional');

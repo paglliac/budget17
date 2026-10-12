@@ -17,6 +17,8 @@ enum Palette {
 
     static let week = color("yellow")
     static let extra = color("violet")
+    /// The amount of an expense that could have been done without.
+    static let optional = color("orange")
 }
 
 extension Color {
