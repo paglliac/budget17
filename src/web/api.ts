@@ -180,8 +180,20 @@ export interface BudgetOptions {
 }
 
 /**
- * The top of the week in the app: what is free, what the plan holds by kind, what was spent today (in a past week, in
- * all of it), how many expenses wait for a category, and when the data came from ZenMoney.
+ * How full a week is, for the wave on the app's circle: «low» when less than one day's share of the week's amount is
+ * left, «empty» at nothing, «over» past the amount. The share is what is left of the amount, or how far past it it
+ * went, from 0 to 1.
+ */
+export function weekLevel(free: number, limit: number): { state: 'enough' | 'low' | 'empty' | 'over'; share: number } {
+  const share = (amount: number) => (limit > 0 ? Math.round(Math.min(amount / limit, 1) * 1000) / 1000 : 1);
+  if (free < -0.5) return { state: 'over', share: share(-free) };
+  if (free < 0.5) return { state: 'empty', share: 0 };
+  return { state: free < limit / 7 ? 'low' : 'enough', share: share(free) };
+}
+
+/**
+ * The top of the week in the app: what is free with how full the week is, what the plan holds by kind, what was spent
+ * today (in a past week, in all of it), how many expenses wait for a category, and when the data came from ZenMoney.
  */
 function weekHome(d: ReturnType<typeof loadDashboard>, data: EntityCollections, saved: SavedBudget, options: BudgetOptions) {
   const { today } = options;
@@ -190,7 +202,7 @@ function weekHome(d: ReturnType<typeof loadDashboard>, data: EntityCollections, 
   const todaySpent = w.spending.filter((o) => o.date === today && envelopeOf(d.marking, o) === 'week').reduce((sum, o) => sum + o.amount, 0);
   const pending = loadUncategorized(data, saved, { today }).pending.length;
   return {
-    free: { label: phase === 'current' ? 'Свободно' : phase === 'past' ? 'Итог недели' : 'Будет свободно', amount: w.free },
+    free: { label: phase === 'current' ? 'Свободно' : phase === 'past' ? 'Итог недели' : 'Будет свободно', amount: w.free, ...weekLevel(w.free, w.limit) },
     reserved: {
       label: 'Зарезервировано',
       amount: w.planned,

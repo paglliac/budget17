@@ -13,6 +13,7 @@ import {
   regularScreen,
   spendingScreen,
   uncategorizedScreen,
+  weekLevel,
   weekScreen,
   widgetScreen,
   withRubleSign,
@@ -137,7 +138,7 @@ describe('api', () => {
     const week = plain(weekScreen(data(), paid, { ...budget, today: '2026-10-05', syncedAt: '2026-10-05T11:42:00.000Z' }));
 
     assert.deepEqual(week.home, {
-      free: { label: 'Свободно', amount: -3_000 },
+      free: { label: 'Свободно', amount: -3_000, state: 'over', share: 0.067 },
       reserved: {
         label: 'Зарезервировано',
         amount: 7_527,
@@ -152,6 +153,16 @@ describe('api', () => {
 
     const past = plain(weekScreen(data(), saved(), { ...budget, week: '2026-09-28' }));
     assert.deepEqual([past.home.free.label, past.home.spent], ['Итог недели', { label: 'Потрачено за неделю', amount: 30_000 }]);
+  });
+
+  it('tells how full the week is for the wave on the circle', () => {
+    assert.deepEqual(weekLevel(27_000, 45_000), { state: 'enough', share: 0.6 });
+    assert.deepEqual(weekLevel(6_500, 45_000), { state: 'enough', share: 0.144 }, 'a day’s share of the week is still enough');
+    assert.deepEqual(weekLevel(3_660, 45_000), { state: 'low', share: 0.081 });
+    assert.deepEqual(weekLevel(0.3, 45_000), { state: 'empty', share: 0 });
+    assert.deepEqual(weekLevel(-16_372, 45_000), { state: 'over', share: 0.364 });
+    assert.deepEqual(weekLevel(-440_341, 45_000), { state: 'over', share: 1 }, 'the wave is full past the whole amount');
+    assert.deepEqual(weekLevel(60_000, 45_000).share, 1);
   });
 
   it('gives the month’s weeks and its extras with where they count', () => {

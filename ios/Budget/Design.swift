@@ -17,12 +17,14 @@ struct LilacAmount: View {
     let symbol: String
     var size: CGFloat = 30
     var weight: Font.Weight = .bold
+    /// nil is red below zero and the text's colour otherwise.
+    var color: Color?
 
     var body: some View {
         Text(Money.text(amount, symbol))
             .font(.system(size: size, weight: weight))
             .monospacedDigit()
-            .foregroundStyle(amount < -0.5 ? Lilac.red : Color.primary)
+            .foregroundStyle(color ?? (amount < -0.5 ? Lilac.red : Color.primary))
             .lineLimit(1)
             .minimumScaleFactor(0.55)
             .contentTransition(.numericText(value: amount))

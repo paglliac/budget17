@@ -176,7 +176,7 @@ struct Figure: Decodable, Hashable {
 /// The top of the week: what is free, what the plan holds by kind, what was spent today (in a past week, in all of
 /// it; nothing in a week ahead), how many expenses wait for a category, and when the server last synced.
 struct WeekHome: Decodable, Hashable {
-    let free: Figure
+    let free: Free
     let reserved: Reserved
     let spent: Figure?
     let pending: Pending
@@ -193,6 +193,16 @@ struct WeekHome: Decodable, Hashable {
     struct Pending: Decodable, Hashable {
         let count: Int
         let label: String
+    }
+
+    /// What is free, with how full the week is for the wave on the circle: «enough», «low» (less than a day's share of
+    /// the week left), «empty» or «over»; the share is what is left of the week's amount, or how far past it, from 0 to
+    /// 1. A server from before the wave sends neither.
+    struct Free: Decodable, Hashable {
+        let label: String
+        let amount: Double
+        let state: String?
+        let share: Double?
     }
 
     var synced: Date? {

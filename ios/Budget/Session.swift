@@ -27,6 +27,27 @@ final class Session {
         server = UserDefaults.standard.string(forKey: Self.serverKey).flatMap(Self.url(from:))
         token = Keychain.read(Keychain.token)
         if let server, Keychain.read(Keychain.server) != server.absoluteString { Keychain.save(server.absoluteString, Keychain.server) }
+        if let server { Self.remember(server, token) }
+    }
+
+    /// Which of the two servers the app is on.
+    var slot: ServerSlot? { server.map(ServerSlot.of) }
+
+    /// The server last signed in to in a slot, with its token; the test one is the Mac's until another is.
+    static func remembered(_ slot: ServerSlot) -> (address: String, token: String)? {
+        let kept = Keychain.read(slot.keychain).split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        if let address = kept.first, !address.isEmpty { return (address, kept.count > 1 ? kept[1] : "") }
+        return slot == .test ? (ServerSlot.mac, "") : nil
+    }
+
+    private static func remember(_ server: URL, _ token: String) {
+        Keychain.save("\(server.absoluteString)\n\(token)", ServerSlot.of(server).keychain)
+    }
+
+    /// Goes over to the other server with what was kept for it, checked first like any other server.
+    func switchTo(_ slot: ServerSlot) async throws {
+        guard let kept = Self.remembered(slot) else { throw APIError.server("Рабочий сервер ещё не подключали.") }
+        try await signIn(address: kept.address, token: kept.token)
     }
 
     var client: APIClient? { server.map { APIClient(base: $0, token: token) } }
@@ -41,6 +62,7 @@ final class Session {
         Keychain.save(client.token, Keychain.token)
         server = url
         self.token = client.token
+        Self.remember(url, client.token)
         notice = nil
         changed()
     }
@@ -127,4 +149,20 @@ final class Session {
         guard let url = URL(string: text), let scheme = url.scheme, ["http", "https"].contains(scheme), url.host() != nil else { return nil }
         return url
     }
+}
+
+/// The two servers the app switches between: the working one on the internet and the test one on the Mac, told apart
+/// by plain http. Each keeps its address and token in the Keychain, so going back and forth needs no typing.
+enum ServerSlot: Hashable {
+    case main
+    case test
+
+    /// The Mac's server of a worktree, the test one until another plain-http server is signed in to.
+    static let mac = "http://MacBook-Pro-kir.local:4318"
+    /// The server on the internet, offered in the form when the working one has not been signed in to on this phone.
+    static let internet = "https://budget.gang.su"
+
+    static func of(_ server: URL) -> ServerSlot { server.scheme == "http" ? .test : .main }
+
+    var keychain: String { self == .main ? "budget.server.main" : "budget.server.test" }
 }
