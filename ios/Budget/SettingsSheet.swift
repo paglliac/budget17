@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Behind the gear of «Ещё»: the day a week begins on, then the server. The day shows what the server sent last for it
-/// at once, and is left out until the server has sent it once. The amount of one week is changed on the week itself.
+/// Behind the gear of «Ещё»: the day a week begins on, the look of the circle on the main page, then the server. The day
+/// shows what the server sent last for it at once, and is left out until the server has sent it once. The amount of one
+/// week is changed on the week itself.
 struct SettingsSheet: View {
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
@@ -11,6 +12,7 @@ struct SettingsSheet: View {
     var body: some View {
         LilacForm(title: "Настройки") {
             if let budget { BudgetSection(screen: budget, error: $error) }
+            HeroSection()
             LilacFieldLabel(text: "Сервер")
             ServerPanel { dismiss() }
         }

@@ -64,21 +64,24 @@ final class ScreensTests: XCTestCase {
         shot("reserved-more")
         back()
 
+        // A week just begun has no spending yet, so the expense's sheet waits for a later walk.
         let expense = openWeekSpending()
-        XCTAssert(expense.waitForExistence(timeout: 10), "the week's spending opens")
+        let spent = expense.waitForExistence(timeout: 10)
         shot("week-spending")
-        expense.tap()
-        if sheet("marking").waitForExistence(timeout: 10) {
-            shot("spending")
-            unfold()
-            shot("spending-unfolded")
-            app.buttons["Платёж"].tap()
-            shot("spending-payment")
-            app.swipeUp()
-            shot("spending-more")
-            app.buttons["Готово"].tap()
-        } else {
-            XCTFail("the expense opens")
+        if spent {
+            expense.tap()
+            if sheet("marking").waitForExistence(timeout: 10) {
+                shot("spending")
+                unfold()
+                shot("spending-unfolded")
+                app.buttons["Платёж"].tap()
+                shot("spending-payment")
+                app.swipeUp()
+                shot("spending-more")
+                app.buttons["Готово"].tap()
+            } else {
+                XCTFail("the expense opens")
+            }
         }
         back()
 
@@ -145,7 +148,23 @@ final class ScreensTests: XCTestCase {
         if sheet("settings").waitForExistence(timeout: 5) {
             sleep(1)
             shot("settings")
-            app.buttons["Готово"].tap()
+            app.swipeUp()
+            shot("settings-server")
+            app.buttons["hero-states"].tap()
+            if sheet("hero-states-sheet").waitForExistence(timeout: 5) {
+                sleep(2)
+                shot("hero-enough")
+                for (state, name) in [("Мало", "low"), ("Ноль", "empty"), ("Перерасход", "over")] {
+                    app.buttons[state].tap()
+                    sleep(2)
+                    shot("hero-\(name)")
+                }
+                app.buttons["Готово"].firstMatch.tap()
+                sleep(1)
+            } else {
+                XCTFail("the circle's states open")
+            }
+            app.buttons["Готово"].firstMatch.tap()
         }
     }
 

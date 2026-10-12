@@ -19,4 +19,8 @@ enum Lilac {
     static let lensTop = Color(light: 0xF5F2FE, dark: 0x3A3170)
     static let lensBottom = Color(light: 0xB4A3F7, dark: 0x5E4BC4)
     static let red = Palette.color("red")
+    /// The wave on the circle: violet while the week has enough, pale when little is left, red past its amount.
+    static let wave = Color(light: 0x8B62F6, dark: 0x7A62F0)
+    static let waveLow = Color(light: 0xD7C5FB, dark: 0x4B3E95)
+    static let waveOver = Color(light: 0xFF5D5A, dark: 0xE5484D)
 }

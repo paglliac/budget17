@@ -64,59 +64,104 @@ struct ServerSheet: View {
     }
 }
 
-/// Where the server is, when it last synced, another server instead of it, and the way out.
+/// The working server or the test one in one tap, where the server is, when it last synced, another server instead of
+/// it, and the way out.
 struct ServerPanel: View {
     /// Called once another server is kept, to close what shows them.
     let switched: () -> Void
     @Environment(Session.self) private var session
     @State private var confirmSignOut = false
     @State private var switching = false
+    /// The server just picked, shown at once while it is checked.
+    @State private var picked: ServerSlot?
+    @State private var error: String?
+    /// What the form of another server starts with: the server the app has, or the working one before it is known.
+    @State private var form = (address: "", token: "")
 
     var body: some View {
-        LilacPanel {
-            LilacPanelLine(title: "Адрес", first: true) {
-                Text(session.server?.absoluteString ?? "").foregroundStyle(Lilac.muted).lineLimit(1).truncationMode(.middle)
-            }
-            if let syncedAt = session.syncedAt {
-                LilacPanelLine(title: "Обновлено") { Text(syncedAt.formatted(.relative(presentation: .named))).foregroundStyle(Lilac.muted) }
-            }
-            Button {
-                Task { await session.sync() }
-            } label: {
-                LilacPanelLine(title: "Обновить из ZenMoney", titleColor: Lilac.accent) {
-                    if session.isSyncing { ProgressView() }
+        VStack(alignment: .leading, spacing: 0) {
+            LilacSegmented(
+                items: [Segment(value: ServerSlot.main, label: "Рабочий"), Segment(value: ServerSlot.test, label: "Тестовый")],
+                selection: Binding(get: { picked ?? session.slot ?? .main }, set: { pick($0) }),
+                width: nil
+            )
+            .disabled(picked != nil)
+            .accessibilityIdentifier("server-slot")
+            .padding(.bottom, 12)
+            LilacPanel {
+                LilacPanelLine(title: "Адрес", first: true) {
+                    if picked != nil {
+                        ProgressView()
+                    } else {
+                        Text(session.server?.absoluteString ?? "").foregroundStyle(Lilac.muted).lineLimit(1).truncationMode(.middle)
+                    }
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(session.isSyncing)
-            Button { switching = true } label: {
-                LilacPanelLine(title: "Сменить сервер", titleColor: Lilac.accent) {
-                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Lilac.muted)
+                if let syncedAt = session.syncedAt {
+                    LilacPanelLine(title: "Обновлено") { Text(syncedAt.formatted(.relative(presentation: .named))).foregroundStyle(Lilac.muted) }
                 }
-                .contentShape(Rectangle())
+                Button {
+                    Task { await session.sync() }
+                } label: {
+                    LilacPanelLine(title: "Обновить из ZenMoney", titleColor: Lilac.accent) {
+                        if session.isSyncing { ProgressView() }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(session.isSyncing)
+                Button { open(session.server?.absoluteString ?? "", session.token) } label: {
+                    LilacPanelLine(title: "Сменить сервер", titleColor: Lilac.accent) {
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Lilac.muted)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-        }
-        LilacPanel {
-            Button { confirmSignOut = true } label: {
-                LilacPanelLine(title: "Выйти", first: true, titleColor: Lilac.red) { EmptyView() }.contentShape(Rectangle())
+            LilacPanel {
+                Button { confirmSignOut = true } label: {
+                    LilacPanelLine(title: "Выйти", first: true, titleColor: Lilac.red) { EmptyView() }.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-        }
-        .padding(.top, 12)
-        .confirmationDialog("Выйти из приложения?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-            Button("Выйти", role: .destructive) { session.signOut() }
-        } message: {
-            Text("Данные останутся на сервере, а сохранённые на телефоне удалятся. Чтобы войти снова, понадобится токен доступа.")
-        }
-        .sheet(isPresented: $switching) {
-            LilacForm(title: "Другой сервер") {
-                ServerForm(action: "Подключить", address: session.server?.absoluteString ?? "", token: session.token) {
-                    switching = false
-                    switched()
+            .padding(.top, 12)
+            .confirmationDialog("Выйти из приложения?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+                Button("Выйти", role: .destructive) { session.signOut() }
+            } message: {
+                Text("Данные останутся на сервере, а сохранённые на телефоне удалятся. Чтобы войти снова, понадобится токен доступа.")
+            }
+            .sheet(isPresented: $switching) {
+                LilacForm(title: "Другой сервер") {
+                    ServerForm(action: "Подключить", address: form.address, token: form.token) {
+                        switching = false
+                        switched()
+                    }
                 }
             }
+            .errorAlert($error)
         }
+    }
+
+    /// Checks the picked server before going over; one that does not answer leaves the app where it was. A working
+    /// server never signed in to is typed in the form.
+    private func pick(_ slot: ServerSlot) {
+        guard slot != session.slot, picked == nil else { return }
+        guard let kept = Session.remembered(slot) else {
+            open(ServerSlot.internet, "")
+            return
+        }
+        picked = slot
+        Task {
+            do {
+                try await session.switchTo(slot)
+            } catch {
+                self.error = "\(kept.address) не отвечает: \(error.localizedDescription)"
+            }
+            picked = nil
+        }
+    }
+
+    private func open(_ address: String, _ token: String) {
+        form = (address, token)
+        switching = true
     }
 }

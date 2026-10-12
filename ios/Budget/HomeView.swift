@@ -56,7 +56,7 @@ struct HomeView: View {
                     LilacDayStrip(start: s.week, today: s.today, active: Set(s.days.map(\.date))) { path.append(.spending($0)) }
                         .padding(.top, 14)
                     Spacer(minLength: 8)
-                    HomeHero(screen: s, editLimit: {
+                    HomeHero(home: s.home, limit: s.limit, symbol: s.symbol, editLimit: {
                         sheet = .weekLimit(WeekLimitDraft(week: s.week, title: s.title, limit: s.limit, symbol: s.symbol))
                     }, openReserved: { path.append(.reserved) })
                     .padding(.top, 16)
@@ -120,24 +120,38 @@ extension PurchaseDraft {
 }
 
 /// The circle of the main page: what is free on its lilac lens, with what the week allows under it to change, and
-/// what is reserved beside it, required and flexible, which opens the plan.
+/// what is reserved beside it, required and flexible, which opens the plan. On the lens a wave shows how full the week
+/// is, and what is free rides above it; the lens as it was before the wave is kept in the settings.
 struct HomeHero: View {
-    let screen: WeekScreen
+    let home: WeekHome
+    let limit: WeekLimit
+    let symbol: String
     let editLimit: () -> Void
     let openReserved: () -> Void
+    @AppStorage(HeroStyle.key) private var style = HeroStyle.wave
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The wave rises from the bottom once the circle shows.
+    @State private var risen = false
+    @State private var freeHeight: CGFloat = 0
 
     var body: some View {
+        let level = style == .wave ? WaveLevel(home.free) : nil
         GeometryReader { geometry in
             let d = min(geometry.size.width, geometry.size.height)
-            let home = screen.home
             ZStack {
                 Circle()
                     .fill(LinearGradient(colors: [Lilac.surface, Lilac.canvas], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .shadow(color: .black.opacity(0.09), radius: 26, y: 16)
                     .shadow(color: .black.opacity(0.03), radius: 2, y: 1)
-                lens(d)
+                if let level {
+                    WaveLens(level: level, height: risen ? level.height : 0, d: d)
+                } else {
+                    lens(d)
+                }
                 HStack(spacing: 0) {
-                    free(home)
+                    free(over: level?.state == "over")
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { freeHeight = $0 }
+                        .offset(y: -lift(d, level))
                         .padding(.leading, d * 0.08)
                         .frame(width: d * 0.49, alignment: .leading)
                     Button(action: openReserved) { reserved(home.reserved) }
@@ -154,6 +168,18 @@ struct HomeHero: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: 400)
+        .animation(.spring(duration: 1.3, bounce: 0.2), value: level)
+        .onAppear {
+            guard !risen else { return }
+            if reduceMotion { risen = true } else { withAnimation(.spring(duration: 1.6, bounce: 0.15).delay(0.15)) { risen = true } }
+        }
+    }
+
+    /// How far what is free rises over the circle's middle to stay above the wave, while it still fits the lens.
+    private func lift(_ d: CGFloat, _ level: WaveLevel?) -> CGFloat {
+        guard let level, risen, freeHeight > 0 else { return 0 }
+        let crest = d * 0.92 - d * 0.84 * level.height - d * WaveLens.amplitude - 12
+        return min(max(d / 2 + freeHeight / 2 - crest, 0), d * 0.11)
     }
 
     /// The lilac lens on the circle's left, deeper towards its rim, cut by the circle.
@@ -174,13 +200,16 @@ struct HomeHero: View {
             .allowsHitTesting(false)
     }
 
-    private func free(_ home: WeekHome) -> some View {
+    /// What is free. Past the week's amount the wave says it: the label goes, and the amount is how far past it, in red.
+    private func free(over: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(home.free.label).font(.callout).foregroundStyle(Color.primary.opacity(0.85))
-            LilacAmount(amount: home.free.amount, symbol: screen.symbol, size: 30)
-            LilacChip(text: "из \(Money.number(screen.limit.amount))", systemImage: "pencil", highlighted: screen.limit.changed, action: editLimit)
+            if !over {
+                Text(home.free.label).font(.callout).foregroundStyle(Color.primary.opacity(0.85))
+            }
+            LilacAmount(amount: over ? -home.free.amount : home.free.amount, symbol: symbol, size: 30, color: over ? Lilac.red : nil)
+            LilacChip(text: "\(over ? "сверх" : "из") \(Money.number(limit.amount))", systemImage: "pencil", highlighted: limit.changed, action: editLimit)
                 .accessibilityIdentifier("week-limit")
-                .accessibilityLabel("Бюджет недели \(Money.text(screen.limit.amount, screen.symbol))")
+                .accessibilityLabel("Бюджет недели \(Money.text(limit.amount, symbol))")
                 .padding(.top, 2)
         }
         .padding(.trailing, 10)
@@ -194,7 +223,7 @@ struct HomeHero: View {
             }
             .lineLimit(1)
             .minimumScaleFactor(0.8)
-            LilacAmount(amount: r.amount, symbol: screen.symbol, size: 27).padding(.top, 4)
+            LilacAmount(amount: r.amount, symbol: symbol, size: 27).padding(.top, 4)
             divider
             part(r.required)
             divider
@@ -206,7 +235,7 @@ struct HomeHero: View {
 
     private func part(_ figure: Figure) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            LilacAmount(amount: figure.amount, symbol: screen.symbol, size: 18, weight: .semibold)
+            LilacAmount(amount: figure.amount, symbol: symbol, size: 18, weight: .semibold)
             Text(figure.label).font(.subheadline).foregroundStyle(Lilac.muted)
         }
     }
