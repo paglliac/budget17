@@ -5,7 +5,9 @@
 // ?week=2026-10-19 and ?month=2026-11, up to a year ahead. Built from widgets only. Entries open by ?edit=purchase-1,
 // wish-1, spending-<ZenMoney id>, or new-purchase and new-wish for the forms folded on the side; an open expense is
 // marked as on every page (see marking.ts). Forms post to /purchases, /wishes and /week-limits (see submitDashboard)
-// and to /spending (see submitMarking), and the server sends the browser back to the page they came from.
+// and to /spending (see submitMarking), and the server sends the browser back to the page they came from. A wish's
+// plan is chosen in the app (see wishes.ts); here a wish says what its plan does, and the money the plan holds shows
+// among the purchases without a form.
 
 import { summarizeBalances } from '../../balances.ts';
 import { addDays, shiftMonth, type MonthString } from '../../dates.ts';

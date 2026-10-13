@@ -49,8 +49,8 @@ export interface Operation {
 }
 
 /**
- * How the user sorted expenses and incomes, the regular expenses and purchases expenses may pay, and how they set up
- * categories.
+ * How the user sorted expenses and incomes, the regular expenses, purchases and wishes expenses may pay, and how they
+ * set up categories.
  */
 export interface Sorting {
   categorizations: ReadonlyMap<string, Categorization>;

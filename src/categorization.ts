@@ -1,5 +1,5 @@
 // Expenses are sorted in the app: into a category when ZenMoney has none for them, or as the payment of a regular
-// expense or of a purchase planned in a week; incomes only into a category. What the user picks is kept by
+// expense, of a purchase planned in a week or of a wish; incomes only into a category. What the user picks is kept by
 // src/settings.ts and applied by listOperations; this module suggests a pick for each expense or income from the picks
 // before it and from the amounts and days of regular expenses, and lists what an expense may have paid.
 

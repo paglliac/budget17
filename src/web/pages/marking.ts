@@ -1,5 +1,5 @@
-// Marking an expense, the same on every page that lists expenses: what it paid (a payment of a regular expense or a
-// purchase planned in a week), its category, which wins over ZenMoney's, whether it could have been done without, and
+// Marking an expense, the same on every page that lists expenses: what it paid (a payment of a regular expense, a
+// purchase planned in a week, or a wish with a plan), its category, which wins over ZenMoney's, whether it could have been done without, and
 // where it counts in the budget, if at all.
 // An open expense shows under its row when and how it was paid, then these as choices made in one click, the
 // likeliest payments and the most popular categories first, and what the user wrote about it. An income is marked the

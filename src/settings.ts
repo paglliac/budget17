@@ -229,7 +229,7 @@ const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> 
 
 /**
  * What the user sets up in the app itself: regular expenses, incomes, the day a week begins on, what a week allows,
- * the weeks' purchases, wishes, where spending counts, what expenses paid or which category they go into, which could
+ * the weeks' purchases, wishes with their days and plans, where spending counts, what expenses paid or bought or which category they go into, which could
  * have been done without, what the user wrote about them, and the categories themselves with their icons, colours and photos. It lives in its own
  * SQLite file, apart from the ZenMoney copy, so make resync never deletes it.
  */

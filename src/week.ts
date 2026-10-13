@@ -1,8 +1,9 @@
 // The budget by weeks: a limit for ordinary spending each week, which the user can change for a week, a limit for
 // extras each month, purchases planned into weeks, and when a wish fits. A week begins on the day the user picked,
 // Monday unless they picked another. Spending from ZenMoney counts towards its week unless it is marked as extras
-// or as outside the budget, or it paid a regular expense or an extra purchase. Spending linked to a purchase takes
-// its amount out of the plan. Pure functions; what the user plans and marks is kept by src/settings.ts.
+// or as outside the budget, or it paid a regular expense, an extra purchase or a wish. Spending linked to a purchase
+// takes its amount out of the plan. The money the plans of wishes hold comes as purchases too (see wish-plans.ts).
+// Pure functions; what the user plans and marks is kept by src/settings.ts.
 
 import { addDays, monthOf, weekday, type MonthString } from './dates.ts';
 import type { Operation } from './ledger.ts';
