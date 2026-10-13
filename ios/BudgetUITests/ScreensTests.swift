@@ -221,6 +221,40 @@ final class ScreensTests: XCTestCase {
         }
     }
 
+    /// The prototype's three looks of all wishes (branch prototype/wish-list): it only opens and closes things.
+    func testWishesPrototype() throws {
+        XCTAssert(app.buttons["reserved"].waitForExistence(timeout: 15))
+        tab("План")
+        app.buttons["A · В плане"].tap()
+        sleep(3)
+        shot("wishes-a")
+        let line = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'wishes-'")).element(boundBy: 1)
+        if line.waitForExistence(timeout: 5) {
+            line.press(forDuration: 1.2)
+            sleep(1)
+            shot("wishes-a-menu")
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.05)).tap()
+            sleep(1)
+        }
+        app.buttons["B · Экран"].tap()
+        sleep(1)
+        shot("wishes-b-plan")
+        app.buttons["open-wishes"].tap()
+        sleep(4)
+        shot("wishes-b")
+        app.swipeUp()
+        shot("wishes-b-more")
+        app.buttons["C · Месяцы"].tap()
+        sleep(2)
+        app.swipeDown()
+        shot("wishes-c")
+        app.swipeUp()
+        shot("wishes-c-more")
+        app.buttons["Готово"].firstMatch.tap()
+        sleep(1)
+        app.buttons["B · Экран"].tap()
+    }
+
     /// Picks two ways for the first wish, the weeks by hand and the extras for the rest, chooses the plan and takes it back.
     /// It changes data, so it runs only against a server with copied databases: TEST_RUNNER_WISHES=1.
     func testWishPlan() throws {

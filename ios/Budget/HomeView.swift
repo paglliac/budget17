@@ -442,6 +442,7 @@ struct PlanContent: View {
     @Binding var sheet: BudgetSheet?
     @Environment(Session.self) private var session
     @State private var error: String?
+    @AppStorage(WishesLook.key) private var look = WishesLook.cards
 
     var body: some View {
         let s = screen
@@ -458,6 +459,8 @@ struct PlanContent: View {
                 share(r.flexible, of: r.amount, s.symbol)
             }
             .padding(.top, 18)
+
+            if look == WishesLook.inPlan { WishesInPlan(sheet: $sheet) }
 
             LilacHeading(title: "Планируемые траты") {
                 Menu {
@@ -481,7 +484,7 @@ struct PlanContent: View {
                 LilacHeading("Регулярные платежи")
                 plan(regular)
             }
-            if let wishes = s.wishes {
+            if look != WishesLook.inPlan, let wishes = s.wishes {
                 LilacHeading(title: "Хочу купить") {
                     LilacRoundButton(systemImage: "plus", label: "Добавить желание") { sheet = .wish(nil) }
                 }
@@ -579,6 +582,8 @@ struct PlanRow: View {
 struct PlanView: View {
     @Binding var week: String?
     @State private var sheet: BudgetSheet?
+    @State private var showWishes = false
+    @AppStorage(WishesLook.key) private var look = WishesLook.cards
 
     var body: some View {
         Screen(path: "week", query: ["week": week]) { (s: WeekScreen) in
@@ -587,11 +592,16 @@ struct PlanView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         LilacTitle(text: "План") {
                             if s.phase != "current" { LilacChip(text: "Сейчас") { week = nil } }
+                            if look != WishesLook.inPlan {
+                                LilacRoundButton(systemImage: "sparkles", label: "Желания") { showWishes = true }
+                                    .accessibilityIdentifier("open-wishes")
+                            }
                             LilacRoundButton(systemImage: "chevron.left", label: "Раньше") { week = s.prev == s.current ? nil : s.prev }
                             LilacRoundButton(systemImage: "chevron.right", label: "Позже") { if let next = s.next { week = next == s.current ? nil : next } }
                                 .disabled(s.next == nil)
                         }
                         Text(s.title).font(.subheadline).foregroundStyle(Lilac.muted).padding(.top, 2)
+                        WishesLookSwitch().padding(.top, 12)
                         PlanContent(screen: s, sheet: $sheet).padding(.top, 8)
                     }
                     .padding(.horizontal, 20)
@@ -603,6 +613,7 @@ struct PlanView: View {
         }
         .background(LilacBackground())
         .budgetSheets($sheet)
+        .sheet(isPresented: $showWishes) { WishesSheet() }
     }
 }
 
