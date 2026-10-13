@@ -2,9 +2,13 @@
 // whatever shop number or mark of a QR payment the bank adds, so Lenta-0089, LENTA 089 and Лента are one shop; shops
 // the bank names too differently, such as SAMOKAT and SBER*5411*SAMOKAT, the user merges into one. A shop takes the
 // name and the logo the user gave it, else those of a chain the app knows: Lenta-0089 is Лента with the logo of
-// lenta.com. A logo is the icon of the shop's site, which the server fetches once from Yandex's service of site icons
-// (see fetchSiteIcon), or a photo the user put on the shop instead.
+// lenta.com. A logo is a photo the user put on the shop, the icon of the site the user gave it, a logo that comes with
+// the app (see APP_LOGOS), or the icon of its chain's site, which the server fetches once from Yandex's service of site
+// icons (see fetchSiteIcon), in that order.
 
+import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { CategoryPhoto } from './categories.ts';
 import { isPerson, shopKey, shopName, shopOf } from './payees.ts';
 
@@ -23,6 +27,8 @@ export interface ShopSetup {
   icons: ReadonlyMap<string, string>;
   /** The shop each shop the user merged is part of, by key; none when not given. */
   merges?: ReadonlyMap<string, string>;
+  /** The logos that come with the app, their versions by shop key (see APP_LOGOS); none when not given. */
+  logos?: ReadonlyMap<string, string>;
 }
 
 export const NO_SHOPS: ShopSetup = { looks: new Map(), icons: new Map(), merges: new Map() };
@@ -35,8 +41,8 @@ export interface Shop {
   /** The site its logo comes from. */
   site: string | null;
   /**
-   * The version of its logo, the user's photo (p…) or its site's icon (s…), which changes with it; null when it has
-   * none yet.
+   * The version of its logo, the user's photo (p…), a logo that comes with the app (a…) or its site's icon (s…), which
+   * changes with it; null when it has none yet.
    */
   logo: string | null;
 }
@@ -135,18 +141,40 @@ export function shopFinder(setup: ShopSetup): (payee: string) => Shop | null {
   };
 }
 
-/** A shop by its key as the user set shops up: their name, site and photo, else its chain's name and site. */
+/**
+ * A shop by its key as the user set shops up: their name, site and photo, else its chain's name and site. Its logo is
+ * the user's photo, else the icon of the site they gave it, else the logo that comes with the app, else its chain's
+ * site's icon.
+ */
 export function shopByKey(key: string, setup: ShopSetup): Shop {
   const look = setup.looks.get(key);
   const chain = chainOf(key);
   const site = look?.site ?? chain?.site ?? null;
   const icon = site ? setup.icons.get(site) : undefined;
+  const kept = look?.site ? undefined : setup.logos?.get(key);
   return {
     key,
     title: look?.title ?? chain?.title ?? null,
     site,
-    logo: look?.photo ? `p${look.photo}` : icon ? `s${icon}` : null,
+    logo: look?.photo ? `p${look.photo}` : kept ? `a${kept}` : icon ? `s${icon}` : null,
   };
+}
+
+/**
+ * Logos found by hand for shops the user buys at often, where the site's icon is missing, blurry or square: round
+ * PNGs 240 points wide on a clear ground in src/shop-logos, named by shop key; sources.tsv there says where each came
+ * from. They come with the app, so the server on the VDS has them too. Their versions, by key, change with the files.
+ */
+const LOGO_DIR = fileURLToPath(new URL('./shop-logos/', import.meta.url));
+export const APP_LOGOS: ReadonlyMap<string, string> = new Map(
+  (existsSync(LOGO_DIR) ? readdirSync(LOGO_DIR) : [])
+    .filter((file) => file.endsWith('.png'))
+    .map((file) => [file.slice(0, -'.png'.length), createHash('sha1').update(readFileSync(LOGO_DIR + file)).digest('hex').slice(0, 12)] as const),
+);
+
+/** The logo that comes with the app for a shop; null when it has none. */
+export function appLogo(key: string): CategoryPhoto | null {
+  return APP_LOGOS.has(key) ? { type: 'image/png', data: readFileSync(LOGO_DIR + key + '.png') } : null;
 }
 
 /** Yandex's service of site icons; it sends a picture of one pixel for a site it has no icon of. */

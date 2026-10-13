@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { Settings } from '../src/settings.ts';
+import { APP_LOGOS } from '../src/shops.ts';
 import { regularInput } from './fixtures.ts';
 
 describe('Settings', () => {
@@ -711,7 +712,7 @@ describe('Settings', () => {
         db.exec(`INSERT INTO category_change (tag_id, title) VALUES ('groceries', 'Продукты')`);
       }
       using settings = new Settings(path);
-      assert.deepEqual(settings.shopSetup(), { looks: new Map(), icons: new Map(), merges: new Map() });
+      assert.deepEqual(settings.shopSetup(), { looks: new Map(), icons: new Map(), merges: new Map(), logos: APP_LOGOS });
       settings.dressShop('lenta', { title: 'Лента', site: 'lenta.com' });
       settings.mergeShop('lentaonlain', 'lenta');
       assert.deepEqual(settings.shopSetup().merges, new Map([['lentaonlain', 'lenta']]));

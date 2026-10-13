@@ -17,7 +17,7 @@ import type { ClaudeAnswer, ClaudeDecision, ClaudeReview, ClaudeSaved } from './
 import type { MonthString } from './dates.ts';
 import { isIncomeModel, type Income, type IncomeInput } from './income.ts';
 import type { RegularExpense, RegularExpenseInput } from './regular.ts';
-import type { ShopLook, ShopSetup } from './shops.ts';
+import { APP_LOGOS, type ShopLook, type ShopSetup } from './shops.ts';
 import { alignWeek, type Envelope, type Purchase, type PurchaseInput, type WeekStart, type Wish, type WishInput } from './week.ts';
 import type { ChosenPlan, Step } from './wish-plans.ts';
 import type { DateString, TagId } from './zenmoney/types.ts';
@@ -776,7 +776,10 @@ export class Settings {
     return row ? { type: row.photo_type === 'image/png' ? 'image/png' : 'image/jpeg', data: row.photo as Uint8Array } : null;
   }
 
-  /** How the user named, dressed and merged shops, and the versions of the sites' icons kept so far. */
+  /**
+   * How the user named, dressed and merged shops, the versions of the sites' icons kept so far, and of the logos that
+   * come with the app.
+   */
   shopSetup(): ShopSetup {
     const text = (value: unknown) => (value === null ? null : String(value));
     const looks = new Map(
@@ -792,7 +795,7 @@ export class Settings {
         .map((row) => [String(row.site), String(row.version)] as const),
     );
     const merges = new Map(this.#db.prepare('SELECT shop, root FROM shop_merge').all().map((row) => [String(row.shop), String(row.root)] as const));
-    return { looks, icons, merges };
+    return { looks, icons, merges, logos: APP_LOGOS };
   }
 
   /**

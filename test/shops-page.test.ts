@@ -94,8 +94,24 @@ describe('shops page', () => {
     assert.ok(html.includes('action="/shops/oktiabrskiv/merge/kemoktiabrskiv"'), 'one key ends the other');
     assert.ok(html.includes('<span>KEM OKTYABRSKIJ 22V <small>1 операция</small></span>'));
     assert.ok(!html.includes('action="/shops/oktiabrskiv/merge/zerno"'), 'another shop is not alike');
-    assert.ok(html.includes('action="/shops/oktiabrskiv/merge"') && html.includes('<option value="zerno">ZERNO — 1 операция</option>'), 'but can be picked');
+    assert.ok(html.includes('placeholder="Найти магазин, чтобы объединить"') && !html.includes('<option value="zerno">'), 'but can be found, not picked from a list');
+    assert.ok(html.includes('<input type="hidden" name="edit" value="oktiabrskiv">'), 'the search keeps the shop open');
     assert.ok(!html.includes('Объединено'), 'nothing merged yet');
+
+    const search = (merging: string) => String(renderShops(loadShopsPage(shops, saved(), { today, edit: 'oktiabrskiv', merging }), createHref())).replaceAll(' ', ' ');
+    assert.ok(search('zer').includes('action="/shops/oktiabrskiv/merge/zerno?merge=zer"'), 'found by the name the bank gives it, the search going along');
+    assert.ok(search('Зерно').includes('action="/shops/oktiabrskiv/merge/zerno?merge='), 'and in Russian by its Latin key');
+    assert.ok(search('zer').includes('<div class="choices" role="group" aria-label="Другой магазин" id="merge-oktiabrskiv">'), 'the found ones are found again by id');
+    assert.ok(search('zer').includes('role="search" data-live>'), 'as it is typed in');
+    assert.ok(search('zer').includes('<form method="post" action="/shops/oktiabrskiv/merge/zerno?merge=zer" data-stay>'), 'and merged without reloading the page');
+    assert.ok(html.includes('<form method="post" action="/shops/oktiabrskiv/merge/kemoktiabrskiv" data-stay>'), 'an alike one too');
+    assert.ok(search('Зерно').includes('value="Зерно"'), 'the search shows what was asked');
+    assert.ok(!search('Зерно').includes('action="/shops/oktiabrskiv/merge/samokat"'), 'only what it finds');
+    assert.ok(!search('oktyabrskij').includes('action="/shops/oktiabrskiv/merge/oktiabrskiv"'), 'never the open shop itself');
+    assert.ok(search('nikogo').includes('Таких магазинов нет'));
+    const alikeFound = search('kem oktyabrskij');
+    assert.equal(alikeFound.split('action="/shops/oktiabrskiv/merge/kemoktiabrskiv?merge=').length - 1, 1, 'an alike shop is offered once');
+    assert.ok(alikeFound.includes('Нашлись только подсказанные выше.'));
 
     const eda = { ...shops, transaction: [transaction({ id: 'eda', date: '2026-10-01', outcome: 500, payee: 'YANDEX*5814*EDA' }), transaction({ id: 'ya', date: '2026-10-01', outcome: 99, payee: 'Яндекс Сервисы' })] };
     const yandex = String(renderShops(loadShopsPage(eda, saved(), { today, edit: 'iandeks' }), createHref()));

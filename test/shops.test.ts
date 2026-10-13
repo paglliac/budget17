@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { CHAINS, chainOf, fetchSiteIcon, NO_SHOPS, shopFinder, shopKeyOf, shopLabel } from '../src/shops.ts';
+import { APP_LOGOS, appLogo, CHAINS, chainOf, fetchSiteIcon, NO_SHOPS, shopFinder, shopKeyOf, shopLabel } from '../src/shops.ts';
 import { shopKey, shopOf } from '../src/payees.ts';
 
 /** A PNG header of an image `width` pixels wide, as much of a PNG as the icon check reads. */
@@ -66,6 +66,41 @@ describe('shops', () => {
     assert.equal(shopFinder(NO_SHOPS)('Кирилл А.'), null, 'a person is no shop');
     const merged = shopFinder({ looks: new Map(), icons: new Map(), merges: new Map([['sbersamokat', 'samokat']]) });
     assert.equal(merged('SBER*5411*SAMOKAT')?.key, 'samokat', 'a merged shop is the one it went into');
+  });
+
+  it('draws a shop by the logo that comes with the app unless the user gave it a photo or a site', () => {
+    const find = shopFinder({
+      looks: new Map([
+        ['cofeman', { title: null, site: 'coffeeman.ru', photo: null }],
+        ['piaterochka', { title: null, site: null, photo: 'abc' }],
+      ]),
+      icons: new Map([
+        ['lenta.com', 'l1'],
+        ['coffeeman.ru', 'c1'],
+      ]),
+      logos: new Map([
+        ['lenta', 'k1'],
+        ['cofeman', 'k2'],
+        ['piaterochka', 'k3'],
+        ['khlebiztandira', 'k4'],
+      ]),
+    });
+
+    assert.equal(find('Lenta-0089')?.logo, 'ak1', 'over the icon of its chain’s site');
+    assert.equal(find('KHLEB IZ TANDYRA_')?.logo, 'ak4', 'a shop of no chain too');
+    assert.equal(find('_COFFEEMAN.')?.logo, 'sc1', 'the site the user gave wins');
+    assert.equal(find('PYATEROCHKA 9076')?.logo, 'pabc', 'the user’s photo wins');
+  });
+
+  it('comes with logos as square PNGs named by the key of a shop', () => {
+    assert.ok(APP_LOGOS.size > 0);
+    for (const key of APP_LOGOS.keys()) {
+      assert.match(key, /^[a-z]+$/, `${key} is a shop key`);
+      const data = appLogo(key)!.data;
+      const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      assert.deepEqual([view.getUint32(16), view.getUint32(20)], [240, 240], `${key} is 240 by 240`);
+    }
+    assert.equal(appLogo('nosuchshop'), null);
   });
 
   it('calls a shop by its name, or by its payee without the shop number', () => {

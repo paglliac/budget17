@@ -93,9 +93,20 @@ export function segmentedLinks(options: { label: string; items: Array<{ label: s
 }
 
 /** A search box that submits a GET form; `params` keep the other filters. */
-export function searchField(options: { action: string; name: string; value?: string; placeholder: string; params?: Record<string, string> }): Html {
+export function searchField(options: {
+  action: string;
+  name: string;
+  value?: string;
+  placeholder: string;
+  params?: Record<string, string>;
+  /**
+   * Finds as it is typed in, without a press of Enter: the page asks the server for what the search finds and shows
+   * it in place of what follows the field in the element with an id round it (see LIVE_SEARCH in document.ts).
+   */
+  live?: boolean;
+}): Html {
   return html`
-    <form class="search" method="get" action="${options.action}" role="search">
+    <form class="search" method="get" action="${options.action}" role="search"${options.live ? html` data-live` : null}>
       ${icon('search', 15)}
       <input type="search" name="${options.name}" value="${options.value ?? ''}" placeholder="${options.placeholder}" aria-label="${options.placeholder}">
       ${Object.entries(options.params ?? {}).map(([name, value]) => html`<input type="hidden" name="${name}" value="${value}">`)}
@@ -247,7 +258,8 @@ export function photoField(options: { label: string; name: string; button: strin
 /**
  * Choices made in one click, under a label, such as the category to put an expense into: each choice posts a form to
  * its URL. The current one is highlighted and posts nothing; a suggested one is marked. `other` lists the rest, for a
- * choice that is not among the buttons; it posts the picked value as `name` with its own button.
+ * choice that is not among the buttons; it posts the picked value as `name` with its own button. When the rest are
+ * too many to list, `search` puts a search field under the label instead, and the page shows what it found as choices.
  */
 export function choiceGroup(options: {
   label: string;
@@ -272,24 +284,36 @@ export function choiceGroup(options: {
     submitLabel: string;
     groups: Array<{ label: string; options: Array<{ value: string; label: string }> }>;
   };
+  /**
+   * A search over its label that finds the choices, for when there are too many to list (see searchField). It finds
+   * as it is typed in when the group has an `id`, which the page finds the choices by.
+   */
+  search?: { action: string; name: string; value?: string; placeholder: string; params?: Record<string, string> };
+  id?: string;
+  /** Choices post without reloading the page, which takes in what changed where it is (see STAY in document.ts). */
+  stay?: boolean;
   /** Shown instead of choices when there are none, such as why the choice is not up to the user. */
   empty?: string;
+  /** Quieter text under the choices, such as how many more a search found. */
+  note?: string;
 }): Html {
   const inner = (c: (typeof options.choices)[number]) =>
     html`${c.suggested && !c.current ? icon('sparkles', 12) : null}${c.current ? icon('check', 12) : null}${
       c.color ? html`<i style="background:${c.color}"></i>` : null
     }<span>${c.label}${c.detail ? html` <small>${c.detail}</small>` : null}</span>`;
-  return html`<div class="choices" role="group" aria-label="${options.label}">
+  return html`<div class="choices" role="group" aria-label="${options.label}"${options.id ? html` id="${options.id}"` : null}>
     <span class="choices-label">${options.label}</span>
+    ${options.search ? searchField({ ...options.search, live: Boolean(options.id) }) : null}
     <span class="choices-list">${options.choices.map((c) =>
       (c.current && !c.toggle) || !c.action
         ? html`<span class="choice${c.current ? ' current' : ''}"${c.current ? html` aria-current="true"` : null}>${inner(c)}</span>`
-        : html`<form method="post" action="${c.action}"><button class="choice${c.current ? ' current' : ''}${c.suggested ? ' suggested' : ''}" type="submit"${
+        : html`<form method="post" action="${c.action}"${options.stay ? html` data-stay` : null}><button class="choice${c.current ? ' current' : ''}${c.suggested ? ' suggested' : ''}" type="submit"${
             c.suggested ? html` title="Подсказка"` : null
           }${c.toggle ? html` aria-pressed="${c.current ? 'true' : 'false'}"` : null}>${inner(c)}</button></form>`,
     )}${options.choices.length === 0 && options.empty ? html`<span class="choices-empty">${options.empty}</span>` : null}</span>
+    ${options.note ? html`<span class="choices-empty">${options.note}</span>` : null}
     ${options.other
-      ? html`<form class="choices-other" method="post" action="${options.other.action}">${selectField({
+      ? html`<form class="choices-other" method="post" action="${options.other.action}"${options.stay ? html` data-stay` : null}>${selectField({
           label: options.other.label,
           name: options.other.name,
           placeholder: options.other.placeholder,

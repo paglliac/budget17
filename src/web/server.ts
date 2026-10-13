@@ -19,7 +19,7 @@ import { localDate } from '../dates.ts';
 import { renderSyncResult } from '../format.ts';
 import { listOperations } from '../ledger.ts';
 import { Settings } from '../settings.ts';
-import { fetchSiteIcon, shopByKey } from '../shops.ts';
+import { appLogo, fetchSiteIcon, shopByKey } from '../shops.ts';
 import { Store } from '../store.ts';
 import { sync } from '../sync.ts';
 import { ZenMoneyClient } from '../zenmoney/client.ts';
@@ -272,7 +272,7 @@ interface Context {
 
 function shopsPage(
   collections: EntityCollections,
-  options: { today: string; query: string | null; edit?: string | null; form?: ShopFormState; back: string | null },
+  options: { today: string; query: string | null; edit?: string | null; merging?: string | null; form?: ShopFormState; back: string | null },
   href: Href,
 ): string {
   const back = options.back ? safeNext(options.back) : null;
@@ -367,12 +367,13 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     // stays open, to show what it is made of now.
     const back = form.get('back');
     const query = form.get('q');
+    const merging = form.get('merge');
     if (result.status === 'invalid') {
       const page = () => shopsPage(collections, { today, query, form: result.form, back }, href);
       return { status: 'invalid', errors: result.form.errors, page };
     }
     const next = result.open
-      ? `${href(SHOPS_PATH, { edit: result.open, q: query, back })}#shop-${result.open}`
+      ? `${href(SHOPS_PATH, { edit: result.open, q: query, back, merge: merging })}#shop-${result.open}`
       : back
         ? safeNext(back)
         : href(SHOPS_PATH, { q: query });
@@ -565,8 +566,10 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   if (logo) {
     const shop = decoded(logo[1]!);
     const found = shop === null ? null : loadSettings((s) => {
-      const site = shopByKey(shop, s.shopSetup()).site;
-      return s.shopPhoto(shop) ?? (site ? s.siteIcon(site) : null);
+      const { site, logo } = shopByKey(shop, s.shopSetup());
+      if (logo?.startsWith('p')) return s.shopPhoto(shop);
+      if (logo?.startsWith('a')) return appLogo(shop);
+      return site ? s.siteIcon(site) : null;
     });
     // Its version is in the address too, as a photo's is.
     if (found) response.writeHead(200, { 'content-type': found.type, 'cache-control': 'private, max-age=31536000, immutable' }).end(found.data);
@@ -633,7 +636,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       const edit = params.get('edit');
       // An expense links to its shop's form, which goes back to the expense.
       const back = params.get('back') ?? (edit ? cameFrom(request) : null);
-      send(response, 200, 'text/html', shopsPage(loadCollections(demo, today), { today, query: params.get('q'), edit, back }, href));
+      send(response, 200, 'text/html', shopsPage(loadCollections(demo, today), { today, query: params.get('q'), edit, merging: params.get('merge'), back }, href));
       return;
     }
     case '/income': {

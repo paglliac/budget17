@@ -4,7 +4,7 @@
 // ?edit=<shop key>: a form to name the shop, give it the site its logo comes from or a photo of the user's instead, for
 // all its operations, the new ones too; what it is made of, the names the bank gives it with how many operations each
 // had; and the shops to merge into it, the alike ones as buttons, such as SBER*5411*SAMOKAT for SAMOKAT, and any other
-// from a list. A merged shop is listed with the one it went into and can be split off again. An expense links to its
+// found by a search in it (?merge=<query>), as buttons too. A merged shop is listed with the one it went into and can be split off again. An expense links to its
 // shop's form, which goes back to the expense once saved (`back`). The form posts to /shops/:key with the name as
 // title, the site as site and a photo as photo, to /shops/:key/photo/delete and to /shops/:key/forget; merging posts
 // to /shops/:key/merge/:other or to /shops/:key/merge with the other as `with`, and splitting to
@@ -33,6 +33,8 @@ import type { SavedMarking } from './marking.ts';
 const NAMES_SHOWN = 3;
 /** How many alike shops an open shop offers to merge as buttons. */
 const ALIKE_SHOWN = 4;
+/** How many shops a search for one to merge shows at most. */
+const FOUND_SHOWN = 12;
 /** How long the shorter of two shop keys must be for one beginning or ending the other to make the shops alike. */
 const ALIKE_KEY = 5;
 const WHOLE_TIME = { from: '0000-01-01', to: '9999-12-31' };
@@ -106,6 +108,8 @@ export interface ShopsData {
   query: string | null;
   /** The shop open for editing, by its key. */
   edit: string | null;
+  /** What the open shop's search for a shop to merge into it asks for. */
+  merging: string | null;
   form: ShopFormState | null;
   /** The page an expense linked to its shop from, which the form goes back to. */
   back: string | null;
@@ -199,7 +203,7 @@ export function shopLook(logo: string | null): { icon: 'bag'; color: string; pho
 }
 
 /** Whether a shop is the one a search asks for, by what it is called, a name the bank gives it, or its key. */
-function found(entry: ShopEntry, query: string): boolean {
+function matches(entry: ShopEntry, query: string): boolean {
   const text = query.toLowerCase();
   const key = shopKey(query);
   return [entry.title, ...entry.names].some((name) => name.toLowerCase().includes(text)) || (key.length >= 3 && entry.key.includes(key));
@@ -219,7 +223,7 @@ function alike(a: ShopEntry, b: ShopEntry): boolean {
 export function loadShopsPage(
   data: EntityCollections,
   saved: SavedMarking,
-  options: { today: DateString; query?: string | null; edit?: string | null; form?: ShopFormState; back?: string | null },
+  options: { today: DateString; query?: string | null; edit?: string | null; merging?: string | null; form?: ShopFormState; back?: string | null },
 ): ShopsData {
   const setup = saved.shops ?? NO_SHOPS;
   const entries = shopEntries(listOperations(data, WHOLE_TIME, saved, { withIgnored: true }), options.today);
@@ -230,12 +234,13 @@ export function loadShopsPage(
   const recent = entries.filter((e) => e.recent > 0);
   return {
     today: options.today,
-    shops: query ? entries.filter((e) => found(e, query)) : entries.filter((e) => e.recent > 0 || setup.looks.has(e.key) || e.key === edit),
+    shops: query ? entries.filter((e) => matches(e, query)) : entries.filter((e) => e.recent > 0 || setup.looks.has(e.key) || e.key === edit),
     entries,
     recent: recent.length,
     named: recent.filter((e) => setup.looks.get(e.key)?.title || chainOf(e.key)).length,
     query,
     edit,
+    merging: (edit && options.merging?.trim()) || null,
     form: options.form ?? null,
     back: options.back ?? null,
     setup,
@@ -290,8 +295,9 @@ function shopRow(d: ShopsData, entry: ShopEntry, href: Href): Html {
 function shopPanel(d: ShopsData, entry: ShopEntry, href: Href): Html[] {
   const form = shopForm(entry, d.setup);
   const failed = d.form?.key === entry.key ? d.form : null;
-  // Where the open shop came from goes along with every form under it, so that each comes back to it.
-  const keep = { back: d.back, q: d.query };
+  // Where the open shop came from goes along with every form under it, so that each comes back to it, and so does the
+  // search for a shop to merge, so that several found by it are merged one after another.
+  const keep = { back: d.back, q: d.query, merge: d.merging };
   const at = (path: string) => href(path, keep);
   return [
     groupForm({
@@ -325,6 +331,7 @@ function shopPanel(d: ShopsData, entry: ShopEntry, href: Href): Html[] {
     entry.merged.length > 0
       ? choiceGroup({
           label: 'Объединено',
+          stay: true,
           choices: entry.merged.map((part) => {
             const names = entry.bank.filter((n) => n.shop === part);
             return {
@@ -337,31 +344,43 @@ function shopPanel(d: ShopsData, entry: ShopEntry, href: Href): Html[] {
           }),
         })
       : null,
-    mergeGroup(d, entry, form, at),
+    ...mergeGroups(d, entry, form, at, href),
   ].filter((part) => part !== null);
 }
 
-/** The shops to merge into an open one: the alike ones as buttons, and any other from a list, the recent first. */
-function mergeGroup(d: ShopsData, entry: ShopEntry, form: ShopForm, at: (path: string) => string): Html {
+/**
+ * The shops to merge into an open one: the alike ones as buttons, and any other found by a search under them, by what
+ * it is called, a name the bank gives it or, for a Russian query, its Latin key, the recent first.
+ */
+function mergeGroups(d: ShopsData, entry: ShopEntry, form: ShopForm, at: (path: string) => string, href: Href): Html[] {
   const others = d.entries.filter((e) => e.key !== entry.key);
   const alikeOnes = others.filter((e) => alike(entry, e)).slice(0, ALIKE_SHOWN);
   const about = (e: ShopEntry) => [bankNames(e, e.title), operationCount(e.count)].filter(Boolean).join(' · ');
-  const option = (e: ShopEntry) => ({ value: e.key, label: `${e.title} — ${about(e)}` });
-  return choiceGroup({
-    label: 'Объединить с',
-    choices: alikeOnes.map((e) => ({ label: e.title, detail: about(e), suggested: true, action: at(`${form.path}/merge/${encodeURIComponent(e.key)}`) })),
-    other: {
-      label: alikeOnes.length > 0 ? 'Другой магазин' : 'Магазин',
-      action: at(`${form.path}/merge`),
-      name: 'with',
-      placeholder: 'Выберите магазин',
-      submitLabel: 'Объединить',
-      groups: [
-        { label: 'За три месяца', options: others.filter((e) => e.recent > 0).map(option) },
-        { label: 'Раньше', options: others.filter((e) => e.recent === 0).map(option) },
-      ],
-    },
-  });
+  const merge = (e: ShopEntry) => at(`${form.path}/merge/${encodeURIComponent(e.key)}`);
+  // What the alike buttons above already offer is not found again.
+  const matching = d.merging ? others.filter((e) => matches(e, d.merging!)) : [];
+  const found = matching.filter((e) => !alikeOnes.includes(e));
+  const more = found.length - FOUND_SHOWN;
+  // The search stays on the open shop and on where it was opened from.
+  const params = Object.fromEntries(new URL(href(SHOPS_PATH, { edit: entry.key, q: d.query, back: d.back }), 'http://localhost').searchParams);
+  return [
+    alikeOnes.length > 0
+      ? choiceGroup({
+          label: 'Объединить с',
+          stay: true,
+          choices: alikeOnes.map((e) => ({ label: e.title, detail: about(e), suggested: true, action: merge(e) })),
+        })
+      : null,
+    choiceGroup({
+      id: `merge-${entry.key}`,
+      stay: true,
+      label: alikeOnes.length > 0 ? 'Другой магазин' : 'Объединить с',
+      search: { action: `${SHOPS_PATH}#shop-${entry.key}`, name: 'merge', value: d.merging ?? '', placeholder: 'Найти магазин, чтобы объединить', params },
+      choices: found.slice(0, FOUND_SHOWN).map((e) => ({ label: e.title, detail: about(e), action: merge(e) })),
+      empty: !d.merging ? undefined : matching.length > 0 ? 'Нашлись только подсказанные выше.' : 'Таких магазинов нет: поищите по названию в банке.',
+      note: more > 0 ? `И ещё ${more} — уточните поиск.` : undefined,
+    }),
+  ].filter((part) => part !== null);
 }
 
 /** Where an expense links to the form of its shop. */
