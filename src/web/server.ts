@@ -32,6 +32,7 @@ import {
   uncategorizedScreen,
   weekScreen,
   widgetScreen,
+  wishScreen,
   withRubleSign,
 } from './api.ts';
 import { isAccessToken, isAuthorized, sessionCookie } from './auth.ts';
@@ -45,6 +46,7 @@ import { loadIncome, renderIncome, submitIncome } from './pages/income.ts';
 import { renderLogin } from './pages/login.ts';
 import { loadOperations, renderOperations } from './pages/operations.ts';
 import { submitMarking, type SavedMarking } from './pages/marking.ts';
+import { submitWishPlan } from './pages/wishes.ts';
 import { loadRegular, renderRegular, submitRegular } from './pages/regular.ts';
 import { loadSettingsPage, renderSettings, submitBudget, submitSettings } from './pages/settings.ts';
 import { renderStoryboard } from './pages/storyboard.ts';
@@ -134,6 +136,9 @@ function savedMarking(settings: Settings): SavedMarking {
     purchasePayments: settings.purchasePayments(),
     regular: settings.regularExpenses(),
     purchases: settings.purchases(),
+    wishPayments: settings.wishPayments(),
+    wishes: settings.wishes(),
+    wishPlans: settings.wishPlans(),
     marks: settings.spendingMarks(),
     descriptions: settings.spendingDescriptions(),
     optionalSpending: settings.optionalSpending(),
@@ -233,6 +238,12 @@ type FormResult =
 /** Applies a form posted to `path`, a page's form path; null when no form posts there. */
 function submitForm(path: string, body: URLSearchParams, request: IncomingMessage, context: Context): FormResult | null {
   const { today, demo, href } = context;
+  if (/^\/wishes\/\d+\/(due|ways)(\/|$)/.test(path)) {
+    using settings = new Settings(SETTINGS_PATH);
+    const result = submitWishPlan(settings, loadCollections(demo, today), savedBudget(settings), path, body, { today, incomes: settings.incomes() });
+    if (result === 'saved') return { status: 'saved', next: backTo(request) };
+    return { status: 'missing', message: 'Такого желания нет' };
+  }
   if (/^\/(purchases|wishes|week-limits)(\/|$)/.test(path)) {
     using settings = new Settings(SETTINGS_PATH);
     const collections = loadCollections(demo, today);
@@ -335,6 +346,8 @@ function apiScreen(path: string, params: URLSearchParams, { today, demo }: Conte
       return categoriesScreen(collections(), loadSettings(savedMarking), { today });
     case '/api/budget-settings':
       return budgetSettingsScreen(collections(), loadSettings(savedMarking));
+    case '/api/wish':
+      return wishScreen(collections(), loadSettings(savedBudget), { today, id: Number(params.get('id')), ways: params.get('ways'), incomes: loadSettings((s) => s.incomes()) });
     case '/api/widget':
       return widgetScreen(collections(), loadSettings(savedBudget), { today, syncedAt: budget.syncedAt });
     case '/api/review/claude/input':

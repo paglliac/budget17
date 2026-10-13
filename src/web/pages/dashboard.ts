@@ -25,15 +25,17 @@ import {
   type Advice,
   type Budget,
   type ExtrasSummary,
+  type Purchase,
   type PurchaseKind,
   type PurchaseStatus,
   type WeekStart,
   type WeekSummary,
   type Wish,
 } from '../../week.ts';
+import { covered, stepMonth, wishPurchases, type ChosenPlan } from '../../wish-plans.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
-import { capitalize, dayMonth, money, monthName, weekLabel } from '../format.ts';
+import { capitalize, dayMonth, money, monthName, num, plural, weekLabel } from '../format.ts';
 import type { Html } from '../html.ts';
 import { categoryIcon, entryIcon } from '../icons.ts';
 import { categoryLook } from '../looks.ts';
@@ -99,7 +101,10 @@ export interface DashboardData {
   weeks: WeekSummary[];
   /** Extras of the month tab's month. */
   extras: ExtrasSummary;
-  wishes: Array<{ wish: Wish; advice: Advice }>;
+  /** Wishes not bought yet, with when they fit and the plan chosen for them. */
+  wishes: Array<{ wish: Wish; advice: Advice; plan: ChosenPlan | undefined }>;
+  /** Wishes an expense bought, by id. */
+  boughtWishes: ReadonlySet<number>;
   /** For an expense opened to mark it. */
   marking: Marking;
   /** What is open for editing: purchase-1, wish-1 or spending-<ZenMoney id>. */
@@ -122,7 +127,17 @@ export function budgetOf(data: EntityCollections, saved: SavedBudget, options: {
   const monthStart = weeksOfMonth(monthOfWeek(current), weekStart)[0] ?? current;
   const from = options.from && options.from < monthStart ? options.from : monthStart;
   const expenses = listOperations(data, { from: addDays(from, -31), to: addDays(current, 6) }, saved).filter((o) => o.kind === 'expense');
-  return { expenses, purchases: saved.purchases, marks: saved.marks, regular: saved.regular, weekStart, weekLimits };
+  return { expenses, purchases: plannedPurchases(saved), marks: saved.marks, regular: saved.regular, weekStart, weekLimits };
+}
+
+/** The purchases of the plan with the money the plans of wishes hold (see wish-plans.ts). */
+export function plannedPurchases(saved: Pick<SavedMarking, 'purchases' | 'wishes' | 'wishPlans'>): Purchase[] {
+  const wishes = new Map((saved.wishes ?? []).map((w) => [w.id, w]));
+  const plans = [...(saved.wishPlans ?? [])].flatMap(([id, plan]) => {
+    const wish = wishes.get(id);
+    return wish ? [{ wish, plan }] : [];
+  });
+  return [...saved.purchases, ...wishPurchases(plans)];
 }
 
 export function loadDashboard(
@@ -146,6 +161,7 @@ export function loadDashboard(
   const weeks = weeksOfMonth(month, saved.weekStart);
   const monthStart = weeks[0] ?? current;
   const budget = budgetOf(data, saved, { today, from: week < monthStart ? week : monthStart });
+  const bought = new Set(saved.wishPayments?.values() ?? []);
   return {
     today,
     current,
@@ -154,7 +170,9 @@ export function loadDashboard(
     week: summarizeWeek(budget, week),
     weeks: weeks.map((w) => summarizeWeek(budget, w)),
     extras: summarizeExtras(budget, month),
-    wishes: saved.wishes.map((wish) => ({ wish, advice: adviseWish(budget, wish, today) })),
+    // A wish an expense bought is no longer wished for.
+    wishes: saved.wishes.filter((wish) => !bought.has(wish.id)).map((wish) => ({ wish, advice: adviseWish(budget, wish, today), plan: saved.wishPlans?.get(wish.id) })),
+    boughtWishes: bought,
     marking: loadMarking(data, saved, allExpenses(data, saved), today),
     edit: options.edit ?? null,
     form: options.form ?? null,
@@ -354,7 +372,7 @@ function weekView(page: Page): { main: Html[]; side: Html[] } {
       ...(w.week === current
         ? [
             topBar({ crumbs: [{ label: 'Хочу купить' }] }),
-            entryList({ label: 'Хочу купить', items: [...d.wishes.map((x) => wishItem(page, x.wish, x.advice)), foldedWishForm(page)] }),
+            entryList({ label: 'Хочу купить', items: [...d.wishes.map((x) => wishItem(page, x.wish, x.advice, x.plan)), foldedWishForm(page)] }),
           ]
         : []),
     ],
@@ -593,6 +611,7 @@ function syncButton(d: DashboardData): Html | null {
 function purchaseItem(page: Page, status: PurchaseStatus): Html {
   const { d, href, here, current } = page;
   const { purchase: p, bought } = status;
+  if (p.wish !== undefined) return wishPurchaseItem(page, p);
   const key = `purchase-${p.id}`;
   const form = d.form?.kind === 'purchase' && d.form.id === p.id ? d.form : null;
   const color = bought ? toneColor('gray') : p.envelope === 'extra' ? toneColor('violet') : categoryColor(key, null);
@@ -630,6 +649,25 @@ function purchaseItem(page: Page, status: PurchaseStatus): Html {
 }
 
 /**
+ * Money a wish's plan holds in a week or the extras: a row of the wish, chosen and changed in the app, so it opens
+ * nothing here.
+ */
+function wishPurchaseItem({ d }: Page, p: Purchase): Html {
+  const bought = d.boughtWishes.has(p.wish!);
+  return entryRow({
+    id: `purchase-${p.id}`,
+    title: p.title,
+    details: bought ? 'Желание · куплено' : 'Желание',
+    icon: 'sparkles',
+    color: toneColor(bought ? 'gray' : 'yellow'),
+    mark: ENVELOPE_MARK[p.envelope],
+    amount: p.amount,
+    symbol: d.symbol,
+    muted: bought,
+  });
+}
+
+/**
  * What a purchase's row says, the amount it shows (what it cost, once bought) and whether its row can finish it: one
  * of a week ahead finishes there only once something paid it.
  */
@@ -657,7 +695,7 @@ export function purchaseActions({ purchase: p, bought }: PurchaseStatus): Array<
   ];
 }
 
-function wishItem({ d, href, here }: Page, wish: Wish, advice: Advice): Html {
+function wishItem({ d, href, here }: Page, wish: Wish, advice: Advice, plan: ChosenPlan | undefined): Html {
   const key = `wish-${wish.id}`;
   const form = d.form?.kind === 'wish' && d.form.id === wish.id ? d.form : null;
   if (form || d.edit === key) {
@@ -675,13 +713,13 @@ function wishItem({ d, href, here }: Page, wish: Wish, advice: Advice): Html {
   return entryRow({
     id: key,
     title: wish.title,
-    details: adviceText(advice, d.current, d.symbol),
+    details: wishLine(wish, plan, adviceText(advice, d.current, d.symbol), d.symbol),
     icon: 'sparkles',
     color: toneColor('yellow'),
     amount: wish.amount,
     symbol: d.symbol,
     href: here({ edit: key }),
-    actions: adviceTarget(advice) ? [{ label: 'Запланировать', action: href(`/wishes/${wish.id}/plan`) }] : [],
+    actions: !plan && adviceTarget(advice) ? [{ label: 'Запланировать', action: href(`/wishes/${wish.id}/plan`) }] : [],
   });
 }
 
@@ -859,6 +897,42 @@ export function monthSentence(m: ExtrasSummary, weeks: WeekSummary[], current: D
 
 function sum(values: number[]): number {
   return values.reduce((total, v) => total + v, 0);
+}
+
+/** к 1 ноября */
+export function dueLabel(due: DateString): string {
+  return `к ${dayMonth(due)}`;
+}
+
+/** Where a plan's money comes from, in a line: по 5 000 с 3 недель, 45 000 из дополнительных октября. */
+export function planSummary(plan: Pick<ChosenPlan, 'steps'>, amount: number, s: string): string {
+  const parts: string[] = [];
+  const moves = plan.steps.filter((x) => x.kind === 'move').length;
+  if (moves > 0) parts.push(`перенести ${moves} ${plural(moves, ['покупку', 'покупки', 'покупок'])}`);
+  const cuts = plan.steps.flatMap((x) => (x.kind === 'week' ? [x] : []));
+  if (cuts.length > 0) {
+    const same = cuts.every((c) => c.amount === cuts[0]!.amount);
+    parts.push(same ? `по ${num(cuts[0]!.amount)} с ${cuts.length} ${plural(cuts.length, ['недели', 'недель', 'недель'])}` : `${num(covered(cuts))} с ${cuts.length} ${plural(cuts.length, ['недели', 'недель', 'недель'])}`);
+  }
+  const byMonth = (kind: 'extra' | 'savings') => {
+    const months = new Map<MonthString, number>();
+    for (const x of plan.steps) if (x.kind === kind) months.set(stepMonth(x), (months.get(stepMonth(x)) ?? 0) + x.amount);
+    return [...months].sort(([a], [b]) => a.localeCompare(b));
+  };
+  for (const [month, sum] of byMonth('extra')) parts.push(`${num(sum)} из дополнительных ${monthName(month, 'genitive')}`);
+  for (const [month, sum] of byMonth('savings')) parts.push(`${num(sum)} из накоплений ${monthName(month, 'genitive')}`);
+  const short = Math.round(amount - covered(plan.steps));
+  const text = parts.join(', ');
+  return short > 0.5 ? `${text}; не хватает ${money(short, s)}` : text;
+}
+
+/**
+ * A wish's line in «Хочу купить»: its day, then what its chosen plan does. A wish with a day but no plan yet waits for
+ * one; without a day either, `advice` tells when it fits (see adviceText).
+ */
+export function wishLine(wish: Wish, plan: ChosenPlan | undefined, advice: string, s: string): string {
+  if (plan) return [wish.due ? dueLabel(wish.due) : null, planSummary(plan, wish.amount, s)].filter(Boolean).join(' · ');
+  return wish.due ? `${dueLabel(wish.due)} · выбрать, как купить` : advice;
 }
 
 /** When to buy a wish; `current` is the first day of the current week. */

@@ -4,14 +4,16 @@
 // photo as a path of the server (see looks.ts), and where an expense or a purchase counts as `mark`. Built from the
 // same loaders and phrases as the pages.
 
+import { mainCurrency } from '../balances.ts';
 import type { Suggestion } from '../categorization.ts';
 import { addDays, dateOf, daysInMonth, monthOf, shiftMonth, weekday, type MonthString } from '../dates.ts';
 import { INCOME_MODEL_IDS, incomeModel, incomeValues, monthlyIncome, type Income, type IncomeModelId } from '../income.ts';
 import { listOperations, type Operation } from '../ledger.ts';
 import { paymentDate, regularTotals, regularValues, type RegularExpense } from '../regular.ts';
-import { adviceTarget, envelopeOf, MONTH_LIMIT, monthOfWeek, WEEK_LIMIT, type Envelope, type ExtrasSummary, type PurchaseStatus, type WeekSummary } from '../week.ts';
+import { adviceTarget, envelopeOf, MONTH_LIMIT, monthOfWeek, WEEK_LIMIT, weekLimit, weekOf, type Envelope, type ExtrasSummary, type PurchaseStatus, type WeekSummary } from '../week.ts';
+import { covered, savingsTaken, stepMonth, type Step } from '../wish-plans.ts';
 import type { DateString, EntityCollections } from '../zenmoney/types.ts';
-import { capitalize, dayHeading, dayMonth, fromToday, money, monthName, plural, ROUND_STEP, roundParts, timeOn, weekLabel, WEEKDAYS, WEEKDAYS_FULL } from './format.ts';
+import { capitalize, dayHeading, dayMonth, fromToday, money, monthName, num, plural, ROUND_STEP, roundParts, timeOn, weekLabel, WEEKDAYS, WEEKDAYS_FULL } from './format.ts';
 import { CATEGORY_ICONS, categoryIcon, ENTRY_ICONS, entryIcon, type IconName } from './icons.ts';
 import { recentMonths } from './pages/chrome.ts';
 import {
@@ -26,6 +28,7 @@ import {
   regularPaymentLine,
   weekChoices,
   weekTotal,
+  wishLine,
   type SavedBudget,
   type Total,
 } from './pages/dashboard.ts';
@@ -47,6 +50,7 @@ import {
   type SavedMarking,
 } from './pages/marking.ts';
 import { loadOperations, netOf, operationCategory, operationLine, operationsEmpty } from './pages/operations.ts';
+import { isBought, wayCards, wishPlan, type WishPlanView } from './pages/wishes.ts';
 import { loadRegular, regularLine, regularTotalNote, STATUS_TONE, timeline, type Placed } from './pages/regular.ts';
 import { categoryDetails, loadBudgetSetup, loadSettingsPage } from './pages/settings.ts';
 import { loadUncategorized, suggestedChoice, suggestionName } from './pages/uncategorized.ts';
@@ -135,9 +139,10 @@ function expenseDays(m: Pick<Marking, 'marks' | 'purchases'>, expenses: readonly
 
 /**
  * A purchase of a plan, saying first whether it is required or flexible; until it is bought, what paid it follows, and
- * that it waits to be bought goes without saying.
+ * that it waits to be bought goes without saying. The money a wish's plan holds is a row of the wish, which opens it.
  */
-function purchaseRow(status: PurchaseStatus, current: DateString, symbol: string) {
+function purchaseRow(status: PurchaseStatus, current: DateString, symbol: string, saved: Pick<SavedBudget, 'wishPayments'>) {
+  if (status.purchase.wish !== undefined) return wishPurchaseRow(status, saved);
   const { purchase: p, bought, covered } = status;
   const key = `purchase-${p.id}`;
   const line = purchaseLine(status, current, symbol);
@@ -156,6 +161,30 @@ function purchaseRow(status: PurchaseStatus, current: DateString, symbol: string
     bought,
     finishable: line.finishable,
     actions: purchaseActions(status),
+    wish: null,
+  };
+}
+
+/** Money a wish's plan holds in a week or the extras: «Желание» until an expense buys the wish, then «Куплено». */
+function wishPurchaseRow(status: PurchaseStatus, saved: Pick<SavedBudget, 'wishPayments'>) {
+  const p = status.purchase;
+  const bought = isBought(saved, p.wish!);
+  return {
+    ...row({
+      id: `purchase-${p.id}`,
+      title: p.title,
+      details: bought ? 'Желание · куплено' : 'Желание',
+      icon: 'sparkles',
+      color: bought ? toneColor('gray') : toneColor('yellow'),
+      amount: p.amount,
+      mark: p.envelope,
+      muted: bought,
+    }),
+    purchase: { ...p, weekLabel: weekLabel(p.week) },
+    bought,
+    finishable: false,
+    actions: [],
+    wish: p.wish!,
   };
 }
 
@@ -268,13 +297,13 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
     /** What the week allows and the usual amount; another amount posts to /api/week-limits/:week, the usual one back to /api/week-limits/:week/delete. */
     limit: { amount: w.limit, usual: WEEK_LIMIT },
     days: expenseDays(d.marking, w.spending, today),
-    plan: [...w.purchases.map((p) => purchaseRow(p, current, d.symbol)), ...w.regular.map((r) => regularPaymentRow(r, d.symbol))],
+    plan: [...w.purchases.map((p) => purchaseRow(p, current, d.symbol, saved)), ...w.regular.map((r) => regularPaymentRow(r, d.symbol))],
     wishes:
       phase === 'current'
-        ? d.wishes.map(({ wish, advice }) => ({
-            ...row({ id: `wish-${wish.id}`, title: wish.title, details: adviceText(advice, current, d.symbol), icon: 'sparkles', color: toneColor('yellow'), amount: wish.amount }),
+        ? d.wishes.map(({ wish, advice, plan }) => ({
+            ...row({ id: `wish-${wish.id}`, title: wish.title, details: wishLine(wish, plan, adviceText(advice, current, d.symbol), d.symbol), icon: 'sparkles', color: toneColor('yellow'), amount: wish.amount }),
             wish,
-            plannable: adviceTarget(advice) !== null,
+            plannable: plan === undefined && adviceTarget(advice) !== null,
           }))
         : null,
     weekChoices: weekChoices(current),
@@ -285,9 +314,9 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
 
 /**
  * Where a month's income goes, as the app's month tab draws it: the month's regular payments, the budgets of its weeks,
- * the extras, and what is left over for savings (short of money when it is below zero). The income is what the incomes
- * bring a month, as /income counts it; null without incomes. With round figures the parts are to the hundred and add up
- * to the income rounded.
+ * the extras, what the plans of wishes take from its savings, and what is left over for savings (short of money when
+ * it is below zero). The income is what the incomes bring a month, as /income counts it; null without incomes. With
+ * round figures the parts are to the hundred and add up to the income rounded.
  */
 function monthFlow(d: ReturnType<typeof loadDashboard>, saved: SavedBudget, incomes: Income[], thisMonth: MonthString) {
   const exact = monthlyIncome(incomes);
@@ -297,10 +326,11 @@ function monthFlow(d: ReturnType<typeof loadDashboard>, saved: SavedBudget, inco
     saved.regular.filter((e) => paymentDate(e, month) !== null).reduce((sum, e) => sum + e.amount, 0),
     d.weeks.reduce((sum, w) => sum + w.limit, 0),
     MONTH_LIMIT,
+    savingsTaken([...(saved.wishPlans?.values() ?? [])].map((plan) => ({ plan })), month),
   ];
   exactParts.push(exact - exactParts.reduce((sum, p) => sum + p, 0));
-  const [regular, weeks, extras, savings] = (saved.roundFigures ? roundParts(exactParts) : exactParts) as [number, number, number, number];
-  const income = regular + weeks + extras + savings;
+  const [regular, weeks, extras, wishes, savings] = (saved.roundFigures ? roundParts(exactParts) : exactParts) as [number, number, number, number, number];
+  const income = regular + weeks + extras + wishes + savings;
   const part = (label: string, amount: number) => ({ label, amount, share: amount / income });
   return {
     income: { label: 'Доход', amount: income, note: month === thisMonth ? 'в этом месяце' : `в ${monthName(month, 'prepositional')}` },
@@ -308,6 +338,7 @@ function monthFlow(d: ReturnType<typeof loadDashboard>, saved: SavedBudget, inco
       part('Обязательные расходы', regular),
       part('Недельные бюджеты', weeks),
       part('Доп. бюджет', extras),
+      ...(wishes > 0 ? [part('На желания', wishes)] : []),
       part(savings >= 0 ? 'В накопления' : 'Не хватает', savings),
     ],
   };
@@ -341,7 +372,7 @@ export function monthScreen(data: EntityCollections, saved: SavedBudget, options
     }),
     total,
     flow: monthFlow(d, saved, options.incomes ?? [], thisMonth),
-    purchases: m.purchases.map((p) => purchaseRow(p, current, d.symbol)),
+    purchases: m.purchases.map((p) => purchaseRow(p, current, d.symbol, saved)),
     spending: expenseDays(d.marking, m.spending, today),
     newPurchaseWeek: m.month === thisMonth ? current : (d.weeks[0]?.week ?? current),
     weekChoices: weekChoices(current),
@@ -368,9 +399,10 @@ export function spendingScreen(data: EntityCollections, saved: SavedMarking, opt
   const colored = (c: MarkingChoice): MarkingChoice => (c.color ? { ...c, color: colorOf(c.color) } : c);
   const regular = new Map(saved.regular.map((e) => [`regular-${e.id}`, e]));
   const purchases = new Map(saved.purchases.map((p) => [`purchase-${p.id}`, p]));
-  /** A payment's icon: the one picked for its regular expense, or one by its title. */
+  /** A payment's icon: the one picked for its regular expense, a wish's, or one by its title. */
   const paymentIcon = (choice: string): IconName => {
     const e = regular.get(choice);
+    if (choice.startsWith('wish-')) return 'sparkles';
     return e ? entryIcon(e.icon, e.title) : categoryIcon(purchases.get(choice)?.title ?? '');
   };
   const time = timeOn(o.date, o.created);
@@ -779,4 +811,81 @@ export function categoriesScreen(data: EntityCollections, saved: SavedMarking, o
       hidden: d.incomeCategories.filter((c) => c.category.hidden).map(item),
     },
   };
+}
+
+/**
+ * A wish's screen: what it is and by when, the ways to afford it as cards to pick together, what they gather, and the
+ * plan's steps up to buying it (see pages/wishes.ts). `ways` are the ways picked as the app sends them; without them
+ * the screen shows the chosen plan. Null when there is no such wish.
+ */
+export function wishScreen(data: EntityCollections, saved: SavedBudget, options: { today: DateString; id: number; ways: string | null; incomes: Income[] }) {
+  const { today } = options;
+  const view = wishPlan(data, saved, options);
+  const wish = saved.wishes.find((w) => w.id === options.id);
+  if (!view || !wish) return null;
+  const s = mainCurrency(data).symbol;
+  const { goal, plan } = view;
+  const late = plan.buyWeek > weekOf(goal.due, saved.weekStart);
+  return {
+    symbol: s,
+    current: weekOf(today, saved.weekStart),
+    wish: { id: wish.id, title: wish.title, amount: wish.amount, due: goal.due, dueSet: wish.due !== null },
+    /** The days the wish can be needed by: from tomorrow to a year ahead. */
+    dueRange: { from: addDays(today, 1), to: addDays(today, 365) },
+    ways: wayCards(view, saved.purchases, s),
+    picks: view.picks,
+    covered: Math.min(goal.amount, covered(plan.steps)),
+    short: plan.short,
+    steps: planStepRows(view, saved, s),
+    buy: { label: late ? `${weekLabel(plan.buyWeek)} · позже срока` : weekLabel(plan.buyWeek), late },
+    chosen: view.chosen,
+    planned: view.planned,
+    bought: view.bought,
+  };
+}
+
+/**
+ * A plan's steps by date as rows: each week's money held with what the week then allows, a month's extras held for the
+ * buying or set aside, savings with what they keep, and the purchases moved.
+ */
+function planStepRows(view: WishPlanView, saved: SavedBudget, s: string) {
+  const { context, plan } = view;
+  const buyingMonth = monthOfWeek(plan.buyWeek);
+  const held = new Map<string, Extract<Step, { kind: 'week' | 'extra' }>>();
+  const others: Step[] = [];
+  for (const step of plan.steps) {
+    if (step.kind !== 'week' && step.kind !== 'extra') {
+      others.push(step);
+      continue;
+    }
+    const key = `${step.kind}/${step.week}`;
+    const before = held.get(key);
+    held.set(key, before ? { ...before, amount: before.amount + step.amount } : step);
+  }
+  const rows = [...held.values(), ...others].map((step, i) => {
+    const id = `step-${i}`;
+    switch (step.kind) {
+      case 'week': {
+        const usual = weekLimit(context.budget, step.week);
+        return { date: step.week, ...row({ id, title: weekLabel(step.week), details: `${num(usual - step.amount)} вместо ${num(usual)}`, icon: 'calendar', color: toneColor('yellow'), amount: step.amount, mark: 'week' }) };
+      }
+      case 'extra': {
+        const month = stepMonth(step);
+        return {
+          date: step.week,
+          ...row({ id, title: `Дополнительные ${monthName(month, 'genitive')}`, details: month === buyingMonth ? 'на покупку' : 'отложить', icon: 'bag', color: toneColor('violet'), amount: step.amount, mark: 'extra' }),
+        };
+      }
+      case 'savings':
+        return {
+          date: plan.buyWeek,
+          ...row({ id, title: `Накопления ${monthName(step.month, 'genitive')}`, details: `останется ${num(context.savings(step.month) - step.amount)}`, icon: 'piggy', color: toneColor('green'), amount: step.amount, mark: 'outside' }),
+        };
+      case 'move': {
+        const title = saved.purchases.find((p) => p.id === step.purchase)?.title ?? 'Покупка';
+        return { date: step.from, ...row({ id, title, details: `перенести на ${monthName(monthOfWeek(step.to))}`, icon: 'arrows', color: toneColor('gray'), amount: step.amount }) };
+      }
+    }
+  });
+  return rows.sort((a, b) => a.date.localeCompare(b.date));
 }

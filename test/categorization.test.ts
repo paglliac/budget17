@@ -120,7 +120,8 @@ describe('paymentChoices', () => {
     done: false,
     ...overrides,
   });
-  const named = (choices: PaymentChoice[]) => choices.map((c) => ('regular' in c ? `${c.regular.title} ${c.date} ${c.left}` : `${c.purchase.title} ${c.left}`));
+  const named = (choices: PaymentChoice[]) =>
+    choices.map((c) => ('regular' in c ? `${c.regular.title} ${c.date} ${c.left}` : 'purchase' in c ? `${c.purchase.title} ${c.left}` : `${c.wish.title} ${c.week} ${c.left}`));
   const groceries = purchase(1, 'Продукты', 3_000, '2026-10-05');
   const shoes = purchase(2, 'Ботинки', 8_000, '2026-10-12');
 

@@ -38,18 +38,21 @@ export interface Purchase {
   kind: PurchaseKind;
   /** Finished: it keeps what the expenses linked to it paid, and the rest of its amount goes back. */
   done: boolean;
+  /** The wish whose plan holds this money (see wish-plans.ts); such a purchase is not in settings.db. */
+  wish?: number;
 }
 
-export type PurchaseInput = Omit<Purchase, 'id'>;
+export type PurchaseInput = Omit<Purchase, 'id' | 'wish'>;
 
-/** Something to buy some day; the budget tells when. */
+/** Something to buy some day, by the day it is needed if the user said; the budget tells when, or how to afford it. */
 export interface Wish {
   id: number;
   title: string;
   amount: number;
+  due: DateString | null;
 }
 
-export type WishInput = Omit<Wish, 'id'>;
+export type WishInput = Omit<Wish, 'id' | 'due'>;
 
 /** The day of the week a week begins on, 0 for Monday to 6 for Sunday, as weekday() counts. */
 export type WeekStart = number;
@@ -99,12 +102,13 @@ export function weeksOfMonth(month: MonthString, start: WeekStart): DateString[]
 
 /**
  * Spending counts towards its week until moved; a payment of a regular expense is outside the budget, as the expense
- * is, and a payment of a purchase counts where the purchase does.
+ * is, a payment of a purchase counts where the purchase does, and a payment of a wish is outside it too, since the
+ * wish's plan held its money in the weeks and extras before.
  */
-export function envelopeOf(budget: Pick<Budget, 'marks' | 'purchases'>, operation: Pick<Operation, 'id' | 'regular' | 'purchase'>): Envelope {
+export function envelopeOf(budget: Pick<Budget, 'marks' | 'purchases'>, operation: Pick<Operation, 'id' | 'regular' | 'purchase' | 'wish'>): Envelope {
   const marked = budget.marks.get(operation.id);
   if (marked) return marked;
-  if (operation.regular) return 'outside';
+  if (operation.regular || operation.wish) return 'outside';
   const purchase = operation.purchase ? budget.purchases.find((p) => p.id === operation.purchase?.id) : undefined;
   return purchase?.envelope ?? 'week';
 }

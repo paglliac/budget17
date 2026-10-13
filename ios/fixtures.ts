@@ -16,9 +16,11 @@ import {
   uncategorizedScreen,
   weekScreen,
   widgetScreen,
+  wishScreen,
 } from '../src/web/api.ts';
 import { demoCollections } from '../src/web/demo.ts';
 import type { SavedBudget } from '../src/web/pages/dashboard.ts';
+import { submitWishPlan } from '../src/web/pages/wishes.ts';
 
 const folder = process.argv[2];
 if (!folder) throw new Error('Укажите папку: node ios/fixtures.ts <папка>');
@@ -34,6 +36,8 @@ const groceries = settings.addPurchase({ title: 'Продукты', amount: 3_00
 settings.addPurchase({ title: 'Стрижка', amount: 1_500, week: '2026-10-19', envelope: 'week', kind: 'flexible', done: false });
 settings.addPurchase({ title: 'Куртка', amount: 20_000, week: '2026-10-05', envelope: 'extra', kind: 'flexible', done: false });
 settings.addWish({ title: 'Укладка для волос', amount: 4_500 });
+const tyres = settings.addWish({ title: 'Зимняя резина', amount: 60_000 });
+settings.setWishDue(tyres.id, '2026-11-01');
 settings.addIncome({ title: 'Зарплата', model: 'salary', params: { salary: 200_000, advanceDay: 20, payDay: 5 } });
 settings.addIncome({ title: 'Сдача квартиры', model: 'fixed', params: { amount: 30_000, day: 1 } });
 const kids = settings.addOwnCategory('Дети');
@@ -47,6 +51,8 @@ const saved = (): SavedBudget => ({
   purchasePayments: settings.purchasePayments(),
   regular: settings.regularExpenses(),
   purchases: settings.purchases(),
+  wishPayments: settings.wishPayments(),
+  wishPlans: settings.wishPlans(),
   marks: settings.spendingMarks(),
   descriptions: settings.spendingDescriptions(),
   optionalSpending: settings.optionalSpending(),
@@ -64,6 +70,8 @@ if (!paying || !moved) throw new Error('В демо-данных у недели
 settings.linkPurchase(paying.spending, groceries.id);
 settings.markSpending(moved.spending, 'extra');
 settings.markOptional(moved.spending, true);
+// The tyres get a plan: the weeks give 5 000 each and October's extras the rest, so the money it holds shows in the plan.
+submitWishPlan(settings, data, saved(), `/wishes/${tyres.id}/ways`, new URLSearchParams({ ways: 'weeks:5000,extra-2026-10:' }), { today, incomes: settings.incomes() });
 // An income opens to be marked too, with its categories and whether it counts.
 const income = operationsScreen(data, saved(), { today, kind: 'income' }).days.flatMap((d) => d.items)[0];
 if (!income?.spending) throw new Error('В демо-данных нет доходов');
@@ -86,6 +94,8 @@ const screens: Record<string, unknown> = {
   categories: categoriesScreen(data, saved(), { today }),
   'budget-settings': budgetSettingsScreen(data, saved()),
   widget: widgetScreen(data, saved(), { today }),
+  wish: wishScreen(data, saved(), { today, id: tyres.id, ways: null, incomes: settings.incomes() }),
+  'wish-picking': wishScreen(data, saved(), { today, id: tyres.id, ways: 'weeks:3000,extra-2026-10:', incomes: settings.incomes() }),
 };
 for (const [name, screen] of Object.entries(screens)) writeFileSync(join(folder, `${name}.json`), JSON.stringify(screen, null, 2));
 console.log(`API: ${Object.keys(screens).length} экранов в ${folder}`);

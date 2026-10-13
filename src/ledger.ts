@@ -3,7 +3,7 @@ import { categoryFinder, NO_SETUP, type CategoryKind, type CategorySetup } from 
 import type { Categorization } from './categorization.ts';
 import { operationAmount, operationKind, type Category, type OperationKind } from './operations.ts';
 import type { RegularExpense } from './regular.ts';
-import type { Envelope, Purchase } from './week.ts';
+import type { Envelope, Purchase, Wish } from './week.ts';
 import type { DateString, EntityCollections, Instrument, TagId } from './zenmoney/types.ts';
 
 /** A transaction as people read it: who, what for, from which account, how much. */
@@ -35,6 +35,8 @@ export interface Operation {
   regular: { id: number; title: string } | null;
   /** The purchase planned in a week that the user said this expense paid. */
   purchase: { id: number; title: string } | null;
+  /** The wish the user said this expense bought; none when not given. */
+  wish?: { id: number; title: string } | null;
   account: string;
   /** Where a transfer went. */
   toAccount: string | null;
@@ -56,6 +58,9 @@ export interface Sorting {
   /** The purchase each expense paid, by ZenMoney transaction id. */
   purchasePayments?: ReadonlyMap<string, number>;
   purchases?: ReadonlyArray<Pick<Purchase, 'id' | 'title'>>;
+  /** The wish each expense bought, by ZenMoney transaction id. */
+  wishPayments?: ReadonlyMap<string, number>;
+  wishes?: ReadonlyArray<Pick<Wish, 'id' | 'title'>>;
   /** ZenMoney's categories as they are without it. */
   categories?: CategorySetup;
   /** Where the user said expenses count; those not counted at all, incomes among them, are left out. */
@@ -95,6 +100,7 @@ export function listOperations(
   const merchants = new Map((data.merchant ?? []).map((m) => [m.id, m.title]));
   const regular = new Map((sorting?.regular ?? []).map((e) => [e.id, e]));
   const purchases = new Map((sorting?.purchases ?? []).map((p) => [p.id, p]));
+  const wishes = new Map((sorting?.wishes ?? []).map((w) => [w.id, w]));
   const findCategory = categoryFinder(tags, sorting?.categories ?? NO_SETUP);
 
   const operations: Operation[] = [];
@@ -120,6 +126,8 @@ export function listOperations(
     const paid = sorted && 'regular' in sorted ? regular.get(sorted.regular) : undefined;
     const purchaseId = kind === 'expense' ? sorting?.purchasePayments?.get(t.id) : undefined;
     const bought = purchaseId === undefined ? undefined : purchases.get(purchaseId);
+    const wishId = kind === 'expense' ? sorting?.wishPayments?.get(t.id) : undefined;
+    const wish = wishId === undefined ? undefined : wishes.get(wishId);
     const zenmoneyTag = t.tag?.[0];
     const zenmoneyCategory = kind === 'transfer' || zenmoneyTag === undefined ? undefined : findCategory(zenmoneyTag);
     const category = (sorted && 'tag' in sorted ? findCategory(sorted.tag) : undefined) ?? zenmoneyCategory;
@@ -133,6 +141,7 @@ export function listOperations(
       category?.title ||
       paid?.title ||
       bought?.title ||
+      wish?.title ||
       UNTITLED[kind];
 
     operations.push({
@@ -149,10 +158,11 @@ export function listOperations(
       originalPayee: originalPayee && originalPayee.toLocaleLowerCase('ru') !== payee.toLocaleLowerCase('ru') ? originalPayee : null,
       comment: comment === payee ? null : comment,
       description: sorting?.descriptions?.get(t.id) ?? null,
-      category: category ?? (paid ? REGULAR_CATEGORY : bought ? PURCHASE_CATEGORY : null),
+      category: category ?? (paid ? REGULAR_CATEGORY : bought || wish ? PURCHASE_CATEGORY : null),
       zenmoneyCategory: zenmoneyCategory ?? null,
       regular: paid ? { id: paid.id, title: paid.title } : null,
       purchase: bought ? { id: bought.id, title: bought.title } : null,
+      wish: wish ? { id: wish.id, title: wish.title } : null,
       account,
       toAccount,
       hold: Boolean(t.hold),

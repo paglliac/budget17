@@ -18,6 +18,7 @@ import type { MonthString } from './dates.ts';
 import { isIncomeModel, type Income, type IncomeInput } from './income.ts';
 import type { RegularExpense, RegularExpenseInput } from './regular.ts';
 import { alignWeek, type Envelope, type Purchase, type PurchaseInput, type WeekStart, type Wish, type WishInput } from './week.ts';
+import type { ChosenPlan, Step } from './wish-plans.ts';
 import type { DateString, TagId } from './zenmoney/types.ts';
 
 const SCHEMA = `
@@ -49,10 +50,33 @@ const SCHEMA = `
     done INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1))
   ) STRICT;
 
+  -- due is the day the wish is needed by; ways and buy_week are those of the plan chosen for it (wish-plans.ts), whose
+  -- steps are in wish_step.
   CREATE TABLE IF NOT EXISTS wish (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
     amount REAL NOT NULL CHECK (amount > 0)
+  ) STRICT;
+
+  -- Steps of the plans chosen for wishes: money held in a week (kind week, from the week's money, or extra, from its
+  -- month's extras), taken from a month's savings, or a flexible purchase moved from week to to_week; way is the way
+  -- it comes from.
+  CREATE TABLE IF NOT EXISTS wish_step (
+    id INTEGER PRIMARY KEY,
+    wish_id INTEGER NOT NULL,
+    way TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('week', 'extra', 'savings', 'move')),
+    week TEXT,
+    month TEXT,
+    amount REAL NOT NULL,
+    purchase_id INTEGER,
+    to_week TEXT
+  ) STRICT;
+
+  -- ZenMoney expenses that bought a wish. They count outside the budget, since the wish's plan held their money.
+  CREATE TABLE IF NOT EXISTS wish_payment (
+    transaction_id TEXT PRIMARY KEY,
+    wish_id INTEGER NOT NULL
   ) STRICT;
 
   -- ZenMoney spending moved out of its week; spending without a mark counts towards the week.
@@ -198,6 +222,9 @@ const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> 
   ['purchase', 'kind', "TEXT NOT NULL DEFAULT 'flexible' CHECK (kind IN ('required', 'flexible'))"],
   ['own_category', 'kind', "TEXT NOT NULL DEFAULT 'expense' CHECK (kind IN ('expense', 'income'))"],
   ['claude_request', 'error', 'TEXT'],
+  ['wish', 'due', 'TEXT'],
+  ['wish', 'ways', 'TEXT'],
+  ['wish', 'buy_week', 'TEXT'],
 ];
 
 /**
@@ -353,6 +380,12 @@ export class Settings {
       this.#db.prepare('DELETE FROM week_limit').run();
       const insert = this.#db.prepare('INSERT INTO week_limit (week, amount) VALUES (?, ?)');
       for (const [week, amount] of limits) insert.run(alignWeek(week, start), amount);
+      const steps = this.#db.prepare('SELECT id, week, to_week FROM wish_step WHERE week IS NOT NULL').all();
+      const moveStep = this.#db.prepare('UPDATE wish_step SET week = ?, to_week = ? WHERE id = ?');
+      for (const s of steps) moveStep.run(alignWeek(String(s.week), start), s.to_week === null ? null : alignWeek(String(s.to_week), start), Number(s.id));
+      const wishes = this.#db.prepare('SELECT id, buy_week FROM wish WHERE buy_week IS NOT NULL').all();
+      const moveWish = this.#db.prepare('UPDATE wish SET buy_week = ? WHERE id = ?');
+      for (const w of wishes) moveWish.run(alignWeek(String(w.buy_week), start), Number(w.id));
     });
   }
 
@@ -422,24 +455,33 @@ export class Settings {
   /** Wishes in the order they were added. */
   wishes(): Wish[] {
     return this.#db
-      .prepare('SELECT id, title, amount FROM wish ORDER BY id')
+      .prepare('SELECT id, title, amount, due FROM wish ORDER BY id')
       .all()
-      .map((row) => ({ id: Number(row.id), title: String(row.title), amount: Number(row.amount) }));
+      .map((row) => ({ id: Number(row.id), title: String(row.title), amount: Number(row.amount), due: row.due === null ? null : String(row.due) }));
   }
 
   addWish(wish: WishInput): Wish {
     const { lastInsertRowid } = this.#db.prepare('INSERT INTO wish (title, amount) VALUES (?, ?)').run(wish.title, wish.amount);
-    return { id: Number(lastInsertRowid), ...wish };
+    return { id: Number(lastInsertRowid), ...wish, due: null };
   }
 
-  /** False when there is no such wish. */
+  /** False when there is no such wish. Its plan stays as chosen. */
   updateWish(id: number, wish: WishInput): boolean {
     return Number(this.#db.prepare('UPDATE wish SET title = ?, amount = ? WHERE id = ?').run(wish.title, wish.amount, id).changes) > 0;
   }
 
-  /** False when there is no such wish. */
+  /** Sets the day a wish is needed by; false when there is no such wish. Its plan stays as chosen. */
+  setWishDue(id: number, due: DateString | null): boolean {
+    return Number(this.#db.prepare('UPDATE wish SET due = ? WHERE id = ?').run(due, id).changes) > 0;
+  }
+
+  /** False when there is no such wish. Its plan goes, the purchases it moved back, and its expenses are left unsorted. */
   deleteWish(id: number): boolean {
-    return Number(this.#db.prepare('DELETE FROM wish WHERE id = ?').run(id).changes) > 0;
+    return this.#transaction(() => {
+      this.dropWishPlan(id);
+      this.#db.prepare('DELETE FROM wish_payment WHERE wish_id = ?').run(id);
+      return Number(this.#db.prepare('DELETE FROM wish WHERE id = ?').run(id).changes) > 0;
+    });
   }
 
   /** Turns a wish into a purchase of the given week, in one transaction; null when there is no such wish. */
@@ -449,6 +491,82 @@ export class Settings {
     return this.#transaction(() => {
       this.deleteWish(id);
       return this.addPurchase({ title: wish.title, amount: wish.amount, ...target, kind: 'flexible', done: false });
+    });
+  }
+
+  /** The plans chosen for wishes, by wish id. */
+  wishPlans(): Map<number, ChosenPlan> {
+    const plans = new Map<number, ChosenPlan>();
+    for (const row of this.#db.prepare('SELECT id, ways, buy_week FROM wish WHERE ways IS NOT NULL AND buy_week IS NOT NULL').all()) {
+      plans.set(Number(row.id), { ways: String(row.ways), buyWeek: String(row.buy_week), steps: [] });
+    }
+    for (const row of this.#db.prepare('SELECT wish_id, way, kind, week, month, amount, purchase_id, to_week FROM wish_step ORDER BY id').all()) {
+      const plan = plans.get(Number(row.wish_id));
+      if (!plan) continue;
+      const way = String(row.way);
+      const amount = Number(row.amount);
+      const step: Step =
+        row.kind === 'savings'
+          ? { way, kind: 'savings', month: String(row.month), amount }
+          : row.kind === 'move'
+            ? { way, kind: 'move', purchase: Number(row.purchase_id), from: String(row.week), to: String(row.to_week), amount }
+            : { way, kind: row.kind === 'extra' ? 'extra' : 'week', week: String(row.week), amount };
+      plan.steps.push(step);
+    }
+    return plans;
+  }
+
+  /**
+   * Keeps the plan chosen for a wish instead of the one it had, and moves the purchases it moves; false when there is
+   * no such wish.
+   */
+  chooseWishPlan(id: number, plan: ChosenPlan): boolean {
+    return this.#transaction(() => {
+      if (!this.wishes().some((w) => w.id === id)) return false;
+      this.dropWishPlan(id);
+      this.#db.prepare('UPDATE wish SET ways = ?, buy_week = ? WHERE id = ?').run(plan.ways, plan.buyWeek, id);
+      const insert = this.#db.prepare('INSERT INTO wish_step (wish_id, way, kind, week, month, amount, purchase_id, to_week) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      const move = this.#db.prepare('UPDATE purchase SET week = ? WHERE id = ? AND week = ?');
+      for (const step of plan.steps) {
+        if (step.kind === 'savings') insert.run(id, step.way, step.kind, null, step.month, step.amount, null, null);
+        else if (step.kind === 'move') {
+          insert.run(id, step.way, step.kind, step.from, null, step.amount, step.purchase, step.to);
+          move.run(step.to, step.purchase, step.from);
+        } else insert.run(id, step.way, step.kind, step.week, null, step.amount, null, null);
+      }
+      return true;
+    });
+  }
+
+  /** Forgets the plan chosen for a wish; the purchases it moved go back, unless they were moved again since. */
+  dropWishPlan(id: number): void {
+    this.#transaction(() => {
+      const moves = this.#db.prepare("SELECT purchase_id, week, to_week FROM wish_step WHERE wish_id = ? AND kind = 'move'").all(id);
+      const back = this.#db.prepare('UPDATE purchase SET week = ? WHERE id = ? AND week = ?');
+      for (const m of moves) back.run(String(m.week), Number(m.purchase_id), String(m.to_week));
+      this.#db.prepare('DELETE FROM wish_step WHERE wish_id = ?').run(id);
+      this.#db.prepare('UPDATE wish SET ways = NULL, buy_week = NULL WHERE id = ?').run(id);
+    });
+  }
+
+  /** The wishes expenses bought: wish id by ZenMoney transaction id. */
+  wishPayments(): Map<string, number> {
+    return new Map(
+      this.#db
+        .prepare('SELECT transaction_id, wish_id FROM wish_payment')
+        .all()
+        .map((row) => [String(row.transaction_id), Number(row.wish_id)] as const),
+    );
+  }
+
+  /** Says an expense bought a wish, instead of paying a purchase or a regular expense; null unlinks it. */
+  linkWish(transactionId: string, wishId: number | null): void {
+    this.#transaction(() => {
+      this.#db.prepare('DELETE FROM wish_payment WHERE transaction_id = ?').run(transactionId);
+      if (wishId === null) return;
+      this.#db.prepare('INSERT INTO wish_payment (transaction_id, wish_id) VALUES (?, ?)').run(transactionId, wishId);
+      this.#db.prepare('DELETE FROM purchase_payment WHERE transaction_id = ?').run(transactionId);
+      this.#db.prepare('DELETE FROM categorization WHERE transaction_id = ? AND regular_expense_id IS NOT NULL').run(transactionId);
     });
   }
 
@@ -518,7 +636,10 @@ export class Settings {
           'INSERT INTO categorization (transaction_id, tag_id, regular_expense_id) VALUES (?, ?, ?) ON CONFLICT (transaction_id) DO UPDATE SET tag_id = excluded.tag_id, regular_expense_id = excluded.regular_expense_id',
         )
         .run(transactionId, tag, regular);
-      if (regular !== null) this.#db.prepare('DELETE FROM purchase_payment WHERE transaction_id = ?').run(transactionId);
+      if (regular !== null) {
+        this.#db.prepare('DELETE FROM purchase_payment WHERE transaction_id = ?').run(transactionId);
+        this.#db.prepare('DELETE FROM wish_payment WHERE transaction_id = ?').run(transactionId);
+      }
     });
   }
 
@@ -541,6 +662,7 @@ export class Settings {
       this.#db.prepare('DELETE FROM purchase_payment WHERE transaction_id = ?').run(transactionId);
       if (purchaseId === null) return;
       this.#db.prepare('INSERT INTO purchase_payment (transaction_id, purchase_id) VALUES (?, ?)').run(transactionId, purchaseId);
+      this.#db.prepare('DELETE FROM wish_payment WHERE transaction_id = ?').run(transactionId);
       this.#db.prepare('DELETE FROM categorization WHERE transaction_id = ? AND regular_expense_id IS NOT NULL').run(transactionId);
     });
   }
@@ -833,7 +955,9 @@ export class Settings {
     });
   }
 
+  /** Runs in one transaction; a transaction begun inside another is part of it. */
   #transaction<T>(run: () => T): T {
+    if (this.#db.isTransaction) return run();
     this.#db.exec('BEGIN');
     try {
       const result = run();

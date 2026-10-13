@@ -557,6 +557,96 @@ describe('Settings', () => {
     }
   });
 
+  it('keeps the day a wish is needed by and the plan chosen for it, moving the purchases it moves and back', () => {
+    using settings = new Settings(':memory:');
+    const tyres = settings.addWish({ title: 'Резина', amount: 60_000 });
+    const boots = settings.addPurchase({ title: 'Ботинки', amount: 9_500, week: '2026-10-24', envelope: 'extra', kind: 'flexible', done: false });
+    assert.equal(tyres.due, null);
+    assert.equal(settings.setWishDue(tyres.id, '2026-11-01'), true);
+    assert.equal(settings.wishes()[0]?.due, '2026-11-01');
+
+    const plan = {
+      ways: 'weeks:5000,flexible:,extra-2026-10:',
+      buyWeek: '2026-10-31',
+      steps: [
+        { way: 'weeks', kind: 'week' as const, week: '2026-10-17', amount: 5_000 },
+        { way: 'flexible', kind: 'move' as const, purchase: boots.id, from: '2026-10-24', to: '2026-12-05', amount: 9_500 },
+        { way: 'flexible', kind: 'extra' as const, week: '2026-10-10', amount: 9_500 },
+        { way: 'savings', kind: 'savings' as const, month: '2026-11', amount: 3_000 },
+      ],
+    };
+    assert.equal(settings.chooseWishPlan(tyres.id, plan), true);
+    assert.deepEqual(settings.wishPlans().get(tyres.id), plan);
+    assert.equal(settings.purchases()[0]?.week, '2026-12-05', 'the plan moves the flexible purchase past the day');
+    assert.equal(settings.updateWish(tyres.id, { title: 'Зимняя резина', amount: 60_000 }), true);
+    assert.equal(settings.wishPlans().has(tyres.id), true, 'changing the wish keeps its plan');
+
+    settings.dropWishPlan(tyres.id);
+    assert.equal(settings.wishPlans().has(tyres.id), false);
+    assert.equal(settings.purchases()[0]?.week, '2026-10-24', 'the purchase goes back where it was');
+
+    settings.chooseWishPlan(tyres.id, plan);
+    settings.updatePurchase(boots.id, { week: '2026-12-12' });
+    settings.deleteWish(tyres.id);
+    assert.equal(settings.purchases()[0]?.week, '2026-12-12', 'a purchase moved again since stays where the user put it');
+    assert.equal(settings.wishPlans().size, 0);
+    assert.equal(settings.chooseWishPlan(tyres.id, plan), false);
+  });
+
+  it('links an expense to the wish it bought instead of a purchase or a regular expense, and forgets it with the wish', () => {
+    using settings = new Settings(':memory:');
+    const tyres = settings.addWish({ title: 'Резина', amount: 60_000 });
+    const shoes = settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: false });
+    const school = settings.addRegularExpense(regularInput({ title: 'Школа', amount: 45_000, day: 7 }));
+
+    settings.linkPurchase('t1', shoes.id);
+    settings.linkWish('t1', tyres.id);
+    assert.deepEqual([...settings.wishPayments()], [['t1', tyres.id]]);
+    assert.equal(settings.purchasePayments().size, 0, 'an expense that bought a wish paid no purchase');
+    settings.linkPurchase('t1', shoes.id);
+    assert.equal(settings.wishPayments().size, 0, 'nor the other way round');
+    settings.linkWish('t1', tyres.id);
+    settings.categorize('t1', { regular: school.id });
+    assert.equal(settings.wishPayments().size, 0, 'a payment of a regular expense bought no wish');
+
+    settings.linkWish('t2', tyres.id);
+    settings.linkWish('t3', tyres.id);
+    settings.linkWish('t3', null);
+    assert.deepEqual([...settings.wishPayments().keys()], ['t2']);
+    settings.deleteWish(tyres.id);
+    assert.equal(settings.wishPayments().size, 0);
+  });
+
+  it('adds the day and the plan of wishes to a file made before them, keeping its wishes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
+    try {
+      const path = join(dir, 'settings.db');
+      {
+        using db = new DatabaseSync(path);
+        db.exec('CREATE TABLE wish (id INTEGER PRIMARY KEY, title TEXT NOT NULL, amount REAL NOT NULL CHECK (amount > 0)) STRICT');
+        db.exec(`INSERT INTO wish (title, amount) VALUES ('Резина Танюшке', 60000)`);
+      }
+      using settings = new Settings(path);
+      assert.deepEqual(settings.wishes(), [{ id: 1, title: 'Резина Танюшке', amount: 60_000, due: null }]);
+      settings.setWishDue(1, '2026-11-01');
+      settings.chooseWishPlan(1, { ways: 'extra-2026-10:', buyWeek: '2026-10-31', steps: [{ way: 'extra-2026-10', kind: 'extra', week: '2026-10-10', amount: 60_000 }] });
+      assert.equal(settings.wishes()[0]?.due, '2026-11-01');
+      assert.equal(settings.wishPlans().get(1)?.steps.length, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('moves the weeks of wishes\' plans with the first day of a week', () => {
+    using settings = new Settings(':memory:');
+    const tyres = settings.addWish({ title: 'Резина', amount: 60_000 });
+    settings.chooseWishPlan(tyres.id, { ways: 'weeks:5000', buyWeek: '2026-10-26', steps: [{ way: 'weeks', kind: 'week', week: '2026-10-12', amount: 5_000 }] });
+    settings.setWeekStart(5);
+    const plan = settings.wishPlans().get(tyres.id);
+    assert.equal(plan?.buyWeek, '2026-10-24');
+    assert.deepEqual(plan?.steps, [{ way: 'weeks', kind: 'week', week: '2026-10-10', amount: 5_000 }]);
+  });
+
   it('keeps the token Claude signs in by, and forgets it', () => {
     using settings = new Settings(':memory:');
     assert.equal(settings.claudeToken(), null);

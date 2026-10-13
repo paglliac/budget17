@@ -190,6 +190,48 @@ final class ScreensTests: XCTestCase {
         }
     }
 
+    /// Picks two ways for the first wish, the weeks by hand and the extras for the rest, chooses the plan and takes it back.
+    /// It changes data, so it runs only against a server with copied databases: TEST_RUNNER_WISHES=1.
+    func testWishPlan() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["WISHES"] == "1", "changes data: only against a copy")
+        let reserved = app.buttons["reserved"]
+        XCTAssert(reserved.waitForExistence(timeout: 15))
+        reserved.tap()
+        sleep(2)
+        app.swipeUp()
+        app.swipeUp()
+        let wish = app.buttons["wish-1"]
+        XCTAssert(wish.waitForExistence(timeout: 5))
+        shot("wishes")
+        wish.tap()
+        XCTAssert(app.buttons["way-weeks"].waitForExistence(timeout: 10))
+        shot("wish")
+        app.buttons["way-weeks"].tap()
+        sleep(2)
+        app.swipeUp()
+        app.sliders["slider-weeks"].adjust(toNormalizedSliderPosition: 0.25)
+        sleep(2)
+        shot("wish-weeks")
+        app.swipeDown()
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'way-extra-'")).firstMatch.tap()
+        sleep(2)
+        shot("wish-weeks-extras")
+        app.buttons["Выбрать"].tap()
+        sleep(2)
+        app.swipeUp()
+        app.swipeUp()
+        shot("wish-chosen")
+        app.buttons["Готово"].firstMatch.tap()
+        sleep(1)
+        shot("wishes-chosen")
+        app.buttons["wish-1"].tap()
+        XCTAssert(app.buttons["Отменить"].waitForExistence(timeout: 10))
+        app.buttons["Отменить"].tap()
+        sleep(2)
+        shot("wish-unchosen")
+        app.buttons["Готово"].firstMatch.tap()
+    }
+
     /// Marks an expense and takes it back: a category, a payment and where it counts. It changes data, so it runs only
     /// against a server with copied databases: TEST_RUNNER_MARKING=1.
     func testMarking() throws {

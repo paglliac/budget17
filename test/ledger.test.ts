@@ -52,6 +52,7 @@ describe('listOperations', () => {
       zenmoneyCategory: { id: transport.id, title: 'Транспорт', color: '#5b84f0' },
       regular: null,
       purchase: null,
+      wish: null,
       account: 'Т-Банк',
       toAccount: null,
       hold: true,

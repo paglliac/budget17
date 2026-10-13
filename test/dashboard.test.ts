@@ -30,7 +30,7 @@ function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
       { id: 2, title: 'Подарок', amount: 5_000, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: true },
       { id: 3, title: 'Куртка', amount: 20_000, week: '2026-10-05', envelope: 'extra', kind: 'flexible', done: false },
     ],
-    wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500 }],
+    wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500, due: null }],
     marks: new Map(marks),
     descriptions: new Map(),
     regular: [regular({ id: 7, title: 'Школа, ЛДК', amount: 45_000, day: 7 })],

@@ -16,9 +16,13 @@ import {
   weekLevel,
   weekScreen,
   widgetScreen,
+  wishScreen,
   withRubleSign,
 } from '../src/web/api.ts';
+import { Settings } from '../src/settings.ts';
 import type { SavedBudget } from '../src/web/pages/dashboard.ts';
+import { submitMarking } from '../src/web/pages/marking.ts';
+import { submitWishPlan } from '../src/web/pages/wishes.ts';
 import { account, regular, RUB, tag, transaction, user } from './fixtures.ts';
 
 const today = '2026-10-06';
@@ -47,7 +51,7 @@ function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
       { id: 3, title: 'Куртка', amount: 20_000, week: '2026-10-05', envelope: 'extra', kind: 'flexible', done: false },
       { id: 4, title: 'Стрижка', amount: 1_500, week: '2026-10-19', envelope: 'week', kind: 'flexible', done: false },
     ],
-    wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500 }],
+    wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500, due: null }],
     marks: new Map(marks),
     descriptions: new Map(),
     regular: [regular({ id: 7, title: 'Школа, ЛДК', amount: 45_000, day: 7 })],
@@ -570,5 +574,121 @@ describe('api', () => {
     assert.equal(operations.categoriesTitle, 'Расходы по категориям');
     assert.equal(plain(operationsScreen(data(), saved(), { today, kind: 'income' })).categoriesTitle, 'Доходы по категориям');
     assert.equal(plain(widgetScreen(data(), saved([['salary', 'ignored']]), { today })).savings.amount, -70_473, 'nor in savings');
+  });
+});
+
+describe('api: a wish’s plan', () => {
+  /** What the server reads from settings.db, as savedBudget does. */
+  const savedOf = (settings: Settings): SavedBudget => ({
+    categorizations: settings.categorizations(),
+    purchasePayments: settings.purchasePayments(),
+    regular: settings.regularExpenses(),
+    purchases: settings.purchases(),
+    wishPayments: settings.wishPayments(),
+    wishes: settings.wishes(),
+    wishPlans: settings.wishPlans(),
+    marks: settings.spendingMarks(),
+    descriptions: settings.spendingDescriptions(),
+    categories: settings.categorySetup(),
+    weekStart: settings.weekStart(),
+    weekLimits: settings.weekLimits(),
+  });
+  const incomes = [{ id: 1, title: 'Зарплата', model: 'fixed' as const, params: { amount: 400_000, day: 1 } }];
+  const post = (settings: Settings, path: string, fields: Record<string, string> = {}) =>
+    submitWishPlan(settings, data(), savedOf(settings), path, new URLSearchParams(fields), { today, incomes });
+
+  it('offers the ways to afford a wish by its day, keeps the plan chosen and holds its money in the weeks and extras', () => {
+    using settings = new Settings(':memory:');
+    const tyres = settings.addWish({ title: 'Резина', amount: 60_000 });
+    assert.equal(post(settings, `/wishes/${tyres.id}/due`, { due: '2026-11-01' }), 'saved');
+    assert.equal(post(settings, `/wishes/${tyres.id}/due`, { due: today }), 'missing', 'a wish is needed after today');
+
+    const fresh = plain(wishScreen(data(), savedOf(settings), { today, id: tyres.id, ways: null, incomes }));
+    assert.deepEqual(fresh.wish, { id: tyres.id, title: 'Резина', amount: 60_000, due: '2026-11-01', dueSet: true });
+    assert.deepEqual(fresh.ways.map((w: { id: string }) => w.id), ['extra-2026-10', 'weeks', 'savings', 'later-2026-11']);
+    assert.deepEqual([fresh.covered, fresh.short, fresh.chosen, fresh.planned], [0, 60_000, false, false]);
+
+    const picking = plain(wishScreen(data(), savedOf(settings), { today, id: tyres.id, ways: 'weeks:5000,extra-2026-10:', incomes }));
+    assert.deepEqual(
+      picking.ways.filter((w: { on: boolean }) => w.on).map((w: { title: string; amount: number; line: string; fixed: boolean }) => [w.title, w.amount, w.fixed, w.line]),
+      [
+        ['Дополнительные октября', 45_000, false, 'останется 55 000 ₽'],
+        ['Ужать недели', 5_000, true, '40 000 вместо 45 000 · 3 недели, всего 15 000 ₽'],
+      ],
+    );
+    assert.deepEqual([picking.covered, picking.chosen], [60_000, false]);
+
+    assert.equal(post(settings, `/wishes/${tyres.id}/ways`, { ways: 'weeks:5000,extra-2026-10:' }), 'saved');
+    const chosen = plain(wishScreen(data(), savedOf(settings), { today, id: tyres.id, ways: null, incomes }));
+    assert.deepEqual([chosen.picks, chosen.covered, chosen.chosen, chosen.planned, chosen.buy.label], ['weeks:5000,extra-2026-10:', 60_000, true, true, '26 октября – 1 ноября']);
+    assert.deepEqual(
+      chosen.steps.map((s: { date: string; title: string; details: string; amount: number }) => [s.date, s.title, s.details, s.amount]),
+      [
+        ['2026-10-12', '12–18 октября', '40 000 вместо 45 000', 5_000],
+        ['2026-10-19', '19–25 октября', '40 000 вместо 45 000', 5_000],
+        ['2026-10-26', '26 октября – 1 ноября', '40 000 вместо 45 000', 5_000],
+        ['2026-10-26', 'Дополнительные октября', 'на покупку', 45_000],
+      ],
+    );
+
+    const ahead = plain(weekScreen(data(), savedOf(settings), { ...budget, week: '2026-10-12' }));
+    const held = ahead.plan.find((p: { wish: number | null }) => p.wish === tyres.id);
+    assert.deepEqual([held.title, held.details, held.amount, held.mark], ['Резина', 'Желание', 5_000, 'week']);
+    assert.equal(ahead.total.amount, 40_000, 'the week has what the plan holds less');
+    const week = plain(weekScreen(data(), savedOf(settings), budget));
+    assert.deepEqual(
+      week.wishes.map((w: { title: string; details: string; plannable: boolean }) => [w.title, w.details, w.plannable]),
+      [['Резина', 'к 1 ноября · по 5 000 с 3 недель, 45 000 из дополнительных октября', false]],
+    );
+
+    assert.equal(post(settings, `/wishes/${tyres.id}/ways/delete`), 'saved');
+    assert.equal(plain(weekScreen(data(), savedOf(settings), { ...budget, week: '2026-10-12' })).total.amount, 45_000);
+    assert.equal(post(settings, '/wishes/99/ways', { ways: 'weeks:' }), 'missing');
+    assert.equal(post(settings, `/wishes/${tyres.id}/ways`, { ways: 'nothing:' }), 'missing', 'a plan needs a way');
+  });
+
+  it('shows what a plan takes from savings in the month’s flow', () => {
+    using settings = new Settings(':memory:');
+    const tyres = settings.addWish({ title: 'Резина', amount: 60_000 });
+    settings.setWishDue(tyres.id, '2026-11-01');
+    assert.equal(post(settings, `/wishes/${tyres.id}/ways`, { ways: 'savings:' }), 'saved');
+    const month = plain(monthScreen(data(), savedOf(settings), { ...budget, incomes }));
+    assert.deepEqual(
+      month.flow.parts.map((p: { label: string; amount: number }) => [p.label, p.amount]),
+      [
+        ['Обязательные расходы', 0],
+        ['Недельные бюджеты', 225_000],
+        ['Доп. бюджет', 100_000],
+        ['На желания', 60_000],
+        ['В накопления', 15_000],
+      ],
+    );
+  });
+
+  it('lets an expense buy a wish with a plan: it counts outside the budget, and the wish is bought', () => {
+    using settings = new Settings(':memory:');
+    const tyres = settings.addWish({ title: 'Резина', amount: 60_000 });
+    settings.setWishDue(tyres.id, '2026-11-01');
+    post(settings, `/wishes/${tyres.id}/ways`, { ways: 'extra-2026-10:' });
+
+    const before = plain(spendingScreen(data(), savedOf(settings), { today, id: 'transfer' }));
+    assert.deepEqual(
+      before.payments.choices.filter((c: { choice: string }) => c.choice.startsWith('wish-')).map((c: { choice: string; label: string; detail: string; icon: string }) => [c.choice, c.label, c.detail, c.icon]),
+      [[`wish-${tyres.id}`, 'Резина', 'желание · 60 000 ₽', 'sparkles']],
+    );
+
+    assert.deepEqual(submitMarking(settings, data(), `/spending/transfer/wish-${tyres.id}`, new URLSearchParams()), { status: 'saved' });
+    const after = plain(spendingScreen(data(), savedOf(settings), { today, id: 'transfer' }));
+    assert.equal(after.title, 'Резина');
+    assert.deepEqual(after.envelopes.filter((e: { current: boolean }) => e.current).map((e: { choice: string }) => e.choice), ['outside']);
+    const week = plain(weekScreen(data(), savedOf(settings), budget));
+    assert.deepEqual(week.wishes, [], 'a wish bought is no longer wished for');
+    assert.equal(week.total.amount, 45_000 - 473, 'the expense that bought it does not count in the week');
+    const month = plain(monthScreen(data(), savedOf(settings), budget));
+    const held = month.purchases.find((p: { wish: number | null }) => p.wish === tyres.id);
+    assert.deepEqual([held.details, held.muted, held.amount], ['Желание · куплено', true, 60_000]);
+
+    submitMarking(settings, data(), '/spending/transfer/unlink', new URLSearchParams());
+    assert.equal(plain(weekScreen(data(), savedOf(settings), budget)).wishes.length, 1);
   });
 });

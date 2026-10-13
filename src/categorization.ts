@@ -8,7 +8,7 @@ import { isUntitled, type Operation } from './ledger.ts';
 import { shopKey } from './payees.ts';
 import type { Category } from './operations.ts';
 import { nearestPayment, paidBy, type RegularExpense } from './regular.ts';
-import { monthOfWeek, purchaseStatus, weekOf, type Purchase, type WeekStart } from './week.ts';
+import { monthOfWeek, purchaseStatus, weekOf, type Purchase, type WeekStart, type Wish } from './week.ts';
 import type { DateString, TagId } from './zenmoney/types.ts';
 
 /** Where the user put an expense: a category, or the regular expense it paid. A purchase it paid is kept apart. */
@@ -84,13 +84,17 @@ export function suggester(history: Operation[], regular: RegularExpense[]): (exp
   };
 }
 
-/** Something an expense may have paid, with what other expenses have not paid of it yet. */
-export type PaymentChoice = { regular: RegularExpense; date: DateString; left: number } | { purchase: Purchase; left: number };
+/** Something an expense may have paid, with what other expenses have not paid of it yet; a wish is bought whole. */
+export type PaymentChoice =
+  | { regular: RegularExpense; date: DateString; left: number }
+  | { purchase: Purchase; left: number }
+  | { wish: Wish; week: DateString; left: number };
 
 /**
  * What an expense may have paid, likeliest first: payments of regular expenses due within PAYMENT_WINDOW days of it,
- * and purchases planned within PURCHASE_WINDOW days of its week or among the extras of its month. Payments and
- * purchases that other expenses paid in full, and purchases marked bought, are left out. A bill is paid with its
+ * purchases planned within PURCHASE_WINDOW days of its week or among the extras of its month, and wishes whose plan
+ * buys them so near. Payments and purchases that other expenses paid in full, purchases marked bought, the money plans
+ * of wishes hold, and wishes bought are left out. A bill is paid with its
  * amount, so payments whose amount left is the expense's within AMOUNT_SPREAD come first, then the purchases planned
  * in the expense's week, then the rest. Within each, the closer what is left of one to the expense's amount, the
  * likelier it is; then the closer its date. `expenses` are the expenses around it with what they paid, the expense
@@ -98,7 +102,14 @@ export type PaymentChoice = { regular: RegularExpense; date: DateString; left: n
  */
 export function paymentChoices(
   expense: Operation,
-  context: { regular: readonly RegularExpense[]; purchases: readonly Purchase[]; expenses: readonly Operation[]; weekStart: WeekStart },
+  context: {
+    regular: readonly RegularExpense[];
+    purchases: readonly Purchase[];
+    expenses: readonly Operation[];
+    weekStart: WeekStart;
+    /** Wishes with a plan, not bought yet, and the week the plan buys them in. */
+    wishes?: ReadonlyArray<{ wish: Wish; week: DateString }>;
+  },
 ): PaymentChoice[] {
   const others = context.expenses.filter((o) => o.id !== expense.id);
   const week = weekOf(expense.date, context.weekStart);
@@ -112,10 +123,15 @@ export function paymentChoices(
     if (left > 0.005) choices.push({ choice: { regular: e, date, left }, rank, days: Math.abs(daysBetween(expense.date, date)) });
   }
   for (const p of context.purchases) {
+    if (p.wish !== undefined) continue;
     const days = Math.abs(daysBetween(week, p.week));
     const near = days <= PURCHASE_WINDOW || (p.envelope === 'extra' && monthOfWeek(p.week) === monthOfWeek(week));
     const status = purchaseStatus(p, others);
     if (near && !status.bought) choices.push({ choice: { purchase: p, left: status.left }, rank: p.week === week ? 1 : 2, days });
+  }
+  for (const { wish, week: buying } of context.wishes ?? []) {
+    const days = Math.abs(daysBetween(week, buying));
+    if (days <= PURCHASE_WINDOW || monthOfWeek(buying) === monthOfWeek(week)) choices.push({ choice: { wish, week: buying, left: wish.amount }, rank: buying === week ? 1 : 2, days });
   }
   const distance = (left: number) => Math.abs(left - expense.amount) / Math.max(left, expense.amount);
   return choices.sort((a, b) => a.rank - b.rank || distance(a.choice.left) - distance(b.choice.left) || a.days - b.days).map((c) => c.choice);
@@ -128,7 +144,7 @@ export function paymentChoices(
  * payee nor comment.
  */
 function payeeKey(o: Operation): string | null {
-  const named = !isUntitled(o) && ![o.category?.title, o.regular?.title, o.purchase?.title].includes(o.payee);
+  const named = !isUntitled(o) && ![o.category?.title, o.regular?.title, o.purchase?.title, o.wish?.title].includes(o.payee);
   const name = named ? o.payee : o.comment;
   return name ? shopKey(name) || null : null;
 }

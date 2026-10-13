@@ -420,7 +420,7 @@ struct PlanContent: View {
                     LilacRoundButton(systemImage: "plus", label: "Добавить желание") { sheet = .wish(nil) }
                 }
                 ForEach(Array(wishes.enumerated()), id: \.element.id) { index, item in
-                    Button { sheet = .wish(item) } label: {
+                    Button { sheet = .wish(item.wish.id) } label: {
                         LilacRow(marker: .symbol("sparkles", Palette.week), title: item.row.title, details: item.row.details, amount: item.row.amount,
                                  symbol: s.symbol, first: index == 0) {
                             if item.plannable {
@@ -429,6 +429,7 @@ struct PlanContent: View {
                         }
                     }
                     .buttonStyle(.card)
+                    .accessibilityIdentifier("wish-\(item.wish.id)")
                 }
                 if wishes.isEmpty { LilacAddRow(label: "Добавить желание") { sheet = .wish(nil) } }
             }
@@ -474,7 +475,9 @@ struct PlanRow: View {
 
     var body: some View {
         Button {
-            if let purchase = item.purchase {
+            if let wish = item.wish {
+                sheet = .wish(wish)
+            } else if let purchase = item.purchase {
                 sheet = .purchase(PurchaseDraft(purchase: purchase, week: purchase.week, envelope: purchase.envelope, choices: choices, actions: item.actions, symbol: symbol))
             } else if let regular = item.regular {
                 sheet = .regular(regular)
@@ -485,7 +488,7 @@ struct PlanRow: View {
         .buttonStyle(.card)
         .accessibilityIdentifier(item.id)
         .contextMenu {
-            if let purchase = item.purchase, item.finishable {
+            if item.wish == nil, let purchase = item.purchase, item.finishable {
                 Button("Завершить: остаток вернётся", systemImage: "checkmark") {
                     Task {
                         do { try await session.send("purchases/\(purchase.id)/done") } catch { self.error = error.localizedDescription }
@@ -496,6 +499,7 @@ struct PlanRow: View {
     }
 
     private var marker: LilacMarker {
+        if item.wish != nil { return .symbol(item.row.muted ? "checkmark" : "sparkles", item.row.muted ? Lilac.muted : Palette.week) }
         if let purchase = item.purchase {
             if item.row.muted { return .symbol("checkmark", Lilac.muted) }
             return purchase.kind == "required" ? .dot(Lilac.accent) : .ring(Lilac.accent)

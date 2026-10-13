@@ -16,7 +16,8 @@ import { listOperations, PURCHASE_CATEGORY, REGULAR_CATEGORY, type Operation } f
 import { operationKind } from '../../operations.ts';
 import { nearestPayment, type RegularExpense } from '../../regular.ts';
 import type { Settings } from '../../settings.ts';
-import { envelopeOf, purchaseStatus, weekOf, type Envelope, type Purchase, type WeekStart } from '../../week.ts';
+import { envelopeOf, purchaseStatus, weekOf, type Envelope, type Purchase, type WeekStart, type Wish } from '../../week.ts';
+import type { ChosenPlan } from '../../wish-plans.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { dayMonth, money, timeOn, weekLabel } from '../format.ts';
 import type { Html } from '../html.ts';
@@ -33,6 +34,12 @@ export interface SavedMarking {
   purchasePayments: ReadonlyMap<string, number>;
   regular: RegularExpense[];
   purchases: Purchase[];
+  /** The wish each expense bought, by ZenMoney transaction id; none when not given. */
+  wishPayments?: ReadonlyMap<string, number>;
+  /** Wishes, bought ones too; none when not given. */
+  wishes?: Wish[];
+  /** The plans chosen for wishes, by wish id; none when not given. */
+  wishPlans?: ReadonlyMap<number, ChosenPlan>;
   /** Envelopes of spending moved out of where it counts by default, and incomes not counted. */
   marks: ReadonlyMap<string, Envelope>;
   /** What the user wrote about expenses and incomes, by ZenMoney transaction id. */
@@ -59,6 +66,8 @@ export interface Marking {
   incomeCategories: CategoryEntry[];
   regular: RegularExpense[];
   purchases: Purchase[];
+  /** Wishes with a plan, with the week the plan buys them in and the expenses that bought them. */
+  wishes: Array<{ wish: Wish; week: DateString; boughtBy: string[] }>;
   /** Expenses with what they paid, to tell what is paid already. */
   expenses: Operation[];
   marks: ReadonlyMap<string, Envelope>;
@@ -89,6 +98,7 @@ export function loadMarking(data: EntityCollections, saved: SavedMarking, expens
     incomeCategories: byPopularity(categoryCatalog(data.tag ?? [], saved.categories, 'income'), incomes, today),
     regular: saved.regular,
     purchases: saved.purchases,
+    wishes: plannedWishes(saved),
     expenses,
     marks: saved.marks,
     categorizations: saved.categorizations,
@@ -96,6 +106,15 @@ export function loadMarking(data: EntityCollections, saved: SavedMarking, expens
     symbol: mainCurrency(data).symbol,
     weekStart: saved.weekStart,
   };
+}
+
+/** Wishes with a plan, with the week the plan buys them in and the expenses that bought them, by ZenMoney id. */
+export function plannedWishes(saved: Pick<SavedMarking, 'wishes' | 'wishPlans' | 'wishPayments'>): Marking['wishes'] {
+  const payments = [...(saved.wishPayments ?? [])];
+  return (saved.wishes ?? []).flatMap((wish) => {
+    const plan = saved.wishPlans?.get(wish.id);
+    return plan ? [{ wish, week: plan.buyWeek, boughtBy: payments.filter(([, id]) => id === wish.id).map(([tx]) => tx) }] : [];
+  });
 }
 
 // ---- Forms
@@ -106,7 +125,7 @@ const ENVELOPES: Envelope[] = ['week', 'extra', 'outside', 'ignored'];
 
 /**
  * Applies a form posted to /spending/:id/:choice, or to /spending/:id with the choice as `target`. A choice is a
- * category (tag-<id>), the regular expense or purchase the expense paid (regular-<id>, purchase-<id>), unlink,
+ * category (tag-<id>), the regular expense, purchase or wish the expense paid (regular-<id>, purchase-<id>, wish-<id>), unlink,
  * uncategorize, could have been done without or not (optional, required), or where it counts (week, extra, outside,
  * ignored for nowhere). A payment counts where what it paid counts, so linking one drops where the expense was moved,
  * and counts it again if it was not counted. The expense and what it is put into must exist.
@@ -140,6 +159,7 @@ export function submitMarking(settings: Settings, data: EntityCollections, path:
   if (choice === 'unlink') {
     if (sorted && 'regular' in sorted) settings.categorize(id, null);
     settings.linkPurchase(id, null);
+    settings.linkWish(id, null);
     return { status: 'saved' };
   }
   if (choice === 'uncategorize') {
@@ -147,7 +167,7 @@ export function submitMarking(settings: Settings, data: EntityCollections, path:
     return { status: 'saved' };
   }
 
-  const [, kind, target] = /^(tag|regular|purchase)-([\w-]+)$/.exec(choice) ?? [];
+  const [, kind, target] = /^(tag|regular|purchase|wish)-([\w-]+)$/.exec(choice) ?? [];
   if (kind === 'tag' && categoryCatalog(data.tag ?? [], settings.categorySetup()).some((c) => c.id === target)) {
     settings.categorize(id, { tag: target! });
     return { status: 'saved' };
@@ -159,6 +179,11 @@ export function submitMarking(settings: Settings, data: EntityCollections, path:
   }
   if (kind === 'purchase' && settings.purchases().some((p) => String(p.id) === target)) {
     settings.linkPurchase(id, Number(target));
+    settings.markSpending(id, 'week');
+    return { status: 'saved' };
+  }
+  if (kind === 'wish' && settings.wishPlans().has(Number(target))) {
+    settings.linkWish(id, Number(target));
     settings.markSpending(id, 'week');
     return { status: 'saved' };
   }
@@ -214,7 +239,7 @@ export const ENVELOPE_MARK: Record<Envelope, { label: string; tone?: Tone }> = {
 
 /** What an expense's row is titled: what it paid, which tells more than who it went to, when it is linked. */
 export function markingTitle(o: Operation): string {
-  return o.regular?.title ?? o.purchase?.title ?? o.payee;
+  return o.regular?.title ?? o.purchase?.title ?? o.wish?.title ?? o.payee;
 }
 
 /**
@@ -223,10 +248,11 @@ export function markingTitle(o: Operation): string {
  */
 export function markingDetails(o: Operation): string {
   const category = o.category && o.category.id !== REGULAR_CATEGORY.id && o.category.id !== PURCHASE_CATEGORY.id ? o.category.title : null;
+  const paid = o.purchase ?? o.wish;
   const marked = o.regular
     ? o.payee
-    : o.purchase
-      ? [o.payee, category?.toLowerCase() === o.purchase.title.toLowerCase() ? null : category].filter(Boolean).join(' · ')
+    : paid
+      ? [o.payee, category?.toLowerCase() === paid.title.toLowerCase() ? null : category].filter(Boolean).join(' · ')
       : (category ?? 'без категории');
   return [marked, o.description].filter(Boolean).join(' · ');
 }
@@ -307,7 +333,7 @@ export interface MarkingChoice {
 export function undoChoices(m: Pick<Marking, 'categorizations'>, o: Operation): MarkingChoice[] {
   const sorted = m.categorizations.get(o.id);
   return [
-    o.regular || o.purchase ? { choice: 'unlink', label: 'Отвязать' } : null,
+    o.regular || o.purchase || o.wish ? { choice: 'unlink', label: 'Отвязать' } : null,
     sorted && 'tag' in sorted && !o.zenmoneyCategory ? { choice: 'uncategorize', label: 'Убрать категорию' } : null,
   ].filter((a) => a !== null);
 }
@@ -318,7 +344,7 @@ export function markingActions(m: Marking, o: Operation, href: Href): Array<{ la
 }
 
 function paymentKey(choice: PaymentChoice): string {
-  return 'regular' in choice ? `regular-${choice.regular.id}` : `purchase-${choice.purchase.id}`;
+  return 'regular' in choice ? `regular-${choice.regular.id}` : 'purchase' in choice ? `purchase-${choice.purchase.id}` : `wish-${choice.wish.id}`;
 }
 
 /** What an expense could have paid: the likeliest as buttons and the rest in lists by kind. */
@@ -329,12 +355,14 @@ export interface PaymentOptions {
 
 /**
  * The likeliest payments as buttons, the one the expense paid, the suggested one and the plan of the expense's week
- * always among them, and the other regular expenses and purchases in a list.
+ * always among them, and the other regular expenses, purchases and wishes in a list.
  */
 export function paymentOptions(m: Marking, o: Operation, suggestion: Suggestion | null): PaymentOptions {
   const week = weekOf(o.date, m.weekStart);
   const others = m.expenses.filter((e) => e.id !== o.id);
-  const choices = paymentChoices(o, m);
+  // A wish another expense bought is bought.
+  const open = m.wishes.filter((w) => w.boughtBy.every((id) => id === o.id));
+  const choices = paymentChoices(o, { ...m, wishes: open });
   const current = currentPayment(m, o, others);
   if (current && !choices.some((c) => paymentKey(c) === paymentKey(current))) choices.unshift(current);
   const currentKey = current ? paymentKey(current) : null;
@@ -353,23 +381,27 @@ export function paymentOptions(m: Marking, o: Operation, suggestion: Suggestion 
       return { value: `regular-${e.id}`, label: [e.title, date ? dayMonth(date) : null, money(e.amount, m.symbol)].filter(Boolean).join(' · ') };
     });
   const purchases = m.purchases
-    .filter((p) => !isShown(`purchase-${p.id}`) && p.week >= addDays(week, -7 * LIST_WEEKS_BEFORE) && p.week <= addDays(week, 7 * LIST_WEEKS_AFTER))
+    .filter((p) => p.wish === undefined && !isShown(`purchase-${p.id}`) && p.week >= addDays(week, -7 * LIST_WEEKS_BEFORE) && p.week <= addDays(week, 7 * LIST_WEEKS_AFTER))
     .filter((p) => !purchaseStatus(p, others).bought)
     .map((p) => ({ value: `purchase-${p.id}`, label: `${p.title} · ${weekLabel(p.week)} · ${money(p.amount, m.symbol)}` }));
+  const wishes = open
+    .filter(({ wish }) => !isShown(`wish-${wish.id}`))
+    .map(({ wish, week: buying }) => ({ value: `wish-${wish.id}`, label: `${wish.title} · ${weekLabel(buying)} · ${money(wish.amount, m.symbol)}` }));
 
   return {
     choices: shown.map((c) => ({
       choice: paymentKey(c),
-      label: 'regular' in c ? c.regular.title : c.purchase.title,
+      label: 'regular' in c ? c.regular.title : 'purchase' in c ? c.purchase.title : c.wish.title,
       detail: paymentDetail(c, week, m.symbol),
       current: paymentKey(c) === currentKey,
       suggested: paymentKey(c) === suggestedKey,
     })),
     others:
-      regular.length + purchases.length > 0
+      regular.length + purchases.length + wishes.length > 0
         ? [
             { label: 'Регулярные траты', options: regular },
             { label: 'Покупки', options: purchases },
+            ...(wishes.length > 0 ? [{ label: 'Желания', options: wishes }] : []),
           ]
         : [],
   };
@@ -408,12 +440,15 @@ function currentPayment(m: Marking, o: Operation, others: Operation[]): PaymentC
   const date = regular ? nearestPayment(regular, o.date) : null;
   if (regular && date) return { regular, date, left: regular.amount };
   const purchase = o.purchase ? m.purchases.find((p) => p.id === o.purchase?.id) : undefined;
-  return purchase ? { purchase, left: purchaseStatus(purchase, others).left } : null;
+  if (purchase) return { purchase, left: purchaseStatus(purchase, others).left };
+  const wish = o.wish ? m.wishes.find((w) => w.wish.id === o.wish?.id) : undefined;
+  return wish ? { ...wish, left: wish.wish.amount } : null;
 }
 
 /** 3 октября · 25 000 ₽ for a payment, план недели · 3 000 ₽ for a purchase; the amount is what is left to pay. */
 function paymentDetail(c: PaymentChoice, week: DateString, symbol: string): string {
   if ('regular' in c) return `${dayMonth(c.date)} · ${money(c.left, symbol)}`;
+  if ('wish' in c) return `желание · ${money(c.left, symbol)}`;
   const plan = c.purchase.envelope === 'extra' ? 'дополнительные' : c.purchase.week === week ? 'план недели' : `план ${weekLabel(c.purchase.week)}`;
   return `${plan} · ${money(c.left, symbol)}`;
 }

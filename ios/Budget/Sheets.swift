@@ -5,7 +5,8 @@ import SwiftUI
 enum BudgetSheet: Identifiable, Hashable {
     case spending(String, queue: [String] = [])
     case purchase(PurchaseDraft)
-    case wish(WishItem?)
+    /// A wish by its id, or a new one.
+    case wish(Int?)
     case regular(Int)
     case weekLimit(WeekLimitDraft)
 
@@ -13,7 +14,7 @@ enum BudgetSheet: Identifiable, Hashable {
         switch self {
         case .spending(let id, _): "spending-\(id)"
         case .purchase(let draft): "purchase-\(draft.purchase.map { String($0.id) } ?? "new-\(draft.envelope)")"
-        case .wish(let item): "wish-\(item.map { String($0.wish.id) } ?? "new")"
+        case .wish(let id): "wish-\(id.map(String.init) ?? "new")"
         case .regular(let id): "regular-\(id)"
         case .weekLimit(let draft): "week-limit-\(draft.week)"
         }
@@ -44,7 +45,8 @@ extension View {
             switch sheet {
             case .spending(let id, let queue): MarkingSheet(id: id, queue: queue)
             case .purchase(let draft): PurchaseSheet(draft: draft)
-            case .wish(let item): WishSheet(item: item)
+            case .wish(let id):
+                if let id { WishPlanSheet(id: id) } else { WishSheet(wish: nil) }
             case .regular(let id): RegularLoader(id: id)
             case .weekLimit(let draft): WeekLimitSheet(draft: draft)
             }
@@ -217,9 +219,10 @@ struct PurchaseSheet: View {
     }
 }
 
-/// A wish: its name and amount large, and when it can be bought; one to change is planned or goes.
+/// A wish: its name and amount large; one to change can go, and `deleted` then closes what it was opened from.
 struct WishSheet: View {
-    let item: WishItem?
+    let wish: Wish?
+    var deleted: () -> Void = {}
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
@@ -228,25 +231,18 @@ struct WishSheet: View {
 
     var body: some View {
         LilacForm(
-            destructive: item.map { item in (label: "Удалить", action: { sender.send(session, "wishes/\(item.wish.id)/delete", [:]) { dismiss() } }) },
-            primary: item == nil ? "Хочу" : "Сохранить",
+            destructive: wish.map { wish in (label: "Удалить", action: { sender.send(session, "wishes/\(wish.id)/delete", [:]) { dismiss(); deleted() } }) },
+            primary: wish == nil ? "Хочу" : "Сохранить",
             busy: sender.busy,
-            save: { sender.send(session, item.map { "wishes/\($0.wish.id)" } ?? "wishes", ["title": title, "amount": amount]) { dismiss() } }
+            save: { sender.send(session, wish.map { "wishes/\($0.id)" } ?? "wishes", ["title": title, "amount": amount]) { dismiss() } }
         ) {
             LilacBigFields(title: $title, amount: $amount, placeholder: "Например, укладка для волос", symbol: "₽", errors: sender.errors)
-            if let item {
-                Text(item.row.details).font(.subheadline).foregroundStyle(Lilac.muted).padding(.top, 18)
-                if item.plannable {
-                    LilacInlineAction(label: "Запланировать") { sender.send(session, "wishes/\(item.wish.id)/plan", [:]) { dismiss() } }
-                        .padding(.top, 8)
-                }
-            }
         }
         .presentationDetents([.medium, .large])
         .errorAlert($sender.error)
         .onAppear {
-            title = item?.wish.title ?? ""
-            amount = item.map { Money.typing(Money.input($0.wish.amount)) } ?? ""
+            title = wish?.title ?? ""
+            amount = wish.map { Money.typing(Money.input($0.amount)) } ?? ""
         }
     }
 }

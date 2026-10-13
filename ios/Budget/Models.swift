@@ -118,6 +118,8 @@ struct PlanItem: Decodable, Hashable, Identifiable {
     let row: Row
     let purchase: Purchase?
     let regular: Int?
+    /// Money a wish's plan holds: the wish it opens.
+    let wish: Int?
     let finishable: Bool
     let actions: [PurchaseAction]
     var id: String { row.id }
@@ -127,6 +129,7 @@ struct PlanItem: Decodable, Hashable, Identifiable {
         let c = try decoder.extra()
         purchase = try c.optional("purchase")
         regular = try c.optional("regular")
+        wish = try c.optional("wish")
         finishable = try c.optional("finishable") ?? false
         actions = try c.optional("actions") ?? []
     }
@@ -633,4 +636,76 @@ struct SessionInfo: Decodable {
     let source: String
     let canSync: Bool
     let syncedAt: String?
+}
+
+// MARK: - A wish's plan
+
+/// A wish with the ways to afford it by its day as cards to pick together, what they gather, and the plan's steps up to
+/// buying it. `chosen` says the plan shown is the one chosen; `picks` go back to the server as the cards change.
+struct WishScreen: Decodable {
+    let symbol: String
+    let current: String
+    let wish: Goal
+    let dueRange: DueRange
+    let ways: [WayCard]
+    let picks: String
+    let covered: Double
+    let short: Double
+    let steps: [PlanStep]
+    let buy: Buy
+    let chosen: Bool
+    let planned: Bool
+    let bought: Bool
+
+    struct Goal: Decodable, Hashable {
+        let id: Int
+        let title: String
+        let amount: Double
+        let due: String
+        /// The user picked the day; otherwise it is a month from now.
+        let dueSet: Bool
+    }
+
+    struct DueRange: Decodable, Hashable {
+        let from: String
+        let to: String
+    }
+
+    struct Buy: Decodable, Hashable {
+        let label: String
+        let late: Bool
+    }
+}
+
+/// A way to put money towards a wish: what it can give, and, picked, what it gives.
+struct WayCard: Decodable, Hashable, Identifiable {
+    let id: String
+    let title: String
+    let icon: String
+    let color: String
+    let on: Bool
+    /// Given by hand; otherwise it takes what the others leave.
+    let fixed: Bool
+    /// What it gives: a week's cut for the weeks.
+    let amount: Double
+    /// What it gives in all: every week's cut together for the weeks.
+    let given: Double
+    /// The most it can be given, with what the others given by hand take.
+    let most: Double
+    let step: Double
+    let unit: String?
+    let line: String
+    let late: Bool
+}
+
+/// A step of a wish's plan on its date.
+struct PlanStep: Decodable, Hashable, Identifiable {
+    let row: Row
+    let date: String
+    var id: String { row.id }
+
+    init(from decoder: Decoder) throws {
+        row = try Row(from: decoder)
+        date = try decoder.extra().value("date")
+    }
 }
