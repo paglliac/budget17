@@ -245,7 +245,7 @@ struct Gathered: View {
                     .font(.headline.monospacedDigit())
                     .contentTransition(.numericText(value: s.covered))
             }
-            GatheredBar(screen: s)
+            GatheredBar(total: s.wish.amount, covered: s.covered, parts: s.ways.filter { $0.on }.map { GatheredBar.Part(amount: $0.given, color: $0.color) })
             if s.short > 0.5, picked || s.chosen {
                 Text("Не хватает \(Money.text(s.short, s.symbol))").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.red)
             }
@@ -271,21 +271,28 @@ struct Gathered: View {
     }
 }
 
-/// The wish's amount as a track, each way picked a part of it in its colour; the chosen plan's money before the ways
-/// picked now shows violet first.
+/// The wish's amount as a track, each way a part of it in its colour; the chosen plan's money before the ways picked now
+/// shows violet first.
 struct GatheredBar: View {
-    let screen: WishScreen
+    struct Part: Hashable {
+        let amount: Double
+        let color: String
+    }
+
+    let total: Double
+    let covered: Double
+    let parts: [Part]
 
     var body: some View {
-        let parts = screen.ways.filter { $0.on && $0.given > 0.5 }
-        let kept = max(0, screen.covered - parts.reduce(0) { $0 + $1.given })
+        let parts = parts.filter { $0.amount > 0.5 }
+        let kept = max(0, covered - parts.reduce(0) { $0 + $1.amount })
         GeometryReader { geometry in
             let count = parts.count + (kept > 0.5 ? 1 : 0)
             let width = geometry.size.width - CGFloat(max(count - 1, 0)) * 3
-            let share = { (amount: Double) in max(width * min(amount / max(screen.wish.amount, 1), 1), 8) }
+            let share = { (amount: Double) in max(width * min(amount / max(total, 1), 1), 8) }
             HStack(spacing: 3) {
                 if kept > 0.5 { Capsule().fill(Lilac.accent.opacity(0.45)).frame(width: share(kept)) }
-                ForEach(parts) { way in Capsule().fill(Palette.color(way.color)).frame(width: share(way.given)) }
+                ForEach(Array(parts.enumerated()), id: \.offset) { _, part in Capsule().fill(Palette.color(part.color)).frame(width: share(part.amount)) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

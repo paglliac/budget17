@@ -18,6 +18,7 @@ import {
   weekScreen,
   widgetScreen,
   wishScreen,
+  wishesScreen,
   withRubleSign,
 } from '../src/web/api.ts';
 import { Settings } from '../src/settings.ts';
@@ -729,6 +730,69 @@ describe('api: a wish’s plan', () => {
     assert.equal(plain(weekScreen(data(), savedOf(settings), { ...budget, week: '2026-10-12' })).total.amount, 45_000);
     assert.equal(post(settings, '/wishes/99/ways', { ways: 'weeks:' }), 'missing');
     assert.equal(post(settings, `/wishes/${tyres.id}/ways`, { ways: 'nothing:' }), 'missing', 'a plan needs a way');
+  });
+
+  it('puts every wish in one place: its card with the ways of its plan, and what the plans hold by month', () => {
+    using settings = new Settings(':memory:');
+    const tyres = settings.addWish({ title: 'Резина', amount: 60_000 });
+    settings.setWishDue(tyres.id, '2026-11-01');
+    settings.addWish({ title: 'Ботинки', amount: 9_000 });
+    post(settings, `/wishes/${tyres.id}/ways`, { ways: 'weeks:5000,extra-2026-10:' });
+
+    const screen = plain(wishesScreen(data(), savedOf(settings), { today, incomes }));
+    type Card = { title: string; state: string; situation: string | null; details: string; when: string; covered: number; short: number; ways: Array<{ title: string; amount: number; line: string }> };
+    assert.deepEqual(
+      screen.wishes.map((w: Card) => [w.title, w.state, w.situation, w.details, w.when, w.covered, w.short]),
+      [
+        ['Резина', 'planned', 'calm', 'к 1 ноября · купить 26 октября – 1 ноября', 'к 1 ноября · купить 26 октября – 1 ноября', 60_000, 0],
+        ['Ботинки', 'none', 'action', 'не разложено', '', 0, 0],
+      ],
+    );
+    assert.deepEqual(
+      screen.wishes[0].ways.map((w: Card['ways'][number]) => [w.title, w.amount, w.line]),
+      [
+        ['Дополнительные октября', 45_000, 'останется 55 000 ₽'],
+        ['Ужать недели', 15_000, '40 000 вместо 45 000 · 3 недели, всего 15 000 ₽'],
+      ],
+    );
+    type Month = { title: string; total: number; rows: Array<{ title: string; details: string; amount: number; wish: number }> };
+    assert.deepEqual(
+      screen.months.map((m: Month) => [m.title, m.total, m.rows.map((r) => [r.title, r.details, r.amount, r.wish])]),
+      [
+        [
+          'Октябрь',
+          60_000,
+          [
+            ['Резина', '12–18 октября · 40 000 вместо 45 000', 5_000, tyres.id],
+            ['Резина', '19–25 октября · 40 000 вместо 45 000', 5_000, tyres.id],
+            ['Резина', '26 октября – 1 ноября · 40 000 вместо 45 000', 5_000, tyres.id],
+            ['Резина', 'Дополнительные октября · на покупку', 45_000, tyres.id],
+          ],
+        ],
+      ],
+    );
+
+    const tyresCard = () => plain(wishesScreen(data(), savedOf(settings), { today, incomes })).wishes[0];
+    post(settings, `/wishes/${tyres.id}/ways`, { ways: 'weeks:1000' });
+    assert.deepEqual([tyresCard().situation, tyresCard().covered, tyresCard().short], ['problem', 3_000, 57_000], 'a plan that falls short is a problem');
+    post(settings, `/wishes/${tyres.id}/ways`, { ways: 'later-2026-11:' });
+    assert.deepEqual([tyresCard().situation, tyresCard().when], ['risk', 'к 1 ноября · купить 2–8 ноября · позже срока'], 'a plan that buys it after its day is a risk');
+
+    post(settings, `/wishes/${tyres.id}/ways/delete`);
+    const taken = plain(wishesScreen(data(), savedOf(settings), { today, incomes }));
+    assert.deepEqual(taken.wishes[0].details, 'к 1 ноября · не разложено', 'a plan taken back leaves the wish without one');
+    assert.deepEqual(taken.months, []);
+
+    settings.linkWish('transfer', tyres.id);
+    const bought = plain(wishesScreen(data(), savedOf(settings), { today, incomes }));
+    assert.deepEqual(
+      bought.wishes.map((w: Card & { muted: boolean }) => [w.title, w.state, w.situation, w.details, w.muted]),
+      [
+        ['Ботинки', 'none', 'action', 'не разложено', false],
+        ['Резина', 'bought', null, 'куплено', true],
+      ],
+      'a bought wish goes last',
+    );
   });
 
   it('shows what a plan takes from savings in the month’s flow', () => {

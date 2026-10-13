@@ -66,6 +66,19 @@ final class ScreensTests: XCTestCase {
         reserved.tap()
         XCTAssert(app.buttons["tab-План"].wait(for: \.isSelected, toEqual: true, timeout: 5), "«Зарезервировано» opens the plan tab")
         shot("plan")
+        app.buttons["open-wishes"].tap()
+        if sheet("wishes-sheet").waitForExistence(timeout: 5) {
+            sleep(2)
+            shot("wishes")
+            app.buttons["Месяцы"].tap()
+            sleep(1)
+            shot("wishes-months")
+            app.buttons["Карточки"].tap()
+            app.buttons["Готово"].firstMatch.tap()
+            sleep(1)
+        } else {
+            XCTFail("the sparkles open «Желания»")
+        }
         let purchase = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'purchase-'")).firstMatch
         if purchase.waitForExistence(timeout: 5) {
             purchase.tap()

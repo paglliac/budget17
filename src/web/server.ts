@@ -37,6 +37,7 @@ import {
   weekScreen,
   widgetScreen,
   wishScreen,
+  wishesScreen,
   withRubleSign,
 } from './api.ts';
 import { isAccessToken, isAuthorized, sessionCookie } from './auth.ts';
@@ -453,6 +454,8 @@ function apiScreen(path: string, params: URLSearchParams, { today, demo }: Conte
       return budgetSettingsScreen(collections(), loadSettings(savedMarking));
     case '/api/wish':
       return wishScreen(collections(), loadSettings(savedBudget), { today, id: Number(params.get('id')), ways: params.get('ways'), incomes: loadSettings((s) => s.incomes()) });
+    case '/api/wishes':
+      return wishesScreen(collections(), loadSettings(savedBudget), { today, incomes: loadSettings((s) => s.incomes()) });
     case '/api/widget':
       return widgetScreen(collections(), loadSettings(savedBudget), { today, syncedAt: budget.syncedAt });
     case '/api/review/claude/input':

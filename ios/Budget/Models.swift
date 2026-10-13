@@ -748,6 +748,72 @@ struct WishScreen: Decodable {
     }
 }
 
+/// «Желания»: every wish with its chosen plan, and the money the plans hold by month.
+struct WishesScreen: Decodable {
+    let symbol: String
+    let wishes: [WishSummary]
+    let months: [WishMonth]
+}
+
+/// A wish in «Желания»: its row for the list, and for its card its day with the week it is bought, what its plan
+/// gathers and the ways its money comes from.
+struct WishSummary: Decodable, Hashable, Identifiable {
+    let row: Row
+    let wish: Wish
+    /// none, planned or bought.
+    let state: String
+    /// What the card puts first: calm, risk (bought after its day), problem (short) or action (no plan); nil when bought.
+    let situation: String?
+    let when: String
+    let covered: Double
+    let short: Double
+    let ways: [Way]
+    var id: Int { wish.id }
+
+    /// A way the chosen plan takes money from, and what it gives in all.
+    struct Way: Decodable, Hashable, Identifiable {
+        let id: String
+        let title: String
+        let icon: String
+        let color: String
+        let line: String
+        let amount: Double
+    }
+
+    init(from decoder: Decoder) throws {
+        row = try Row(from: decoder)
+        let c = try decoder.extra()
+        wish = try c.value("wish")
+        state = try c.value("state")
+        situation = try c.optional("situation")
+        when = try c.value("when")
+        covered = try c.value("covered")
+        short = try c.value("short")
+        ways = try c.value("ways")
+    }
+}
+
+/// What the plans of wishes hold in a month, a row each naming its wish.
+struct WishMonth: Decodable, Hashable, Identifiable {
+    let month: String
+    let title: String
+    let total: Double
+    let rows: [HeldMoney]
+    var id: String { month }
+}
+
+/// Money a wish's plan holds, which opens the wish.
+struct HeldMoney: Decodable, Hashable, Identifiable {
+    let row: Row
+    let wish: Int
+    var id: String { row.id }
+
+    init(from decoder: Decoder) throws {
+        row = try Row(from: decoder)
+        wish = try decoder.extra().value("wish")
+    }
+}
+
 /// A way to put money towards a wish: what it can give, and, picked, what it gives.
 struct WayCard: Decodable, Hashable, Identifiable {
     let id: String

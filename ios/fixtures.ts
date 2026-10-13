@@ -18,6 +18,7 @@ import {
   weekScreen,
   widgetScreen,
   wishScreen,
+  wishesScreen,
 } from '../src/web/api.ts';
 import { demoCollections } from '../src/web/demo.ts';
 import type { SavedBudget } from '../src/web/pages/dashboard.ts';
@@ -104,6 +105,7 @@ const screens: Record<string, unknown> = {
   widget: widgetScreen(data, saved(), { today }),
   wish: wishScreen(data, saved(), { today, id: tyres.id, ways: null, incomes: settings.incomes() }),
   'wish-picking': wishScreen(data, saved(), { today, id: tyres.id, ways: 'weeks:3000,extra-2026-10:', incomes: settings.incomes() }),
+  wishes: wishesScreen(data, saved(), { today, incomes: settings.incomes() }),
 };
 for (const [name, screen] of Object.entries(screens)) writeFileSync(join(folder, `${name}.json`), JSON.stringify(screen, null, 2));
 console.log(`API: ${Object.keys(screens).length} экранов в ${folder}`);
