@@ -13,7 +13,7 @@ struct BudgetApp: App {
     }
 }
 
-enum Tab: Hashable { case home, operations, plan, more }
+enum Tab: Hashable { case wishes, operations, home, plan, more }
 
 /// Opens a shop on the tab of shops of «Ещё», from an expense of it, as the root sets it up.
 nonisolated struct OpenShopAction: Sendable {
@@ -25,9 +25,6 @@ nonisolated struct OpenShopAction: Sendable {
 extension EnvironmentValues {
     @Entry var openShop = OpenShopAction()
 }
-
-/// What the «+» of the tab bar adds: a purchase into the current week's plan or into the extras, or a wish.
-enum Addition { case week, extra, wish }
 
 /// The login until a server is set, then the screens under the tab bar. The screens stay alive between tabs, so each
 /// keeps its place; a tap on the open «Главная» brings the main page back. Coming back to the app asks the server to
@@ -46,8 +43,6 @@ struct RootView: View {
     @State private var extrasOpens = 0
     /// The week the plan shows; nil is the current one. The main page's «Зарезервировано» opens the plan on its week.
     @State private var planWeek: String?
-    /// A purchase or a wish added from the «+» of the tab bar.
-    @State private var sheet: BudgetSheet?
     /// A shop an expense opened, which «Ещё» shows on its tab of shops.
     @State private var shop: Shop?
 
@@ -56,13 +51,14 @@ struct RootView: View {
             LoginView()
         } else {
             ZStack {
-                screen(.home) { BudgetView(openPending: openPending, openPlan: openPlan, returns: homeReturns, extrasOpens: extrasOpens) }
+                screen(.wishes) { WishesView() }
                 screen(.operations) { OperationsView(filter: $filter) }
+                screen(.home) { BudgetView(openPending: openPending, openPlan: openPlan, returns: homeReturns, extrasOpens: extrasOpens) }
                 screen(.plan) { PlanView(week: $planWeek) }
                 screen(.more) { MoreView(opening: $shop) }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                TabBar(tab: $tab, pending: session.pending, reselect: reselect, add: add)
+                TabBar(tab: $tab, pending: session.pending, reselect: reselect)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { barHeight = $0 }
             }
             .environment(\.tabBarHeight, barHeight)
@@ -72,7 +68,6 @@ struct RootView: View {
             })
             // The tab bar stays at the bottom under the keyboard, as when searching operations.
             .ignoresSafeArea(.keyboard, edges: .bottom)
-            .budgetSheets($sheet)
             .task(id: session.version) { await session.refreshPending() }
             // budget://week, sort, operations, regular and extras, from the widgets.
             .onOpenURL { url in
@@ -112,25 +107,6 @@ struct RootView: View {
         if value == .home { homeReturns += 1 }
     }
 
-    /// A purchase goes into the current week, which gives it the weeks to pick from; the saved week when the server
-    /// cannot be reached.
-    private func add(_ addition: Addition) {
-        let envelope: String
-        switch addition {
-        case .wish:
-            sheet = .wish(nil)
-            return
-        case .week: envelope = "week"
-        case .extra: envelope = "extra"
-        }
-        Task {
-            let fresh: WeekScreen? = try? await session.get("week")
-            let saved: (value: WeekScreen, date: Date)? = session.saved("week")
-            guard let s = fresh ?? saved?.value else { return }
-            sheet = .purchase(PurchaseDraft.new(s, envelope: envelope))
-        }
-    }
-
     private func screen<Content: View>(_ value: Tab, @ViewBuilder content: () -> Content) -> some View {
         content()
             .opacity(tab == value ? 1 : 0)
@@ -139,19 +115,19 @@ struct RootView: View {
     }
 }
 
-/// The tabs after the user's picture of 2026-10-12: a white bar with round top corners, two tabs on each side and a raised
-/// violet «+» between them that adds a purchase or a wish. The picked tab is violet and filled, the operations carry how
-/// many expenses wait for a category.
+/// The tabs after the user's picture of 2026-10-12: a white bar with round top corners, «Желания» and «Операции» on one
+/// side, «План» and «Ещё» on the other, and «Главная» raised between them as the main page's circle, the user's mascot.
+/// The picked tab is violet and filled, the circle gets a violet ring; the operations carry how many expenses wait for a
+/// category.
 struct TabBar: View {
     @Binding var tab: Tab
     let pending: Int
     /// A tap on the tab that is open.
     let reselect: (Tab) -> Void
-    let add: (Addition) -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            item(.home, "house", "Главная")
+            item(.wishes, "sparkles", "Желания")
             item(.operations, "list.bullet", "Операции", badge: pending)
             Color.clear.frame(width: 84, height: 1)
             item(.plan, "calendar", "План")
@@ -166,28 +142,26 @@ struct TabBar: View {
                 .shadow(color: .black.opacity(0.07), radius: 16, y: -2)
                 .ignoresSafeArea(edges: .bottom)
         }
-        .overlay(alignment: .top) { plus.offset(y: -15) }
+        .overlay(alignment: .top) { home.offset(y: -15) }
         .sensoryFeedback(.selection, trigger: tab)
     }
 
-    /// The violet «+» in a lilac halo, standing above the bar's edge.
-    private var plus: some View {
-        Menu {
-            Button("В план недели", systemImage: "cart") { add(.week) }
-            Button("В дополнительные", systemImage: "bag") { add(.extra) }
-            Button("Желание", systemImage: "sparkles") { add(.wish) }
+    /// «Главная»: the main page's circle in a lilac halo, standing above the bar's edge.
+    private var home: some View {
+        let picked = tab == .home
+        return Button {
+            if picked { reselect(.home) } else { tab = .home }
         } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .background(LinearGradient(colors: [Color(rgb: 0x9C8BF8), Color(rgb: 0x6E52F5)], startPoint: .topLeading, endPoint: .bottomTrailing), in: Circle())
-                .shadow(color: Color(rgb: 0x6E52F5).opacity(0.35), radius: 10, y: 5)
+            Mascot(d: 56)
+                .overlay { if picked { Circle().strokeBorder(Lilac.accent, lineWidth: 2) } }
                 .padding(7)
                 .background(Lilac.tint, in: Circle())
+                .contentShape(Circle())
         }
-        .accessibilityLabel("Добавить")
-        .accessibilityIdentifier("tab-add")
+        .buttonStyle(.card)
+        .accessibilityIdentifier("tab-Главная")
+        .accessibilityLabel("Главная")
+        .accessibilityAddTraits(picked ? .isSelected : [])
     }
 
     private func item(_ value: Tab, _ icon: String, _ label: String, badge: Int = 0) -> some View {

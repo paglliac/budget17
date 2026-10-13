@@ -73,7 +73,7 @@ struct HomeView: View {
                         openExtras: openExtras
                     )
                     .padding(.top, 16)
-                    // Clear of the raised «+».
+                    // Clear of the raised circle of «Главная».
                     .padding(.bottom, 14)
                 }
                 .padding(.horizontal, 20)
@@ -575,11 +575,10 @@ struct PlanRow: View {
 }
 
 /// The «План» tab: the plan of a week, stepping back and forth from the current one. The main page's «Зарезервировано»
-/// opens it on the week the main page shows; the sparkles open «Желания».
+/// opens it on the week the main page shows.
 struct PlanView: View {
     @Binding var week: String?
     @State private var sheet: BudgetSheet?
-    @State private var showWishes = false
 
     var body: some View {
         Screen(path: "week", query: ["week": week]) { (s: WeekScreen) in
@@ -588,8 +587,6 @@ struct PlanView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         LilacTitle(text: "План") {
                             if s.phase != "current" { LilacChip(text: "Сейчас") { week = nil } }
-                            LilacRoundButton(systemImage: "sparkles", label: "Желания") { showWishes = true }
-                                .accessibilityIdentifier("open-wishes")
                             LilacRoundButton(systemImage: "chevron.left", label: "Раньше") { week = s.prev == s.current ? nil : s.prev }
                             LilacRoundButton(systemImage: "chevron.right", label: "Позже") { if let next = s.next { week = next == s.current ? nil : next } }
                                 .disabled(s.next == nil)
@@ -606,7 +603,6 @@ struct PlanView: View {
         }
         .background(LilacBackground())
         .budgetSheets($sheet)
-        .sheet(isPresented: $showWishes) { WishesSheet() }
     }
 }
 

@@ -66,19 +66,6 @@ final class ScreensTests: XCTestCase {
         reserved.tap()
         XCTAssert(app.buttons["tab-План"].wait(for: \.isSelected, toEqual: true, timeout: 5), "«Зарезервировано» opens the plan tab")
         shot("plan")
-        app.buttons["open-wishes"].tap()
-        if sheet("wishes-sheet").waitForExistence(timeout: 5) {
-            sleep(2)
-            shot("wishes")
-            app.buttons["Месяцы"].tap()
-            sleep(1)
-            shot("wishes-months")
-            app.buttons["Карточки"].tap()
-            app.buttons["Готово"].firstMatch.tap()
-            sleep(1)
-        } else {
-            XCTFail("the sparkles open «Желания»")
-        }
         let purchase = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'purchase-'")).firstMatch
         if purchase.waitForExistence(timeout: 5) {
             purchase.tap()
@@ -97,16 +84,18 @@ final class ScreensTests: XCTestCase {
         tab("Главная")
         XCTAssert(reserved.waitForExistence(timeout: 5), "«Главная» shows the main page")
 
-        app.buttons["tab-add"].tap()
-        let toExtras = app.buttons["В дополнительные"]
-        if toExtras.waitForExistence(timeout: 5) {
-            shot("add-menu")
-            toExtras.tap()
-            if sheet("purchase-sheet").waitForExistence(timeout: 10) { shot("add-purchase") }
-            app.buttons["Отмена"].tap()
+        tab("Желания")
+        if app.buttons["Месяцы"].waitForExistence(timeout: 10) {
+            sleep(2)
+            shot("wishes")
+            app.buttons["Месяцы"].tap()
+            sleep(1)
+            shot("wishes-months")
+            app.buttons["Карточки"].tap()
         } else {
-            XCTFail("the «+» of the tab bar opens its menu")
+            XCTFail("«Желания» open")
         }
+        tab("Главная")
 
         // A week just begun has no spending yet, so the expense's sheet waits for a later walk.
         let expense = openWeekSpending()

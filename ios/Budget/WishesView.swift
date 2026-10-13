@@ -1,28 +1,17 @@
 import SwiftUI
 
-// «Желания», opened by the sparkles of the «План» tab: every wish in one place, as cards with the ways each one's money
-// comes from, or as the money their plans hold by month. A wish opens its page, and its plan can be taken back here.
+// The «Желания» tab: every wish in one place, as cards with the ways each one's money comes from, or as the money their
+// plans hold by month. A wish opens its page, and its plan can be taken back here.
 
-/// The sheet of all wishes, switched between the cards and the months.
-struct WishesSheet: View {
+/// All wishes, switched between the cards and the months; «+» adds one.
+struct WishesView: View {
     enum Part: String { case cards, months }
 
     @AppStorage("wishes-part") private var part = Part.cards
     @State private var sheet: BudgetSheet?
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark").font(.system(size: 18, weight: .medium)).frame(width: 40, height: 40).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Готово")
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
             VStack(alignment: .leading, spacing: 12) {
                 LilacTitle(text: "Желания") {
                     LilacRoundButton(systemImage: "plus", label: "Добавить желание") { sheet = .wish(nil) }
@@ -31,6 +20,7 @@ struct WishesSheet: View {
                     .accessibilityIdentifier("wishes-part")
             }
             .padding(.horizontal, 20)
+            .padding(.bottom, 4)
             Screen(path: "wishes") { (s: WishesScreen) in
                 ScrollView {
                     Group {
@@ -46,9 +36,7 @@ struct WishesSheet: View {
             }
         }
         .background(LilacBackground())
-        .presentationDetents([.large])
         .budgetSheets($sheet)
-        .accessibilityIdentifier("wishes-sheet")
     }
 }
 

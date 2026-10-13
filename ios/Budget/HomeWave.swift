@@ -100,3 +100,26 @@ struct Wave: Shape {
         return path
     }
 }
+
+/// The main page's circle small, as the middle of the tab bar shows it: the white disc with its lilac lens and a violet
+/// wave standing still.
+struct Mascot: View {
+    let d: CGFloat
+
+    var body: some View {
+        let lens = RoundedRectangle(cornerRadius: d * 0.27, style: .continuous)
+        ZStack {
+            Circle()
+                .fill(LinearGradient(colors: [Lilac.surface, Lilac.canvas], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
+            lens
+                .fill(LinearGradient(colors: [Lilac.lensTop, Lilac.tint], startPoint: .top, endPoint: .bottom))
+                .overlay { Wave(level: 0.36, amplitude: d * 0.03, phase: 1.2).fill(Lilac.wave).clipShape(lens) }
+                .frame(width: d * 0.58, height: d * 0.84)
+                .offset(x: -d * 0.29)
+                .frame(width: d, height: d)
+                .clipShape(Circle().inset(by: d * 0.04))
+        }
+        .frame(width: d, height: d)
+    }
+}
