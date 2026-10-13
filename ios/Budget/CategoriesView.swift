@@ -203,7 +203,7 @@ struct CategorySheet: View {
         Task {
             guard let data = try? await item.loadTransferable(type: Data.self),
                   let url = await Task.detached(operation: { CategoryPhoto.dataURL(data) }).value,
-                  let image = Self.image(url)
+                  let image = CategoryPhoto.image(url)
             else {
                 sender.error = "Не получилось открыть фото."
                 return
@@ -220,16 +220,6 @@ struct CategorySheet: View {
         var form = ["title": title, "kind": kind, "icon": icon, "color": color]
         if let photo { form["photo"] = photo }
         sender.send(session, item.map { "categories/\($0.category.id)" } ?? "categories", form) { dismiss() }
-    }
-
-    /// The photo just picked, from the data URL it is sent as.
-    private static func image(_ url: String) -> Image? {
-        guard let comma = url.firstIndex(of: ","), let data = Data(base64Encoded: String(url[url.index(after: comma)...])) else { return nil }
-        #if os(iOS)
-        return UIImage(data: data).map { Image(uiImage: $0) }
-        #else
-        return NSImage(data: data).map { Image(nsImage: $0) }
-        #endif
     }
 
     /// A colour of the wheel as the server takes it, #RRGGBB.

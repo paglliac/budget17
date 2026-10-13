@@ -1,6 +1,7 @@
 // Web UI and the JSON API of the iPhone app: the week's budget at /, operations at /operations, expenses without a
 // category at /uncategorized, incomes at /income, regular expenses at /regular, the day a week begins on and categories
-// at /settings, the photos the user put on categories at /category-photo/:id, the widget
+// at /settings, shops at /settings/shops, the photos the user put on categories at /category-photo/:id, shops' logos at
+// /shop-logo/:key, the widget
 // storyboard at /storyboard, and the same screens as JSON under /api (see api.ts), along with the month as Claude
 // reviews it and where its answer is posted (see src/claude/run.ts); with a Claude token in the settings the server
 // has Claude review what the user asks for by itself (see reviewRequested). Forms post to the same paths
@@ -16,7 +17,9 @@ import { fileURLToPath } from 'node:url';
 import { mainCurrency } from '../balances.ts';
 import { localDate } from '../dates.ts';
 import { renderSyncResult } from '../format.ts';
+import { listOperations } from '../ledger.ts';
 import { Settings } from '../settings.ts';
+import { fetchSiteIcon, shopByKey } from '../shops.ts';
 import { Store } from '../store.ts';
 import { sync } from '../sync.ts';
 import { ZenMoneyClient } from '../zenmoney/client.ts';
@@ -24,6 +27,7 @@ import type { EntityCollections } from '../zenmoney/types.ts';
 import {
   budgetSettingsScreen,
   categoriesScreen,
+  shopsScreen,
   incomeScreen,
   monthScreen,
   operationsScreen,
@@ -38,7 +42,7 @@ import {
 import { isAccessToken, isAuthorized, sessionCookie } from './auth.ts';
 import { demoCollections } from './demo.ts';
 import { escape } from './html.ts';
-import { createHref, userName } from './pages/chrome.ts';
+import { createHref, userName, type Href } from './pages/chrome.ts';
 import { askClaude } from '../claude/ask.ts';
 import { loadClaudeInput, loadReview, renderReview, renderReviewCheck, saveClaudeAnswer, submitClaude, submitReview } from './pages/review.ts';
 import { budgetOf, loadDashboard, renderDashboard, submitDashboard, type DashboardForm, type SavedBudget } from './pages/dashboard.ts';
@@ -47,6 +51,7 @@ import { renderLogin } from './pages/login.ts';
 import { loadOperations, renderOperations } from './pages/operations.ts';
 import { submitMarking, type SavedMarking } from './pages/marking.ts';
 import { submitWishPlan } from './pages/wishes.ts';
+import { loadShopsPage, renderShops, SHOPS_PATH, submitShop, type ShopFormState } from './pages/shops.ts';
 import { loadRegular, renderRegular, submitRegular } from './pages/regular.ts';
 import { loadSettingsPage, renderSettings, submitBudget, submitSettings } from './pages/settings.ts';
 import { renderStoryboard } from './pages/storyboard.ts';
@@ -79,10 +84,53 @@ function syncNow(): Promise<void> {
     using store = new Store(DB_PATH);
     console.log(renderSyncResult(await sync(new ZenMoneyClient(token), store)));
     syncedAt = new Date();
+    // New shops may need their sites' icons; they come in the background.
+    void refreshLogos();
   })().finally(() => {
     syncing = null;
   });
   return syncing;
+}
+
+/** How long a site without an icon waits before it is asked again. */
+const SITE_ICON_RETRY_MS = 7 * 24 * 3_600_000;
+
+let refreshing: Promise<void> | null = null;
+
+/**
+ * Fetches the icons of the sites of every shop operations went to that the server has not kept yet; a refresh asked
+ * for while one runs waits for that one.
+ */
+function refreshLogos(): Promise<void> {
+  if (!existsSync(DB_PATH)) return Promise.resolve();
+  refreshing ??= (async () => {
+    const shops = loadSettings((s) => s.shopSetup());
+    const operations = listOperations(loadCollections(false, localDate()), { from: '0000-01-01', to: '9999-12-31' }, { categorizations: new Map(), regular: [], shops }, { withIgnored: true });
+    await keepSiteIcons(new Set(operations.flatMap((o) => (o.shop?.site ? [o.shop.site] : []))));
+  })()
+    .catch((error: unknown) => console.error('Не удалось обновить значки магазинов:', error instanceof Error ? error.message : error))
+    .finally(() => {
+      refreshing = null;
+    });
+  return refreshing;
+}
+
+/**
+ * Fetches the icons of these sites that the server has not kept, one by one; a site the service has no icon of is
+ * asked again a week later, and one that could not be reached on the next refresh.
+ */
+async function keepSiteIcons(sites: Iterable<string>): Promise<void> {
+  const { kept, asked } = loadSettings((s) => ({ kept: s.shopSetup().icons, asked: s.siteIconsAsked() }));
+  for (const site of sites) {
+    const at = asked.get(site);
+    if (kept.has(site) || (at && Date.now() - Date.parse(at) < SITE_ICON_RETRY_MS)) continue;
+    try {
+      const icon = await fetchSiteIcon(site);
+      loadSettings((s) => s.putSiteIcon(site, icon, new Date()));
+    } catch (error) {
+      console.error(`Не удалось получить значок ${site}:`, error instanceof Error ? error.message : error);
+    }
+  }
 }
 
 let reviewing: Promise<void> | null = null;
@@ -148,6 +196,7 @@ function savedMarking(settings: Settings): SavedMarking {
     roundFigures: settings.roundFigures(),
     subcategories: settings.subcategorySetup(),
     dismissedHints: settings.dismissedHints(),
+    shops: settings.shopSetup(),
   };
 }
 
@@ -201,6 +250,15 @@ function redirect(response: ServerResponse, location: string, headers: Record<st
   response.writeHead(303, { location, ...headers }).end();
 }
 
+/** A part of a path as it was before it was percent-encoded; null when it is not one. */
+function decoded(part: string): string | null {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return null;
+  }
+}
+
 /** Where a login sends the browser: a path of this site, never another site. */
 function safeNext(value: string | null): string {
   return value && value.startsWith('/') && !value.startsWith('//') ? value : '/';
@@ -210,6 +268,26 @@ interface Context {
   today: string;
   demo: boolean;
   href: ReturnType<typeof createHref>;
+}
+
+function shopsPage(
+  collections: EntityCollections,
+  options: { today: string; query: string | null; edit?: string | null; form?: ShopFormState; back: string | null },
+  href: Href,
+): string {
+  const back = options.back ? safeNext(options.back) : null;
+  return renderShops(loadShopsPage(collections, loadSettings(savedMarking), { ...options, back }), href).toString();
+}
+
+/**
+ * The page of this server a link came from, to go back to; null for another site's and for the settings, whose tabs
+ * go back by themselves.
+ */
+function cameFrom(request: IncomingMessage): string | null {
+  const referer = request.headers.referer;
+  if (!referer || !URL.canParse(referer)) return null;
+  const url = new URL(referer);
+  return url.host === request.headers.host && !url.pathname.startsWith('/settings') ? `${url.pathname}${url.search}` : null;
 }
 
 function dashboardPage(params: URLSearchParams, { today, demo, href }: Context, form?: DashboardForm): string {
@@ -231,7 +309,7 @@ function dashboardPage(params: URLSearchParams, { today, demo, href }: Context, 
  * fix by field and the page that shows the form again with it.
  */
 type FormResult =
-  | { status: 'saved'; next: string }
+  | { status: 'saved'; next: string; then?: () => Promise<void> }
   | { status: 'missing'; message: string }
   | { status: 'invalid'; errors: Record<string, string>; page: () => string };
 
@@ -277,6 +355,30 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     if (result.status === 'missing') return { status: 'missing', message: 'Такой траты, дохода, категории, регулярной траты или покупки нет' };
     // The page's field allows no more than the server takes, so only a hand-made form gets here.
     return { status: 'invalid', errors: { description: result.error }, page: () => `<p>${escape(result.error)}</p>` };
+  }
+  if (path.startsWith('/shops/')) {
+    // Merging and splitting post empty forms to URLs that carry where the shop was opened from.
+    const form = new URLSearchParams([...new URL(request.url ?? '/', 'http://localhost').searchParams, ...body]);
+    using settings = new Settings(SETTINGS_PATH);
+    const collections = loadCollections(demo, today);
+    const result = submitShop(settings, collections, path, form);
+    if (result.status === 'missing') return { status: 'missing', message: 'Такого магазина нет' };
+    // A shop opened from an expense goes back to it; one opened on the tab, back to the tab. A merged or split shop
+    // stays open, to show what it is made of now.
+    const back = form.get('back');
+    const query = form.get('q');
+    if (result.status === 'invalid') {
+      const page = () => shopsPage(collections, { today, query, form: result.form, back }, href);
+      return { status: 'invalid', errors: result.form.errors, page };
+    }
+    const next = result.open
+      ? `${href(SHOPS_PATH, { edit: result.open, q: query, back })}#shop-${result.open}`
+      : back
+        ? safeNext(back)
+        : href(SHOPS_PATH, { q: query });
+    // A new site's icon is fetched before the answer, so the page or the app shows it at once.
+    const { site } = result;
+    return { status: 'saved', next, then: site && !demo ? () => keepSiteIcons([site]) : undefined };
   }
   if (/^\/categories(\/|$)/.test(path)) {
     using settings = new Settings(SETTINGS_PATH);
@@ -344,6 +446,8 @@ function apiScreen(path: string, params: URLSearchParams, { today, demo }: Conte
       return incomeScreen(collections(), loadSettings((s) => s.incomes()), { today });
     case '/api/categories':
       return categoriesScreen(collections(), loadSettings(savedMarking), { today });
+    case '/api/shops':
+      return shopsScreen(collections(), loadSettings(savedMarking), { today, query: params.get('q') });
     case '/api/budget-settings':
       return budgetSettingsScreen(collections(), loadSettings(savedMarking));
     case '/api/wish':
@@ -428,11 +532,12 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       sendJson(response, saved.status === 'saved' ? 200 : 422, saved);
       return;
     }
-    const result = submitForm(path, await readForm(request, path.startsWith('/categories') ? CATEGORY_FORM_LIMIT : undefined), request, context);
+    const result = submitForm(path, await readForm(request, /^\/(categories|shops)/.test(path) ? CATEGORY_FORM_LIMIT : undefined), request, context);
     if (result === null) {
       if (isApi) sendJson(response, 404, { error: 'Такого действия нет' });
       else send(response, 405, 'text/plain', 'Метод не поддерживается');
     } else if (result.status === 'saved') {
+      await result.then?.();
       if (isApi) sendJson(response, 200, { status: 'saved' });
       else redirect(response, result.next);
     } else if (result.status === 'missing') {
@@ -454,6 +559,18 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     // The address carries the photo's version, so a photo once loaded never needs asking for again.
     if (found) response.writeHead(200, { 'content-type': found.type, 'cache-control': 'private, max-age=31536000, immutable' }).end(found.data);
     else send(response, 404, 'text/plain', 'Такого фото нет');
+    return;
+  }
+  const logo = /^\/shop-logo\/([^/]+)$/.exec(url.pathname);
+  if (logo) {
+    const shop = decoded(logo[1]!);
+    const found = shop === null ? null : loadSettings((s) => {
+      const site = shopByKey(shop, s.shopSetup()).site;
+      return s.shopPhoto(shop) ?? (site ? s.siteIcon(site) : null);
+    });
+    // Its version is in the address too, as a photo's is.
+    if (found) response.writeHead(200, { 'content-type': found.type, 'cache-control': 'private, max-age=31536000, immutable' }).end(found.data);
+    else send(response, 404, 'text/plain', 'Такого значка нет');
     return;
   }
   if (isApi) {
@@ -512,6 +629,13 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       send(response, 200, 'text/html', renderSettings(page, href).toString());
       return;
     }
+    case SHOPS_PATH: {
+      const edit = params.get('edit');
+      // An expense links to its shop's form, which goes back to the expense.
+      const back = params.get('back') ?? (edit ? cameFrom(request) : null);
+      send(response, 200, 'text/html', shopsPage(loadCollections(demo, today), { today, query: params.get('q'), edit, back }, href));
+      return;
+    }
     case '/income': {
       const page = loadIncome(loadCollections(demo, today), loadSettings((s) => s.incomes()), {
         today,
@@ -538,6 +662,7 @@ try {
   console.error('Не удалось синхронизироваться, показываю локальную копию:', error instanceof Error ? error.message : error);
 }
 reviewRequested();
+void refreshLogos();
 if (token && SYNC_MINUTES > 0) {
   setInterval(() => {
     syncNow().catch((error: unknown) => console.error('Не удалось синхронизироваться:', error instanceof Error ? error.message : error));

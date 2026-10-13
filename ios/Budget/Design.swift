@@ -71,9 +71,13 @@ struct LilacSegmented<Value: Hashable>: View {
             ForEach(items) { item in
                 let picked = item.value == selection
                 Button { withAnimation(.snappy) { selection = item.value } } label: {
+                    // Four labels as long as «Регулярные» fill a phone's width, so a picked one, heavier, gets smaller.
                     Text(item.label)
                         .font(.subheadline.weight(picked ? .semibold : .regular))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .foregroundStyle(picked ? Color.primary : Lilac.muted)
+                        .padding(.horizontal, 2)
                         .frame(maxWidth: .infinity)
                         .frame(height: 36)
                         .background {
@@ -275,6 +279,8 @@ enum LilacMarker: Hashable {
     case symbol(String, Color)
     /// A category's photo by its path, on the category's colour.
     case photo(String, Color)
+    /// A shop's logo by its path, on white with a hairline round it, whatever its colours.
+    case logo(String)
 
     @ViewBuilder
     var view: some View {
@@ -297,6 +303,11 @@ enum LilacMarker: Hashable {
                 .background(color.opacity(0.16), in: Circle())
         case .photo(let path, let color):
             RemotePhoto(path: path).background(color).clipShape(Circle())
+        case .logo(let path):
+            RemotePhoto(path: path)
+                .background(Color.white)
+                .clipShape(Circle())
+                .overlay(Circle().strokeBorder(Lilac.hairline, lineWidth: 0.5))
         }
     }
 }
@@ -371,6 +382,11 @@ extension LilacRow where Accessory == EmptyView {
 }
 
 extension LilacMarker {
+    /// An expense's row: its shop's logo, else a dot of its category's colour.
+    static func expense(_ row: Row, dot color: Color? = nil) -> LilacMarker {
+        row.logo.map { .logo($0) } ?? .dot(color ?? Palette.color(row.color))
+    }
+
     /// A row's icon from the server on a halo of its colour, or its category's photo on the colour.
     static func icon(_ row: Row) -> LilacMarker {
         if let photo = row.photo { return .photo(photo, Palette.color(row.color)) }

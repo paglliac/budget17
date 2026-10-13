@@ -1,10 +1,12 @@
 import SwiftUI
 
-/// What is set up once in a while, switched under the title: regular expenses, incomes and categories. The budget's
-/// setup and the server are behind the gear.
+/// What is set up once in a while, switched under the title: regular expenses, incomes, categories and shops. The
+/// budget's setup and the server are behind the gear.
 struct MoreView: View {
-    enum Part: Hashable { case regular, income, categories }
+    enum Part: Hashable { case regular, income, categories, shops }
 
+    /// A shop an expense opened, which «Магазины» shows.
+    @Binding var opening: Shop?
     @State private var part = Part.regular
     @State private var showSettings = false
 
@@ -15,7 +17,10 @@ struct MoreView: View {
                     LilacIconButton(systemImage: "gearshape", label: "Настройки") { showSettings = true }
                 }
                 LilacSegmented(
-                    items: [Segment(value: Part.regular, label: "Регулярные"), Segment(value: .income, label: "Доходы"), Segment(value: .categories, label: "Категории")],
+                    items: [
+                        Segment(value: Part.regular, label: "Регулярные"), Segment(value: .income, label: "Доходы"), Segment(value: .categories, label: "Категории"),
+                        Segment(value: .shops, label: "Магазины"),
+                    ],
                     selection: $part,
                     width: nil
                 )
@@ -27,11 +32,13 @@ struct MoreView: View {
                 case .regular: RegularPanel()
                 case .income: IncomePanel()
                 case .categories: CategoriesPanel()
+                case .shops: ShopsPanel(opening: $opening)
                 }
             }
             .frame(maxHeight: .infinity, alignment: .top)
         }
         .background(LilacBackground())
+        .onChange(of: opening, initial: true) { if opening != nil { part = .shops } }
         .sheet(isPresented: $showSettings) { SettingsSheet() }
     }
 }

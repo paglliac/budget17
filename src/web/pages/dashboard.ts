@@ -40,7 +40,7 @@ import { pageDocument } from '../document.ts';
 import { capitalize, dayMonth, money, monthName, num, plural, weekLabel } from '../format.ts';
 import type { Html } from '../html.ts';
 import { categoryIcon, entryIcon } from '../icons.ts';
-import { categoryLook } from '../looks.ts';
+import { categoryLook, withLogo } from '../looks.ts';
 import { categoryColor, toneColor, type Tone } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
 import { button, emptyState, field, footnote, pageIntro, section, segmentedLinks, selectField, shareBar } from '../widgets/basics.ts';
@@ -449,7 +449,7 @@ function spendingByDay(page: Page, spending: Operation[]): Html {
               id: key,
               title: markingTitle(o),
               details: `${o.account} · ${markingDetails(o)}`,
-              ...categoryLook(o.category),
+              ...withLogo(o, categoryLook(o.category)),
               kind: 'expense',
               amount: o.amount,
               symbol: d.symbol,
@@ -762,7 +762,7 @@ function spendingItem({ d, href, here }: Page, o: Operation): Html {
     id: key,
     title: markingTitle(o),
     details: `${dayMonth(o.date)}, ${o.account} · ${markingDetails(o)}`,
-    ...categoryLook(o.category),
+    ...withLogo(o, categoryLook(o.category)),
     mark: envelopeMark(d.marking, o),
     tint: markingTint(o),
     amount: o.amount,

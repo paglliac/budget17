@@ -647,6 +647,81 @@ describe('Settings', () => {
     assert.deepEqual(plan?.steps, [{ way: 'weeks', kind: 'week', week: '2026-10-10', amount: 5_000 }]);
   });
 
+  it('names and dresses shops, keeps the icons of their sites, and forgets a shop', () => {
+    using settings = new Settings(':memory:');
+    const png = (...bytes: number[]) => ({ type: 'image/png' as const, data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, ...bytes]) });
+    const jpeg = { type: 'image/jpeg' as const, data: new Uint8Array([0xff, 0xd8, 0xff, 0xe0]) };
+
+    settings.dressShop('cofeman', { title: 'Кофеман', site: 'coffeeman.ru' });
+    settings.dressShop('lenta', { title: null, site: null });
+    settings.setShopPhoto('lenta', jpeg);
+    const looks = settings.shopSetup().looks;
+    assert.deepEqual(looks.get('cofeman'), { title: 'Кофеман', site: 'coffeeman.ru', photo: null });
+    assert.match(looks.get('lenta')?.photo ?? '', /^[0-9a-f]{12}$/, 'a photo has a version');
+    assert.deepEqual(settings.shopPhoto('lenta'), jpeg);
+    settings.dressShop('lenta', { title: 'Лента у дома', site: null });
+    assert.deepEqual(settings.shopPhoto('lenta'), jpeg, 'a name keeps the photo');
+    settings.setShopPhoto('lenta', null);
+    assert.equal(settings.shopPhoto('lenta'), null);
+    assert.deepEqual(settings.shopSetup().looks.get('lenta'), { title: 'Лента у дома', site: null, photo: null });
+    settings.forgetShop('lenta');
+    assert.equal(settings.shopSetup().looks.has('lenta'), false);
+
+    const asked = new Date('2026-10-13T09:00:00Z');
+    settings.putSiteIcon('lenta.com', png(1), asked);
+    settings.putSiteIcon('mariara.ru', null, asked);
+    assert.deepEqual(settings.siteIcon('lenta.com'), png(1));
+    assert.equal(settings.siteIcon('mariara.ru'), null, 'a site without an icon has none');
+    assert.deepEqual([...settings.shopSetup().icons.keys()], ['lenta.com'], 'only kept icons have versions');
+    assert.deepEqual(settings.siteIconsAsked(), new Map([['lenta.com', asked.toISOString()], ['mariara.ru', asked.toISOString()]]));
+    const before = settings.shopSetup().icons.get('lenta.com');
+    settings.putSiteIcon('lenta.com', png(2), asked);
+    assert.notEqual(settings.shopSetup().icons.get('lenta.com'), before, 'another icon, another version');
+  });
+
+  it('merges shops into one that stands alone, and splits them off again', () => {
+    using settings = new Settings(':memory:');
+
+    settings.mergeShop('sbersamokat', 'samokat');
+    settings.mergeShop('samokatbistro', 'sbersamokat');
+    assert.deepEqual(settings.shopSetup().merges, new Map([['sbersamokat', 'samokat'], ['samokatbistro', 'samokat']]), 'into the one the other went into');
+    settings.mergeShop('samokat', 'lavka');
+    assert.deepEqual(
+      settings.shopSetup().merges,
+      new Map([['sbersamokat', 'lavka'], ['samokatbistro', 'lavka'], ['samokat', 'lavka']]),
+      'a merged shop takes the shops merged into it along',
+    );
+    settings.mergeShop('lavka', 'samokat');
+    assert.equal(settings.shopSetup().merges?.get('lavka'), undefined, 'not into itself');
+    settings.splitShop('samokat');
+    assert.deepEqual(settings.shopSetup().merges, new Map([['sbersamokat', 'lavka'], ['samokatbistro', 'lavka']]));
+  });
+
+  it('names shops in a file made before them, keeping its categories', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
+    try {
+      const path = join(dir, 'settings.db');
+      {
+        using db = new DatabaseSync(path);
+        db.exec(`CREATE TABLE category_change (
+          tag_id TEXT PRIMARY KEY,
+          title TEXT,
+          hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))
+        ) STRICT`);
+        db.exec(`INSERT INTO category_change (tag_id, title) VALUES ('groceries', 'Продукты')`);
+      }
+      using settings = new Settings(path);
+      assert.deepEqual(settings.shopSetup(), { looks: new Map(), icons: new Map(), merges: new Map() });
+      settings.dressShop('lenta', { title: 'Лента', site: 'lenta.com' });
+      settings.mergeShop('lentaonlain', 'lenta');
+      assert.deepEqual(settings.shopSetup().merges, new Map([['lentaonlain', 'lenta']]));
+      assert.deepEqual(settings.shopSetup().looks.get('lenta'), { title: 'Лента', site: 'lenta.com', photo: null });
+      assert.deepEqual(settings.categorySetup().changes.get('groceries'), { title: 'Продукты', hidden: false });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('keeps the token Claude signs in by, and forgets it', () => {
     using settings = new Settings(':memory:');
     assert.equal(settings.claudeToken(), null);

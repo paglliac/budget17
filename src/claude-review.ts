@@ -13,7 +13,8 @@ import { addDays, shiftMonth, type MonthString } from './dates.ts';
 import { parseTitle } from './input.ts';
 import type { Operation } from './ledger.ts';
 import type { Category } from './operations.ts';
-import { shopKey, shopName } from './payees.ts';
+import { shopKey } from './payees.ts';
+import { shopLabel } from './shops.ts';
 import type { RegularExpense } from './regular.ts';
 import { QUESTIONS, transferHint, type MonthReview, type Question, type ReviewedExpense } from './review.ts';
 import { schemaErrors, type JsonSchema } from './schema.ts';
@@ -311,7 +312,7 @@ export function claudeInput(context: {
   const earliest = spanOf(monthsBefore[0]!).from;
   const earlier = context.history.filter((o) => o.date >= earliest && o.date < r.from);
   const shops = new Map<string, string>();
-  for (const { operation: o } of context.month) if (!shops.has(shopKey(o.payee))) shops.set(shopKey(o.payee), shopName(o.payee));
+  for (const { operation: o } of context.month) if (!shops.has(shopKey(o.payee))) shops.set(shopKey(o.payee), shopLabel(o));
 
   const previous = (() => {
     const saved = claude.review;

@@ -2,10 +2,11 @@
 // purchase planned in a week, or a wish with a plan), its category, which wins over ZenMoney's, whether it could have been done without, and
 // where it counts in the budget, if at all.
 // An open expense shows under its row when and how it was paid, then these as choices made in one click, the
-// likeliest payments and the most popular categories first, and what the user wrote about it. An income is marked the
-// same way, only it pays nothing, its categories are the income ones, and it either counts among the incomes or not
-// at all. Choices post to /spending/:id/:choice, the list of other payments to /spending/:id with the choice as
-// `target`, and the description to /spending/:id/description (see submitMarking).
+// likeliest payments and the most popular categories first, what the user wrote about it, and a link to the form of
+// its shop on the settings' tab of shops (see shops.ts). An income is marked the same way, only it pays nothing, its
+// categories are the income ones, and it either counts among the incomes or not at all. Choices post to
+// /spending/:id/:choice, the list of other payments to /spending/:id with the choice as `target`, and the description
+// to /spending/:id/description (see submitMarking).
 
 import { mainCurrency } from '../../balances.ts';
 import { MAX_DESCRIPTION, parseDescription } from '../../input.ts';
@@ -16,6 +17,7 @@ import { listOperations, PURCHASE_CATEGORY, REGULAR_CATEGORY, type Operation } f
 import { operationKind } from '../../operations.ts';
 import { nearestPayment, type RegularExpense } from '../../regular.ts';
 import type { Settings } from '../../settings.ts';
+import type { ShopSetup } from '../../shops.ts';
 import { envelopeOf, purchaseStatus, weekOf, type Envelope, type Purchase, type WeekStart, type Wish } from '../../week.ts';
 import type { ChosenPlan } from '../../wish-plans.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
@@ -24,8 +26,9 @@ import type { Html } from '../html.ts';
 import type { IconName } from '../icons.ts';
 import { categoryLook } from '../looks.ts';
 import type { Tone } from '../tones.ts';
-import { choiceGroup, factList, inlineForm } from '../widgets/basics.ts';
+import { choiceGroup, factList, inlineForm, segmentedLinks } from '../widgets/basics.ts';
 import type { Href } from './chrome.ts';
+import { shopHref } from './shops.ts';
 
 /** What the user keeps in the app about expenses and incomes. */
 export interface SavedMarking {
@@ -56,6 +59,8 @@ export interface SavedMarking {
   subcategories?: SubcategorySetup;
   /** Suggestions of the month review the user turned down. */
   dismissedHints?: ReadonlySet<string>;
+  /** How the user named and dressed shops; none when not given. */
+  shops?: ShopSetup;
 }
 
 /** What marking an expense or an income needs besides it. */
@@ -239,7 +244,7 @@ export const ENVELOPE_MARK: Record<Envelope, { label: string; tone?: Tone }> = {
 
 /** What an expense's row is titled: what it paid, which tells more than who it went to, when it is linked. */
 export function markingTitle(o: Operation): string {
-  return o.regular?.title ?? o.purchase?.title ?? o.wish?.title ?? o.payee;
+  return o.regular?.title ?? o.purchase?.title ?? o.wish?.title ?? o.name;
 }
 
 /**
@@ -250,9 +255,9 @@ export function markingDetails(o: Operation): string {
   const category = o.category && o.category.id !== REGULAR_CATEGORY.id && o.category.id !== PURCHASE_CATEGORY.id ? o.category.title : null;
   const paid = o.purchase ?? o.wish;
   const marked = o.regular
-    ? o.payee
+    ? o.name
     : paid
-      ? [o.payee, category?.toLowerCase() === paid.title.toLowerCase() ? null : category].filter(Boolean).join(' · ')
+      ? [o.name, category?.toLowerCase() === paid.title.toLowerCase() ? null : category].filter(Boolean).join(' · ')
       : (category ?? 'без категории');
   return [marked, o.description].filter(Boolean).join(' · ');
 }
@@ -282,7 +287,13 @@ export function markingPanel(m: Marking, o: Operation, href: Href): Html[] {
     optionalGroup(o, href),
     envelopeGroup(m, o, href),
     descriptionForm(o, href),
+    shopLink(o, href),
   ].filter((part) => part !== null);
+}
+
+/** The way to the form of the shop an operation went to or came from, on its tab of the settings. */
+function shopLink(o: Operation, href: Href): Html | null {
+  return o.shop ? segmentedLinks({ label: 'Магазин', items: [{ label: 'Название и значок магазина →', href: shopHref(o.shop.key, href) }] }) : null;
 }
 
 /** When, from where and how the bank put it, with whatever else it said: comment, foreign amount, not settled yet. */

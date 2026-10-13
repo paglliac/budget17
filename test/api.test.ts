@@ -11,6 +11,7 @@ import {
   monthScreen,
   operationsScreen,
   regularScreen,
+  shopsScreen,
   spendingScreen,
   uncategorizedScreen,
   weekLevel,
@@ -100,6 +101,7 @@ describe('api', () => {
       icon: 'cart',
       color: '#3fa46a',
       photo: null,
+      logo: null,
       amount: 473,
       mark: 'week',
       muted: false,
@@ -274,6 +276,52 @@ describe('api', () => {
     assert.equal(spending.hint, null, 'nothing to suggest for a transfer to a person');
     assert.deepEqual(spending.undo, []);
     assert.equal(spending.description, null);
+  });
+
+  it('names an expense by its shop with its logo, in its rows and on its sheet, which opens the shop', () => {
+    const lenta = { ...data(), transaction: [transaction({ id: 'lenta', date: '2026-10-05', outcome: 736, payee: 'Lenta 089', tag: ['groceries'] })] };
+    const shops = { ...saved(), shops: { looks: new Map(), icons: new Map([['lenta.com', 'v1']]) } };
+    const logo = '/shop-logo/lenta?v=sv1';
+
+    const sheet = plain(spendingScreen(lenta, shops, { today, id: 'lenta' }));
+    assert.equal(sheet.title, 'Лента');
+    assert.deepEqual(sheet.notes, ['в банке — Lenta 089']);
+    assert.deepEqual(sheet.shop, {
+      key: 'lenta',
+      title: '',
+      placeholder: 'Лента',
+      site: '',
+      sitePlaceholder: 'lenta.com',
+      logo,
+      photo: false,
+      dressed: false,
+      note: 'Для 1 операции: Lenta 089.',
+      names: [{ name: 'Lenta 089', count: 1 }],
+    });
+    const operation = plain(operationsScreen(lenta, shops, { today })).days[0].items[0];
+    assert.deepEqual([operation.title, operation.logo, operation.icon, operation.photo], ['Лента', logo, 'cart', null], 'the logo comes beside the category’s icon');
+    const week = plain(weekScreen(lenta, shops, budget)).days[0].items[0];
+    assert.deepEqual([week.title, week.logo], ['Лента', logo]);
+    assert.equal(plain(spendingScreen(data(), saved(), { today, id: 'pyaterochka' })).shop.logo, null, 'no logo until its site’s icon is kept');
+
+    const list = plain(shopsScreen(lenta, shops, { today, query: null }));
+    assert.equal(list.recent, 1);
+    assert.deepEqual(list.items, [
+      {
+        id: 'shop-lenta',
+        title: 'Лента',
+        details: 'Lenta 089',
+        icon: 'bag',
+        color: '#ffffff',
+        photo: null,
+        logo,
+        amount: null,
+        mark: null,
+        muted: false,
+        shop: sheet.shop,
+      },
+    ]);
+    assert.deepEqual(plain(shopsScreen(lenta, shops, { today, query: 'пятёрочка' })).items, [], 'a search finds only what it asks for');
   });
 
   it('shows what the user wrote about an expense on its sheet and under its rows', () => {

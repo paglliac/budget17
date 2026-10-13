@@ -45,6 +45,8 @@ describe('listOperations', () => {
       amount: 560,
       original: null,
       payee: 'Яндекс Go',
+      shop: { key: 'iandeksgo', title: 'Яндекс Go', site: 'go.yandex', logo: null },
+      name: 'Яндекс Go',
       originalPayee: null,
       comment: null,
       description: null,
@@ -59,6 +61,40 @@ describe('listOperations', () => {
       ignored: false,
       optional: false,
     });
+  });
+
+  it('names an expense by its shop: the name the user gave it, else its chain’s, keeping how the bank named it', () => {
+    const shops = {
+      looks: new Map([['cofeman', { title: 'Кофеман', site: 'coffeeman.ru', photo: null }]]),
+      icons: new Map([['lenta.com', 'v1']]),
+    };
+    const operations = listOperations(
+      {
+        ...base,
+        transaction: [
+          transaction({ id: 'lenta', created: 3, outcome: 736, payee: 'Lenta 089', originalPayee: 'Lenta 089' }),
+          transaction({ id: 'coffee', created: 2, outcome: 120, payee: '_COFFEEMAN.', originalPayee: '_COFFEEMAN.' }),
+          transaction({ id: 'bakery', created: 1, outcome: 90, payee: 'KHLEB IZ TANDYRA_' }),
+          transaction({ id: 'move', created: 0, outcome: 1000, income: 1000, outcomeAccount: 'card', incomeAccount: 'savings' }),
+        ],
+      },
+      october,
+      { categorizations: new Map(), regular: [], shops },
+    );
+
+    assert.deepEqual(
+      operations.map((o) => [o.id, o.name, o.originalPayee, o.shop?.logo ?? null]),
+      [
+        ['lenta', 'Лента', 'Lenta 089', 'sv1'],
+        ['coffee', 'Кофеман', '_COFFEEMAN.', null],
+        ['bakery', 'KHLEB IZ TANDYRA_', null, null],
+        ['move', 'Т-Банк → Копилка', null, null],
+      ],
+    );
+    assert.equal(operations[0]?.payee, 'Lenta 089', 'the rules go by the payee as ZenMoney names it');
+    assert.equal(operations[3]?.shop, null, 'a transfer has no shop');
+    assert.deepEqual(filterOperations(operations, { query: 'кофеман' }).map((o) => o.id), ['coffee'], 'found by its name');
+    assert.deepEqual(filterOperations(operations, { query: 'lenta' }).map((o) => o.id), ['lenta'], 'and by the bank’s');
   });
 
   it('drops stray spaces around account titles', () => {
@@ -245,7 +281,7 @@ describe('listOperations with banks and the user’s sorting', () => {
         transaction({ id: 'cash', created: 3, outcome: 120_000 }),
         transaction({ id: 'debt', created: 2, income: 22_000, payee: 'Сергей В.' }),
         transaction({ id: 'shop', created: 1, outcome: 473, payee: 'Пятёрочка', originalPayee: 'PYATEROCHKA 9076' }),
-        transaction({ id: 'same', created: 0, outcome: 100, payee: 'Lenta', originalPayee: 'LENTA' }),
+        transaction({ id: 'same', created: 0, outcome: 100, payee: 'Khofenberg', originalPayee: 'KHOFENBERG' }),
       ],
     };
     const sorting = {

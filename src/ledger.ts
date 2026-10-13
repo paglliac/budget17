@@ -3,6 +3,7 @@ import { categoryFinder, NO_SETUP, type CategoryKind, type CategorySetup } from 
 import type { Categorization } from './categorization.ts';
 import { operationAmount, operationKind, type Category, type OperationKind } from './operations.ts';
 import type { RegularExpense } from './regular.ts';
+import { NO_SHOPS, shopFinder, type Shop, type ShopSetup } from './shops.ts';
 import type { Envelope, Purchase, Wish } from './week.ts';
 import type { DateString, EntityCollections, Instrument, TagId } from './zenmoney/types.ts';
 
@@ -17,8 +18,13 @@ export interface Operation {
   amount: number;
   /** The amount in the currency of the purchase or account, when it is not the main currency. */
   original: { amount: number; instrument: Instrument } | null;
+  /** Who it went to or came from, as ZenMoney names them; the rules of the app go by it. */
   payee: string;
-  /** How the bank named the payee, when ZenMoney or the user named it otherwise. */
+  /** The shop the payee is, with the name and logo it has in the app; null for a transfer or when no payee is named. */
+  shop: Shop | null;
+  /** What the app calls who it went to: the name of its shop when it has one, else the payee. */
+  name: string;
+  /** How the bank named the payee, when ZenMoney, the user or the chain the shop is named it otherwise. */
   originalPayee: string | null;
   comment: string | null;
   /** What the user wrote about it in the app. */
@@ -69,6 +75,8 @@ export interface Sorting {
   descriptions?: ReadonlyMap<string, string>;
   /** Expenses the user said could have been done without, by ZenMoney transaction id. */
   optionalSpending?: ReadonlySet<string>;
+  /** How the user named and dressed shops; without it shops are named as the chains the app knows are. */
+  shops?: ShopSetup;
 }
 
 /** Payments of regular expenses go together under this category when they have no other. */
@@ -102,6 +110,7 @@ export function listOperations(
   const purchases = new Map((sorting?.purchases ?? []).map((p) => [p.id, p]));
   const wishes = new Map((sorting?.wishes ?? []).map((w) => [w.id, w]));
   const findCategory = categoryFinder(tags, sorting?.categories ?? NO_SETUP);
+  const findShop = shopFinder(sorting?.shops ?? NO_SHOPS);
 
   const operations: Operation[] = [];
   for (const t of data.transaction ?? []) {
@@ -133,16 +142,19 @@ export function listOperations(
     const category = (sorted && 'tag' in sorted ? findCategory(sorted.tag) : undefined) ?? zenmoneyCategory;
     const comment = t.comment?.trim() || null;
     const originalPayee = t.originalPayee?.trim() || null;
+    const named = t.payee?.trim() || (t.merchant ? merchants.get(t.merchant) : undefined) || originalPayee;
+    const shop = named && kind !== 'transfer' ? findShop(named) : null;
     const payee =
-      t.payee?.trim() ||
-      (t.merchant ? merchants.get(t.merchant) : undefined) ||
-      t.originalPayee?.trim() ||
+      named ||
       (toAccount ? `${account} → ${toAccount}` : undefined) ||
       category?.title ||
       paid?.title ||
       bought?.title ||
       wish?.title ||
       UNTITLED[kind];
+    const name = shop?.title ?? payee;
+    // A shop named in the app is told by the name ZenMoney has too, when the bank's own is not known.
+    const bankName = originalPayee ?? (shop?.title ? payee : null);
 
     operations.push({
       id: t.id,
@@ -155,7 +167,9 @@ export function listOperations(
           ? { amount: original.amount, instrument: original.instrument }
           : null,
       payee,
-      originalPayee: originalPayee && originalPayee.toLocaleLowerCase('ru') !== payee.toLocaleLowerCase('ru') ? originalPayee : null,
+      shop,
+      name,
+      originalPayee: bankName && bankName.toLocaleLowerCase('ru') !== name.toLocaleLowerCase('ru') ? bankName : null,
       comment: comment === payee ? null : comment,
       description: sorting?.descriptions?.get(t.id) ?? null,
       category: category ?? (paid ? REGULAR_CATEGORY : bought || wish ? PURCHASE_CATEGORY : null),
@@ -196,7 +210,7 @@ export function filterOperations(operations: Operation[], filter: OperationFilte
     if (filter.category === 'none' && (o.category !== null || o.kind === 'transfer')) return false;
     if (filter.category && filter.category !== 'none' && o.category?.id !== filter.category) return false;
     if (query) {
-      const text = [o.payee, o.comment, o.description, o.category?.title, o.regular?.title, o.purchase?.title, o.account, o.toAccount].filter(Boolean).join(' ');
+      const text = [o.name, o.payee, o.originalPayee, o.comment, o.description, o.category?.title, o.regular?.title, o.purchase?.title, o.account, o.toAccount].filter(Boolean).join(' ');
       if (!text.toLocaleLowerCase('ru').includes(query)) return false;
     }
     return true;

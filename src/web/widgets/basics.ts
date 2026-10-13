@@ -4,7 +4,7 @@
 
 import { percent } from '../format.ts';
 import { html, type Content, type Html } from '../html.ts';
-import { icon, type IconName } from '../icons.ts';
+import { icon, iconOrPhoto, type IconName } from '../icons.ts';
 import { toneColor, type Tone } from '../tones.ts';
 
 /** The main action. With `action` it submits a POST form to that URL; with `submit`, the form it is in. */
@@ -124,6 +124,8 @@ export function field(options: {
   maxLength?: number;
   placeholder?: string;
   required?: boolean;
+  /** What the browser checks the text against before sending it, with `hint` as its words for what is wrong. */
+  pattern?: { regex: string; hint: string };
   width?: number;
   error?: string;
 }): Html {
@@ -139,6 +141,8 @@ export function field(options: {
     }${options.min === undefined ? null : html` min="${options.min}"`}${options.max === undefined ? null : html` max="${options.max}"`}${
       options.maxLength === undefined ? null : html` maxlength="${options.maxLength}"`
     }${options.placeholder ? html` placeholder="${options.placeholder}"` : null}${options.required ? html` required` : null}${
+      options.pattern ? html` pattern="${options.pattern.regex}" title="${options.pattern.hint}"` : null
+    }${
       options.error ? html` aria-invalid="true"` : null
     }>
     ${options.error ? html`<small class="field-error">${options.error}</small>` : null}
@@ -318,9 +322,41 @@ export function inlineForm(options: {
   })}${button({ label: options.submitLabel, submit: true })}</form>`;
 }
 
-/** Facts about something, a label and a value each, in a row that wraps, such as when and from where an expense was paid. */
-export function factList(options: { label: string; items: Array<{ label: string; value: string }> }): Html {
-  return html`<dl class="facts" aria-label="${options.label}">${options.items.map(
+/**
+ * A few fields under a label with their own button, posting a form to its URL with the `hidden` values, such as a
+ * shop's name, site and photo. `look` shows the icon or photo first, which a photo picked in a photoField replaces at
+ * once; `actions` post the same form elsewhere without checking its fields, and `note` says under it what it changes.
+ */
+export function groupForm(options: {
+  label: string;
+  action: string;
+  fields: Content;
+  submitLabel: string;
+  hidden?: Record<string, string>;
+  look?: { icon: IconName; color: string; photo?: string | null };
+  actions?: Array<{ label: string; action: string }>;
+  note?: string;
+}): Html {
+  return html`<div class="choices group-form" role="group" aria-label="${options.label}">
+    <span class="choices-label">${options.label}</span>
+    <form class="inline-form" method="post" action="${options.action}">${Object.entries(options.hidden ?? {}).map(
+      ([name, value]) => html`<input type="hidden" name="${name}" value="${value}">`,
+    )}${options.look ? html`<span class="entry-icon" style="--color:${options.look.color}">${iconOrPhoto(options.look.icon, options.look.photo)}</span>` : null}${
+      options.fields
+    }${button({ label: options.submitLabel, submit: true })}${(options.actions ?? []).map(
+      (a) => html`<button class="entry-quiet" type="submit" formaction="${a.action}" formnovalidate>${a.label}</button>`,
+    )}</form>
+    ${options.note ? footnote({ text: options.note }) : null}
+  </div>`;
+}
+
+/**
+ * Facts about something, a label and a value each, in a row that wraps, such as when and from where an expense was
+ * paid. With `titled` the label shows above them, as a choice group's does.
+ */
+export function factList(options: { label: string; items: Array<{ label: string; value: string }>; titled?: boolean }): Html {
+  const list = html`<dl class="facts" aria-label="${options.label}">${options.items.map(
     (item) => html`<div class="fact"><dt>${item.label}</dt><dd>${item.value}</dd></div>`,
   )}</dl>`;
+  return options.titled ? html`<div class="choices"><span class="choices-label">${options.label}</span>${list}</div>` : list;
 }

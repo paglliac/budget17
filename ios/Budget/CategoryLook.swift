@@ -102,6 +102,16 @@ enum CategoryPhoto {
         return "data:\(type.preferredMIMEType ?? "image/jpeg");base64,\((out as Data).base64EncodedString())"
     }
 
+    /// The photo just picked, from the data URL it is sent as.
+    static func image(_ url: String) -> Image? {
+        guard let comma = url.firstIndex(of: ","), let data = Data(base64Encoded: String(url[url.index(after: comma)...])) else { return nil }
+        #if os(iOS)
+        return UIImage(data: data).map { Image(uiImage: $0) }
+        #else
+        return NSImage(data: data).map { Image(nsImage: $0) }
+        #endif
+    }
+
     /// Whether some of the image is see-through, judged on a small copy of it.
     nonisolated private static func hasClearGround(_ image: CGImage) -> Bool {
         if [.none, .noneSkipFirst, .noneSkipLast].contains(image.alphaInfo) { return false }

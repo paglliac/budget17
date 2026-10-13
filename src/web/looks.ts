@@ -1,11 +1,13 @@
 // How a category is drawn: the icon and colour the user picked for it in the app, or the ones its title suggests, and
 // the photo the user put on it, shown instead of the icon on the category's colour, so that a photo with a clear
 // ground takes the colour. Rows and tiles take all three, so a category looks the same on every page and in the app.
-// The photo itself is served at /category-photo/<category id>; its version in the address changes with it.
+// The photo itself is served at /category-photo/<category id>; its version in the address changes with it. A row of an
+// operation shows the logo of its shop instead, when the shop has one (see shops.ts).
 
+import type { Operation } from '../ledger.ts';
 import type { Category } from '../operations.ts';
 import type { TagId } from '../zenmoney/types.ts';
-import { categoryIcon, isCategoryIcon, type IconName } from './icons.ts';
+import { categoryIcon, isCategoryIcon, SHOP_LOGO_PATH, type IconName } from './icons.ts';
 import { categoryColor, isTone } from './tones.ts';
 
 export interface Look {
@@ -28,6 +30,17 @@ export function categoryLook(c: (Pick<Category, 'title' | 'color' | 'icon' | 'ph
 
 export function photoPath(id: TagId, version: string): string {
   return `/category-photo/${encodeURIComponent(id)}?v=${encodeURIComponent(version)}`;
+}
+
+/** Where the logo of a shop is, as a path of the site, served at /shop-logo/<shop key>; null when it has none. */
+export function logoOf(o: Pick<Operation, 'shop'>): string | null {
+  return o.shop?.logo ? `${SHOP_LOGO_PATH}${encodeURIComponent(o.shop.key)}?v=${encodeURIComponent(o.shop.logo)}` : null;
+}
+
+/** How an operation's row is drawn: the logo of its shop when it has one, else as `look` says, by its category. */
+export function withLogo(o: Pick<Operation, 'shop'>, look: Look): Look {
+  const logo = logoOf(o);
+  return logo ? { ...look, color: '#ffffff', photo: logo } : look;
 }
 
 /** Colours to pick for a category, with their names: the palette's tones by name, and a few more as #rrggbb. */

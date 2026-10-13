@@ -98,7 +98,22 @@ final class ScreensTests: XCTestCase {
                 shot("spending-payment")
                 app.swipeUp()
                 shot("spending-more")
-                app.buttons["Готово"].tap()
+                // The shop's name leaves for the shop on «Ещё», whose form is left with «Отмена».
+                app.swipeDown()
+                let shop = app.buttons["shop"]
+                if shop.waitForExistence(timeout: 2) {
+                    shop.tap()
+                    if app.buttons["Сохранить"].waitForExistence(timeout: 5) {
+                        shot("shop")
+                    } else {
+                        XCTFail("the shop's name opens the shop")
+                    }
+                    app.buttons["Отмена"].tap()
+                    shot("shops-opened")
+                    tab("Главная")
+                } else {
+                    app.buttons["Готово"].tap()
+                }
             } else {
                 XCTFail("the expense opens")
             }
@@ -165,6 +180,8 @@ final class ScreensTests: XCTestCase {
         app.buttons["filter-Все"].tap()
 
         tab("Ещё")
+        pill("Регулярные").tap()
+        sleep(1)
         shot("regular")
         pill("Доходы").tap()
         sleep(1)
@@ -182,6 +199,9 @@ final class ScreensTests: XCTestCase {
                 app.buttons["Отмена"].firstMatch.tap()
             }
         }
+        pill("Магазины").tap()
+        sleep(1)
+        shot("shops")
         app.buttons["Настройки"].tap()
         if sheet("settings").waitForExistence(timeout: 5) {
             sleep(1)

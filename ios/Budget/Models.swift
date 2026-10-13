@@ -13,6 +13,9 @@ struct Row: Decodable, Hashable {
     let color: String
     /// A category's photo, drawn instead of the icon on its colour: a path of the server; nil when there is none.
     let photo: String?
+    /// The logo of an expense's shop, drawn on white instead of its dot: a path of the server; nil when its shop has none,
+    /// or from a server before this.
+    let logo: String?
     let amount: Double?
     /// week, extra, outside or ignored; nil when the row has no dot.
     let mark: String?
@@ -21,7 +24,7 @@ struct Row: Decodable, Hashable {
 
 extension Row {
     func with(amount: Double) -> Row {
-        Row(id: id, title: title, details: details, icon: icon, color: color, photo: photo, amount: amount, mark: mark, muted: muted)
+        Row(id: id, title: title, details: details, icon: icon, color: color, photo: photo, logo: logo, amount: amount, mark: mark, muted: muted)
     }
 }
 
@@ -310,6 +313,8 @@ struct SpendingScreen: Decodable, Hashable {
     let account: String
     /// What the user wrote about the expense; posted to /api/spending/:id/description.
     let description: String?
+    /// Its shop, named and dressed for all its expenses; nil for one without a shop, or from a server before this.
+    let shop: Shop?
     /// What else the bank said, such as its comment or that it has not settled the expense yet.
     let notes: [String]
     var isIncome: Bool { kind == "income" }
@@ -325,6 +330,7 @@ struct SpendingScreen: Decodable, Hashable {
         let label: String
         let current: Bool
     }
+
     let envelopes: [Choice]
     let undo: [Choice]
 
@@ -608,6 +614,54 @@ struct CategoriesScreen: Decodable {
     struct Group: Decodable {
         let shown: [CategoryItem]
         let hidden: [CategoryItem]
+    }
+}
+
+/// A shop's form, from the tab of shops or an expense of it: posted to /api/shops/:key with title, site and photo, to
+/// its photo/delete and to its forget.
+struct Shop: Decodable, Hashable, Identifiable {
+    var id: String { key }
+    let key: String
+    /// The name the user gave it; empty for the one it would have, `placeholder`.
+    let title: String
+    let placeholder: String
+    /// The site its logo comes from that the user gave it; empty for its chain's, `sitePlaceholder`.
+    let site: String
+    let sitePlaceholder: String
+    /// Its logo, or the user's photo, as a path of the server.
+    let logo: String?
+    /// Whether the user put a photo on it.
+    let photo: Bool
+    /// Whether the user named or dressed it, which forget takes back.
+    let dressed: Bool
+    /// Для 43 операций: Lenta-0089, Lenta-0178, Лента и ещё 9 названий.
+    let note: String
+    /// What it is made of, merged shops included: the names the bank gives it, the most frequent first; nil from a
+    /// server before this.
+    let names: [Name]?
+
+    struct Name: Decodable, Hashable {
+        let name: String
+        let count: Int
+    }
+}
+
+/// The shops of the last three months, the most frequent first, or those a search found, each with its form.
+struct ShopsScreen: Decodable {
+    let query: String?
+    /// How many shops the last three months had.
+    let recent: Int
+    let items: [Item]
+
+    struct Item: Decodable, Identifiable {
+        var id: String { shop.key }
+        let row: Row
+        let shop: Shop
+
+        init(from decoder: Decoder) throws {
+            row = try Row(from: decoder)
+            shop = try decoder.extra().value("shop")
+        }
     }
 }
 

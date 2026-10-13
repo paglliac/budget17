@@ -15,7 +15,7 @@ import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { money, monthName, plural } from '../format.ts';
 import type { Html } from '../html.ts';
-import { categoryLook, type Look } from '../looks.ts';
+import { categoryLook, withLogo, type Look } from '../looks.ts';
 import { toneColor } from '../tones.ts';
 import { emptyState, filterTag, pageIntro, searchField, segmentedLinks } from '../widgets/basics.ts';
 import { categoryList, dayGroup, operationRow } from '../widgets/operations.ts';
@@ -265,8 +265,9 @@ function row(d: OperationsData, o: Operation, href: Href, to: (changes: { edit?:
   const line = operationLine(o);
   return operationRow({
     id: markable ? key : undefined,
-    title: o.payee,
+    title: o.name,
     ...line,
+    ...withLogo(o, line),
     kind: o.kind,
     amount: o.amount,
     symbol: d.symbol,

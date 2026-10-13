@@ -309,7 +309,7 @@ struct WeekSpendingList: View {
                 ForEach(Array(group.items.enumerated()), id: \.element.id) { index, expense in
                     Button { sheet = .spending(expense.spending) } label: {
                         LilacRow(
-                            marker: .dot(Palette.color(expense.row.color)),
+                            marker: .expense(expense.row),
                             title: expense.row.title,
                             details: expense.row.details,
                             amount: expense.row.amount,

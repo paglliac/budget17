@@ -11,7 +11,7 @@ import { pageDocument } from '../document.ts';
 import { dayMonth, money, monthName, plural } from '../format.ts';
 import type { Html } from '../html.ts';
 import { entryIcon } from '../icons.ts';
-import { categoryLook } from '../looks.ts';
+import { categoryLook, withLogo } from '../looks.ts';
 import { toneColor } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
 import { emptyState, footnote, pageIntro, section } from '../widgets/basics.ts';
@@ -118,10 +118,9 @@ function pendingItem({ d, href, here }: Page, o: Operation, suggestion: Suggesti
   const open = d.edit === key;
   return entryRow({
     id: key,
-    title: o.payee,
+    title: o.name,
     details: [where(o), o.description, suggestion ? `похоже на ${suggestionName(suggestion)}` : null].filter(Boolean).join(' · '),
-    icon: 'tag',
-    color: toneColor('gray'),
+    ...withLogo(o, { icon: 'tag', color: toneColor('gray'), photo: null }),
     amount: o.amount,
     symbol: d.symbol,
     href: open ? here() : here({ edit: key }),
@@ -139,8 +138,7 @@ function sortedItem({ d, href, here }: Page, o: Operation): Html {
     id: key,
     title: markingTitle(o),
     details: `${where(o)} · ${markingDetails(o)}`,
-    ...categoryLook(o.category),
-    ...(regular ? { icon: entryIcon(regular.icon, regular.title), photo: null } : {}),
+    ...(regular ? { ...categoryLook(o.category), icon: entryIcon(regular.icon, regular.title), photo: null } : withLogo(o, categoryLook(o.category))),
     mark: envelopeMark(d.marking, o),
     tint: markingTint(o),
     amount: o.amount,

@@ -89,6 +89,22 @@ describe('operations page', () => {
     assert.ok(changed.includes(`action="/spending/${lavka}/uncategorize"`), 'ZenMoney’s category takes the pick back');
   });
 
+  it('names an expense by its shop with its logo, says how the bank named it, and links to its shop’s form', () => {
+    const lenta = { ...data, transaction: [transaction({ id: 'lenta', date: '2026-10-05', outcome: 736, payee: 'Lenta 089', tag: [food.id] })] };
+    const shops = { ...sorting, shops: { looks: new Map(), icons: new Map([['lenta.com', 'v1']]) } };
+    const page = String(renderOperations(loadOperations(lenta, shops, { today, edit: 'spending-lenta' }), createHref())).replaceAll(' ', ' ');
+
+    assert.ok(page.includes('<b>Лента</b>'));
+    assert.ok(page.includes('<img class="photo logo" src="/shop-logo/lenta?v=sv1"'), 'its logo instead of the category’s icon');
+    assert.ok(page.includes('<dt>В банке</dt><dd>Lenta 089</dd>'));
+    assert.ok(page.includes('href="/settings/shops?edit=lenta#shop-lenta">Название и значок магазина →</a>'), 'the shop is named and dressed on its tab of the settings');
+    assert.ok(!page.includes('action="/shops/lenta"'), 'not under the expense');
+
+    const person = { ...data, transaction: [transaction({ id: 'person', date: '2026-10-05', outcome: 500, payee: 'Кирилл А.' })] };
+    const transfer = String(renderOperations(loadOperations(person, sorting, { today, edit: 'spending-person' }), createHref()));
+    assert.ok(!transfer.includes('/settings/shops'), 'a person is no shop');
+  });
+
   it('lists an expense not counted at all quieter, outside every sum, and opens it with when and how it was paid', () => {
     const at = (time: string) => new Date(`2026-10-03T${time}`).getTime() / 1000;
     const cash = transaction({ id: 'cash', date: '2026-10-03', created: at('14:58:00'), outcome: 120_000, payee: 'Снятие наличных', comment: 'Снял в банкомате', originalPayee: 'ATM 1234' });

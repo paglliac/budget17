@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isPerson, shopKey, shopName } from '../src/payees.ts';
+import { isPerson, shopKey, shopName, shopOf } from '../src/payees.ts';
 
 describe('payees', () => {
   it('takes every shop of a chain for one, whichever alphabet and shop number the bank writes', () => {
@@ -16,6 +16,17 @@ describe('payees', () => {
     assert.equal(shopKey('Пятёрочка'), shopKey('PYATEROCHKA'));
     assert.notEqual(shopKey('220024******4099'), shopKey('220024******6141'), 'cards by number stay apart');
     assert.notEqual(shopKey('GAZPROMNEFT AZS 089'), shopKey('GAZPROM*5541*GPN'));
+  });
+
+  it('takes a payment by QR code or SBP for the shop it paid', () => {
+    assert.equal(shopOf('KhlebIzTandyraSBP'), shopOf('KHLEB IZ TANDYRA_'));
+    assert.equal(shopOf('BRISTOL 4226PQR'), shopOf('BRISTOL 4226'));
+    assert.equal(shopOf('GORY NOCH PANASIAN QR'), shopOf('Gory Noch Panasian'));
+    assert.equal(shopOf('Lenta-0089'), 'lenta');
+    assert.equal(shopOf('SBP'), 'sbp', 'a name of the mark alone stays');
+    assert.equal(shopOf('KhofenbergPSBP'), shopOf('Хофенберг'), 'a mark cut short goes too');
+    assert.equal(shopOf('Vostochnaya Kukhnya PQ'), shopOf('Vostochnaya Kukhnya'));
+    assert.equal(shopOf('Abdurakhmonov B. M.SQR'), shopOf('ABDURAKHMONOV B. M. -'));
   });
 
   it('calls a shop by its name without the shop number', () => {

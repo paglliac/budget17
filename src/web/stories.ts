@@ -20,6 +20,7 @@ import {
   iconBadge,
   colorPicker,
   iconPicker,
+  groupForm,
   inlineForm,
   photoField,
   listHeading,
@@ -329,7 +330,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       props: { label: 'Куда отнести', name: 'target', placeholder: 'Категория или регулярная трата', required: true, groups: sortingGroups },
     },
   ]),
-  doc(factList, { group: 'Основа', description: 'Сведения о чём-то: подпись и значение, в строку с переносом, например когда и откуда оплачена трата.' }, [
+  doc(factList, { group: 'Основа', description: 'Сведения о чём-то: подпись и значение, в строку с переносом, например когда и откуда оплачена трата; с заголовком — например, из чего состоит магазин.' }, [
     {
       name: 'Трата',
       width: 520,
@@ -340,6 +341,18 @@ export const WIDGET_DOCS: WidgetDoc[] = [
           { label: 'Счёт', value: 'Основной' },
           { label: 'В банке', value: 'prostoplatSBP' },
           { label: 'Комментарий', value: 'Оплата штрафа по постановлению 18810542260930190636' },
+        ],
+      },
+    },
+    {
+      name: 'С подписью',
+      width: 520,
+      props: {
+        label: 'Из чего состоит',
+        titled: true,
+        items: [
+          { label: 'SAMOKAT', value: '39 операций, последняя 12 октября' },
+          { label: 'SBER*5411*SAMOKAT', value: '2 операции, последняя 3 марта 2025' },
         ],
       },
     },
@@ -382,6 +395,28 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       name: 'Выбирать не из чего',
       width: 320,
       props: { label: 'Категория', choices: [], empty: 'Из ZenMoney: Продукты' },
+    },
+  ]),
+  doc(groupForm, {
+    group: 'Формы',
+    description: 'Несколько полей под подписью со своей кнопкой, например название, сайт и фото магазина; рядом кнопки, которые отправляют ту же форму в другое место, под ними — что форма меняет.',
+  }, [
+    {
+      name: 'Магазин',
+      width: 720,
+      props: {
+        label: 'Название и значок',
+        action: '#',
+        look: { icon: 'bag', color: 'var(--gray)' },
+        fields: [
+          field({ label: 'Название', name: 'title', placeholder: 'Lenta-0089', maxLength: 80 }),
+          field({ label: 'Сайт для значка', name: 'site', placeholder: 'Например, lenta.com' }),
+          photoField({ label: 'Фото вместо значка', name: 'photo', button: 'Выбрать фото' }),
+        ],
+        submitLabel: 'Сохранить',
+        actions: [{ label: 'Сбросить', action: '#' }],
+        note: 'Для 49 операций: Lenta-0089, Lenta-0178, Лента и ещё 11 названий.',
+      },
     },
   ]),
   doc(inlineForm, {

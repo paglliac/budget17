@@ -1,4 +1,4 @@
-// What all pages share: the rail with sections and the month tabs.
+// What all pages share: the rail with sections, the month tabs and the tabs of the settings.
 
 import { shiftMonth, type MonthString } from '../../dates.ts';
 import type { EntityCollections } from '../../zenmoney/types.ts';
@@ -61,6 +61,17 @@ export function monthTabs(current: MonthString, selected: MonthString, link: (mo
       href: link(m === current ? null : m),
       active: m === selected,
     })),
+  });
+}
+
+/** The tabs of the settings: the budget, Claude and categories, and the shops. */
+export function settingsTabs(active: 'main' | 'shops', href: Href): Html {
+  return tabs({
+    label: 'Настройки',
+    items: [
+      { label: 'Основные', icon: 'sliders', href: href('/settings'), active: active === 'main' },
+      { label: 'Магазины', icon: 'bag', href: href('/settings/shops'), active: active === 'shops' },
+    ],
   });
 }
 

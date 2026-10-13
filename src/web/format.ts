@@ -134,3 +134,8 @@ export function dayHeading(date: DateString, today: DateString): { title: string
   const day = WEEKDAYS_FULL[weekday(date)]!;
   return { title, subtitle: title === 'Сегодня' || title === 'Вчера' ? `${dayMonth(date)}, ${day}` : day };
 }
+
+/** Ends a sentence with a full stop, unless it already ends with one, as an amount in «руб.» does. */
+export function stop(text: string): string {
+  return text.endsWith('.') ? text : `${text}.`;
+}

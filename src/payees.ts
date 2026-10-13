@@ -32,6 +32,17 @@ export function shopKey(name: string): string {
 }
 
 /**
+ * The shop a payee is, to name and draw it by: its shopKey without the mark banks add to a payment by QR code or SBP,
+ * whole or cut short, so KhlebIzTandyraSBP is the shop KHLEB IZ TANDYRA_ is, BRISTOLPQR the one BRISTOL is, and
+ * KhofenbergPSBP and Vostochnaya Kukhnya PQ those without the marks.
+ */
+export function shopOf(payee: string): string {
+  const key = shopKey(payee);
+  const unmarked = key.replace(/(?:[ps]?qr|pq|p?sbp)$/, '');
+  return unmarked.length >= 3 ? unmarked : key;
+}
+
+/**
  * A shop's name without its shop number, to call all its shops by: Lenta-0089 is Lenta, APTECHNYY PUNKT N52 APTECHNYY
  * PUNKT, GAZPROM*5541*GPN GAZPROM GPN.
  */

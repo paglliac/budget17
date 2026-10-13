@@ -8,6 +8,7 @@ import { Settings } from '../src/settings.ts';
 import {
   budgetSettingsScreen,
   categoriesScreen,
+  shopsScreen,
   incomeScreen,
   monthScreen,
   operationsScreen,
@@ -45,6 +46,11 @@ settings.dressCategory(kids.id, { icon: 'baby', color: '#1E90FF' });
 settings.setCategoryPhoto(kids.id, { type: 'image/jpeg', data: new Uint8Array([0xff, 0xd8, 0xff, 0xe0]) });
 settings.addOwnCategory('Кэшбэк', 'income');
 settings.setWeekLimit('2026-10-05', 30_000);
+// Shops get a logo: the demo's chains by the icons of their sites, one by a photo of the user's, and one a name.
+const icon = { type: 'image/png' as const, data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) };
+for (const site of ['5ka.ru', 'lenta.com', 'samokat.ru', 'perekrestok.ru', 'vkusvill.ru', 'magnit.ru']) settings.putSiteIcon(site, icon, new Date(`${today}T09:00:00Z`));
+settings.setShopPhoto('kofemania', { type: 'image/jpeg', data: new Uint8Array([0xff, 0xd8, 0xff, 0xe0]) });
+settings.dressShop('rinoknatishinke', { title: 'Тишинский рынок', site: null });
 
 const saved = (): SavedBudget => ({
   categorizations: settings.categorizations(),
@@ -60,6 +66,7 @@ const saved = (): SavedBudget => ({
   weekStart: settings.weekStart(),
   weekLimits: settings.weekLimits(),
   wishes: settings.wishes(),
+  shops: settings.shopSetup(),
 });
 const budget = { today, source: 'demo' as const, canSync: false };
 
@@ -92,6 +99,7 @@ const screens: Record<string, unknown> = {
   regular: regularScreen(data, saved(), { today }),
   income: incomeScreen(data, settings.incomes(), { today }),
   categories: categoriesScreen(data, saved(), { today }),
+  shops: shopsScreen(data, saved(), { today, query: null }),
   'budget-settings': budgetSettingsScreen(data, saved()),
   widget: widgetScreen(data, saved(), { today }),
   wish: wishScreen(data, saved(), { today, id: tyres.id, ways: null, incomes: settings.incomes() }),

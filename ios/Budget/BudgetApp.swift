@@ -15,6 +15,17 @@ struct BudgetApp: App {
 
 enum Tab: Hashable { case home, operations, plan, more }
 
+/// Opens a shop on the tab of shops of «Ещё», from an expense of it, as the root sets it up.
+nonisolated struct OpenShopAction: Sendable {
+    var open: @MainActor @Sendable (Shop) -> Void = { _ in }
+
+    @MainActor func callAsFunction(_ shop: Shop) { open(shop) }
+}
+
+extension EnvironmentValues {
+    @Entry var openShop = OpenShopAction()
+}
+
 /// What the «+» of the tab bar adds: a purchase into the current week's plan or into the extras, or a wish.
 enum Addition { case week, extra, wish }
 
@@ -35,6 +46,8 @@ struct RootView: View {
     @State private var planWeek: String?
     /// A purchase or a wish added from the «+» of the tab bar.
     @State private var sheet: BudgetSheet?
+    /// A shop an expense opened, which «Ещё» shows on its tab of shops.
+    @State private var shop: Shop?
 
     var body: some View {
         if session.server == nil {
@@ -44,13 +57,17 @@ struct RootView: View {
                 screen(.home) { BudgetView(openPending: openPending, openPlan: openPlan, returns: homeReturns) }
                 screen(.operations) { OperationsView(filter: $filter) }
                 screen(.plan) { PlanView(week: $planWeek) }
-                screen(.more) { MoreView() }
+                screen(.more) { MoreView(opening: $shop) }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 TabBar(tab: $tab, pending: session.pending, reselect: reselect, add: add)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { barHeight = $0 }
             }
             .environment(\.tabBarHeight, barHeight)
+            .environment(\.openShop, OpenShopAction { opened in
+                shop = opened
+                tab = .more
+            })
             // The tab bar stays at the bottom under the keyboard, as when searching operations.
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .budgetSheets($sheet)

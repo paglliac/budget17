@@ -1,8 +1,8 @@
 // The JSON the iPhone app reads: each screen as the pages show it, its words included, so the app only lays it out
 // and the rules stay here. The sentences that explain a page are left out: on a phone the figures speak for
-// themselves, and so are the accounts money went from and the times. Rows carry an icon by name (see icons.ts), a colour as a tone's name or #rrggbb, a category's
-// photo as a path of the server (see looks.ts), and where an expense or a purchase counts as `mark`. Built from the
-// same loaders and phrases as the pages.
+// themselves, and so are the accounts money went from and the times. Rows carry an icon by name (see icons.ts), a
+// colour as a tone's name or #rrggbb, a category's photo and a shop's logo as paths of the server (see looks.ts), and
+// where an expense or a purchase counts as `mark`. Built from the same loaders and phrases as the pages.
 
 import { mainCurrency } from '../balances.ts';
 import type { Suggestion } from '../categorization.ts';
@@ -10,6 +10,7 @@ import { addDays, dateOf, daysInMonth, monthOf, shiftMonth, weekday, type MonthS
 import { INCOME_MODEL_IDS, incomeModel, incomeValues, monthlyIncome, type Income, type IncomeModelId } from '../income.ts';
 import { listOperations, type Operation } from '../ledger.ts';
 import { paymentDate, regularTotals, regularValues, type RegularExpense } from '../regular.ts';
+import { NO_SHOPS } from '../shops.ts';
 import { adviceTarget, envelopeOf, MONTH_LIMIT, monthOfWeek, WEEK_LIMIT, weekLimit, weekOf, type Envelope, type ExtrasSummary, type PurchaseStatus, type WeekSummary } from '../week.ts';
 import { covered, savingsTaken, stepMonth, type Step } from '../wish-plans.ts';
 import type { DateString, EntityCollections } from '../zenmoney/types.ts';
@@ -53,8 +54,9 @@ import { loadOperations, netOf, operationCategory, operationLine, operationsEmpt
 import { isBought, wayCards, wishPlan, type WishPlanView } from './pages/wishes.ts';
 import { loadRegular, regularLine, regularTotalNote, STATUS_TONE, timeline, type Placed } from './pages/regular.ts';
 import { categoryDetails, loadBudgetSetup, loadSettingsPage } from './pages/settings.ts';
+import { bankNames, loadShopsPage, operationShop, shopForm, shopLook, type ShopForm } from './pages/shops.ts';
 import { loadUncategorized, suggestedChoice, suggestionName } from './pages/uncategorized.ts';
-import { autoLook, CATEGORY_COLORS, categoryLook } from './looks.ts';
+import { autoLook, CATEGORY_COLORS, categoryLook, logoOf } from './looks.ts';
 import { categoryColor, toneColor, type Tone } from './tones.ts';
 
 /** A row of a list, as entryRow and operationRow draw it. */
@@ -68,6 +70,11 @@ export interface Row {
   color: string;
   /** A category's photo, drawn instead of the icon on its colour: a path of the server; null when there is none. */
   photo: string | null;
+  /**
+   * The logo of the shop of an expense or an income, drawn on white instead of its dot or icon: a path of the server;
+   * null when its shop has none.
+   */
+  logo: string | null;
   amount: number | null;
   /** Where it counts, as the dot before the amount; null when it has none. */
   mark: Envelope | null;
@@ -103,7 +110,7 @@ export function colorOf(css: string): string {
 }
 
 function row(fields: Pick<Row, 'id' | 'title' | 'details' | 'icon' | 'color'> & Partial<Row>): Row {
-  return { photo: null, amount: null, mark: null, muted: false, ...fields, color: colorOf(fields.color) };
+  return { photo: null, logo: null, amount: null, mark: null, muted: false, ...fields, color: colorOf(fields.color) };
 }
 
 function byDay<T>(items: readonly T[], dateOf: (item: T) => DateString, today: DateString): Array<Day<T>> {
@@ -124,6 +131,7 @@ function expenseRow(m: Pick<Marking, 'marks' | 'purchases'>, o: Operation): Expe
       title: markingTitle(o),
       details: markingDetails(o),
       ...categoryLook(o.category),
+      logo: logoOf(o),
       amount: o.amount,
       mark: envelopeOf(m, o),
     }),
@@ -390,7 +398,8 @@ export function monthScreen(data: EntityCollections, saved: SavedBudget, options
 export function spendingScreen(data: EntityCollections, saved: SavedMarking, options: { today: DateString; id: string }) {
   const expenses = allExpenses(data, saved);
   // Operations that do not count are marked too, from the operations, so they are looked up among all of them.
-  const o = listOperations(data, { from: '0000-01-01', to: '9999-12-31' }, saved, { withIgnored: true }).find((e) => e.id === options.id && e.kind !== 'transfer');
+  const operations = listOperations(data, { from: '0000-01-01', to: '9999-12-31' }, saved, { withIgnored: true });
+  const o = operations.find((e) => e.id === options.id && e.kind !== 'transfer');
   if (!o) return null;
   const marking = loadMarking(data, saved, expenses, options.today);
   const suggestion = o.category === null ? marking.suggest(o) : null;
@@ -407,6 +416,7 @@ export function spendingScreen(data: EntityCollections, saved: SavedMarking, opt
   };
   const time = timeOn(o.date, o.created);
   const hints = o.kind === 'income' ? INCOME_HINTS : ENVELOPE_HINTS;
+  const shop = operationShop(o, operations, saved.shops ?? NO_SHOPS, options.today);
   return {
     id: o.id,
     /** expense or income: an income pays nothing and has income categories. */
@@ -418,6 +428,8 @@ export function spendingScreen(data: EntityCollections, saved: SavedMarking, opt
     account: o.account,
     /** What the user wrote about the expense; posted to /api/spending/:id/description. */
     description: o.description,
+    /** Its shop's form, which the app opens on the tab of shops, as shopsScreen gives it; null for one without a shop. */
+    shop: shop ? shopJSON(shop) : null,
     /** What else the bank said: how it named the payee, its comment, the amount in a foreign currency, not settled yet. */
     notes: [
       o.originalPayee ? `в банке — ${o.originalPayee}` : null,
@@ -512,8 +524,9 @@ export function operationsScreen(
       items: day.items.map((o) => ({
         ...row({
           id: o.id,
-          title: o.payee,
+          title: o.name,
           ...operationLine(o),
+          logo: logoOf(o),
           details: o.kind === 'transfer' ? `${o.account} → ${o.toAccount}` : operationCategory(o),
           amount: o.amount,
           muted: o.ignored,
@@ -553,10 +566,11 @@ export function uncategorizedScreen(data: EntityCollections, saved: SavedMarking
   const pending = ({ expense: o, suggestion }: { expense: Operation; suggestion: Suggestion | null }) => ({
     ...row({
       id: `spending-${o.id}`,
-      title: o.payee,
+      title: o.name,
       details: [writtenAbout(o), suggestion ? `похоже на ${suggestionName(suggestion)}` : 'без категории'].filter(Boolean).join(' · '),
       icon: 'tag',
       color: toneColor('gray'),
+      logo: logoOf(o),
       amount: o.amount,
     }),
     spending: o.id,
@@ -570,7 +584,7 @@ export function uncategorizedScreen(data: EntityCollections, saved: SavedMarking
         title: markingTitle(o),
         details: markingDetails(o),
         ...categoryLook(o.category),
-        ...(regular ? { icon: entryIcon(regular.icon, regular.title), photo: null } : {}),
+        ...(regular ? { icon: entryIcon(regular.icon, regular.title), photo: null } : { logo: logoOf(o) }),
         amount: o.amount,
         mark: envelopeOf(d.marking, o),
       }),
@@ -753,6 +767,42 @@ function nextPayment(data: EntityCollections, saved: SavedMarking, today: DateSt
   const next = ahead[0] ?? later[0];
   if (!next) return null;
   return { title: next.expense.title, amount: next.expense.amount - next.status.covered, date: dayMonth(next.status.date), when: fromToday(next.status.date, today) };
+}
+
+/**
+ * The shops of the last three months, the most frequent first, or those a search finds by `q`, each with the other
+ * names the bank gives it, without the count of its operations the page adds, and with its form: posted to
+ * /api/shops/:key with title, site and photo, to /api/shops/:key/photo/delete and /api/shops/:key/forget (see
+ * shops.ts).
+ */
+export function shopsScreen(data: EntityCollections, saved: SavedMarking, options: { today: DateString; query: string | null }) {
+  const d = loadShopsPage(data, saved, options);
+  return {
+    query: d.query,
+    /** How many shops the last three months had. */
+    recent: d.recent,
+    items: d.shops.map((e) => ({
+      ...row({ id: `shop-${e.key}`, title: e.title, details: bankNames(e, e.title), ...shopLook(e.logo), photo: null, logo: e.logo }),
+      shop: shopJSON(shopForm(e, d.setup)),
+    })),
+  };
+}
+
+/** A shop's form as the app's sheet of it takes it, which posts to /api/shops/:key. */
+function shopJSON(f: ShopForm) {
+  return {
+    key: f.key,
+    title: f.title,
+    placeholder: f.placeholder,
+    site: f.site,
+    sitePlaceholder: f.sitePlaceholder,
+    logo: f.logo,
+    photo: f.photo,
+    dressed: f.dressed,
+    note: f.note,
+    /** What it is made of, merged shops included: the names the bank gives it, the most frequent first. */
+    names: f.names,
+  };
 }
 
 /**

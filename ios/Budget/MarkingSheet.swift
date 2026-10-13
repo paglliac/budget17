@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// An expense opened to mark it. On top what it is: whom it went to, how much and when, what the bank said and what is
-/// suggested. Then what it was for — a category, or the payment of a regular expense or a purchase it made — alone on a
-/// card; a tap on it unfolds all of them as tiles and cards to pick another, and a pick folds them back. While nothing
+/// suggested; the shop's name leaves for the shop on its tab, to name and dress it for all its expenses (see
+/// ShopsPanel). Then what it was for — a category, or the payment of a regular expense or a purchase it made — alone on
+/// a card; a tap on it unfolds all of them as tiles and cards to pick another, and a pick folds them back. While nothing
 /// is picked they are unfolded. Under it whether the expense was needed or could have been done without, what the user
 /// wrote about it, and at the bottom where it counts: the place picked alone on a large card, which unfolds the others
 /// the same way. Opened from the expenses that wait for a category, it steps through them: «1 из 4». An income
@@ -16,6 +17,7 @@ struct MarkingSheet: View {
     @State private var id: String
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openShop) private var openShop
     /// nil until picked: the payments when the expense paid one or one is suggested, the categories otherwise.
     @State private var mode: Mode?
     /// A choice made and not yet confirmed by the server, shown as made already.
@@ -221,14 +223,18 @@ struct MarkingSheet: View {
         return s.isIncome ? ("arrowDownLeft", Palette.color("green"), nil) : ("tag", Palette.color("gray"), nil)
     }
 
-    /// The expense in the middle: what it is for on a large disc, the exact amount, whom it went to, when and from where,
-    /// what else the bank said and what is suggested.
+    /// The expense in the middle: its shop's logo on a large disc, or else what it is for, the exact amount, whom it went
+    /// to, when and from where, what else the bank said and what is suggested. The shop's name leaves for the shop: the
+    /// title itself, or a line under it when the title is what the expense paid.
     private func header(_ s: SpendingScreen) -> some View {
         let (icon, color, photo) = look(s)
+        let shopName = s.shop.map { $0.title.isEmpty ? $0.placeholder : $0.title }
         return VStack(spacing: 6) {
             ZStack {
                 Circle().fill(Lilac.surface).frame(width: 108, height: 108).shadow(color: .black.opacity(0.07), radius: 16, y: 6)
-                if let photo {
+                if let logo = s.shop?.logo {
+                    LilacMarker.logo(logo).view.frame(width: 76, height: 76)
+                } else if let photo {
                     CategoryDisc(icon: icon, color: color, photo: photo, size: 76)
                 } else {
                     Circle().fill(color.opacity(0.15)).frame(width: 60, height: 60)
@@ -237,7 +243,12 @@ struct MarkingSheet: View {
             }
             .padding(.bottom, 10)
             Text(Money.exact(s.amount, s.symbol)).font(.system(size: 38, weight: .bold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
-            Text(s.title).font(.title3).multilineTextAlignment(.center)
+            if let found = s.shop, shopName == s.title {
+                shopButton(found, name: s.title, font: .title3, color: .primary)
+            } else {
+                Text(s.title).font(.title3).multilineTextAlignment(.center)
+                if let found = s.shop, let shopName { shopButton(found, name: shopName, font: .subheadline, color: Lilac.muted) }
+            }
             Text("\(s.when) · \(s.account)").font(.subheadline).foregroundStyle(Lilac.muted)
             ForEach(s.notes + (s.hint.map { [$0] } ?? []), id: \.self) { note in
                 Text(note).font(.subheadline).foregroundStyle(Lilac.muted).multilineTextAlignment(.center)
@@ -245,6 +256,22 @@ struct MarkingSheet: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 4)
+    }
+
+    /// The shop's name with a pencil, which closes the sheet for the shop on its tab.
+    private func shopButton(_ found: Shop, name: String, font: Font, color: Color) -> some View {
+        Button {
+            dismiss()
+            openShop(found)
+        } label: {
+            HStack(spacing: 6) {
+                Text(name).font(font).foregroundStyle(color).multilineTextAlignment(.center)
+                Image(systemName: "pencil").font(.footnote.weight(.semibold)).foregroundStyle(Lilac.muted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("shop")
     }
 
     /// What the expense was for, alone on a card that unfolds the categories and payments under it to pick another; an

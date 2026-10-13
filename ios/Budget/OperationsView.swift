@@ -178,7 +178,7 @@ struct OperationLine: View {
         let notes = [operation.comment, operation.original.map { Money.text($0.amount, $0.symbol) }, operation.hold ? "банк ещё не провёл" : nil].compactMap { $0 }
         Button(action: open) {
             LilacRow(
-                marker: .dot(Palette.color(row.color)),
+                marker: .expense(row),
                 title: row.title,
                 details: row.details,
                 amount: operation.kind == "expense" ? -(row.amount ?? 0) : row.amount,
@@ -220,7 +220,7 @@ struct PendingList: View {
                     LilacDayHeading(title: day.title, subtitle: day.subtitle)
                     ForEach(Array(day.items.enumerated()), id: \.element.id) { index, item in
                         // A tap on the row opens it; «Принять» is a button of its own inside the row.
-                        LilacRow(marker: .dot(Lilac.red), title: item.row.title, details: item.row.details, amount: item.row.amount, symbol: s.symbol,
+                        LilacRow(marker: .expense(item.row, dot: Lilac.red), title: item.row.title, details: item.row.details, amount: item.row.amount, symbol: s.symbol,
                                  first: index == 0) {
                             if let suggestion = item.suggestion {
                                 LilacInlineAction(label: "Принять") { accept(item.spending, suggestion.choice) }
@@ -237,7 +237,7 @@ struct PendingList: View {
                         LilacDayHeading(title: day.title, subtitle: day.subtitle)
                         ForEach(Array(day.items.enumerated()), id: \.element.id) { index, expense in
                             Button { sheet = .spending(expense.spending) } label: {
-                                LilacRow(marker: .dot(Palette.color(expense.row.color)), title: expense.row.title, details: expense.row.details,
+                                LilacRow(marker: .expense(expense.row), title: expense.row.title, details: expense.row.details,
                                          amount: expense.row.amount, symbol: s.symbol, chip: WeekSpendingList.chip(expense.row.mark), first: index == 0,
                                          chevron: false, amountColor: expense.optional ? Palette.optional : .primary)
                             }

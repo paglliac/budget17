@@ -329,6 +329,9 @@ button.choice.current:hover { border-color: var(--ink); color: #fff; opacity: .8
 .choices-other .button { margin-bottom: 3px; }
 .inline-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
 .inline-form .button { margin-bottom: 3px; }
+/* groupForm */
+.group-form .inline-form > .entry-icon { margin-bottom: 1px; }
+.group-form .inline-form > .entry-quiet { margin-bottom: 3px; }
 
 /* entryList, entryRow, entryForm */
 .entries { display: grid; gap: 2px; list-style: none; container-type: inline-size; }
@@ -436,6 +439,8 @@ a.amount:hover, a.amount[aria-current] { background: var(--fill); }
 /* A category's photo fills its tile on the category's colour, which shows through a photo with a clear ground. */
 :is(.entry-icon, .operation-icon, .category-icon, .tile-icon):has(> .photo) { overflow: hidden; background: var(--color); }
 .photo { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* A shop's logo sits on white with a hairline round it, so a logo on a clear ground keeps its edge. */
+.photo.logo { background: #fff; border-radius: inherit; outline: 1px solid var(--line); outline-offset: -1px; }
 .amount-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: color-mix(in srgb, var(--tone) 14%, white); color: var(--tone); }
 .amount-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .amount-bar { height: 6px; border-radius: 6px; background: #ECECEA; overflow: hidden; }

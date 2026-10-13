@@ -105,8 +105,12 @@ export function icon(name: IconName, size = 16): Html {
 
 /** A category's photo instead of its icon when it has one; its tile then takes the category's colour (styles.css). */
 export function iconOrPhoto(name: IconName, photo: string | null | undefined, size = 16): Html {
-  return photo ? html`<img class="photo" src="${photo}" alt="" loading="lazy">` : icon(name, size);
+  if (!photo) return icon(name, size);
+  return html`<img class="photo${photo.startsWith(SHOP_LOGO_PATH) ? ' logo' : ''}" src="${photo}" alt="" loading="lazy">`;
 }
+
+/** Where shops' logos are served (see looks.ts); a logo is drawn on white with a hairline round it, whatever its colour. */
+export const SHOP_LOGO_PATH = '/shop-logo/';
 
 /**
  * What a category likely is by its title, since ZenMoney's category icons are not documented: its icon and its colour,

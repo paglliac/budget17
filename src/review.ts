@@ -8,7 +8,8 @@ import { recentCount, subcategoryOf, type CategoryEntry, type Subcategory, type 
 import { addDays, shiftMonth, type MonthString } from './dates.ts';
 import { isUntitled, type Operation } from './ledger.ts';
 import type { Category } from './operations.ts';
-import { isPerson, shopKey, shopName } from './payees.ts';
+import { isPerson, shopKey } from './payees.ts';
+import { shopLabel } from './shops.ts';
 import { paymentDate, type RegularExpense } from './regular.ts';
 import { envelopeOf, MONTH_LIMIT, summarizeWeek, WEEK_LIMIT, weekOf, weeksOfMonth, type Budget, type Envelope, type WeekSummary } from './week.ts';
 import type { DateString, TagId } from './zenmoney/types.ts';
@@ -315,7 +316,7 @@ export function weekParts(
 
 /** Expenses by shop or person, largest first. */
 function byShop(expenses: Operation[]): WeekPiece[] {
-  return pieced(expenses, (o) => ({ key: `shop-${shopKey(o.payee)}`, by: 'shop', name: shopName(o.payee) }));
+  return pieced(expenses, (o) => ({ key: `shop-${shopKey(o.payee)}`, by: 'shop', name: shopLabel(o) }));
 }
 
 /** Expenses in pieces by what `piece` makes of each, largest first; a piece is described by its largest expense. */

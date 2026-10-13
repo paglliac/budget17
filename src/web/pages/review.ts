@@ -32,7 +32,8 @@ import { addDays, localDate, monthOf, shiftMonth, type MonthString } from '../..
 import { parseTitle } from '../../input.ts';
 import { listOperations, type Operation } from '../../ledger.ts';
 import { operationKind } from '../../operations.ts';
-import { shopKey, shopName } from '../../payees.ts';
+import { shopKey } from '../../payees.ts';
+import { shopLabel } from '../../shops.ts';
 import type { RegularExpense } from '../../regular.ts';
 import {
   findings,
@@ -61,10 +62,10 @@ import type { Settings } from '../../settings.ts';
 import { MONTH_LIMIT, WEEK_LIMIT, weeksOfMonth, type WeekSummary } from '../../week.ts';
 import type { DateString, EntityCollections, TagId } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
-import { capitalize, dayMonth, dayMonthYear, money, monthName, percent, plural } from '../format.ts';
+import { capitalize, dayMonth, dayMonthYear, money, monthName, percent, plural, stop } from '../format.ts';
 import type { Html } from '../html.ts';
 import { categoryIcon, entryIcon, type IconName } from '../icons.ts';
-import { categoryLook } from '../looks.ts';
+import { categoryLook, withLogo } from '../looks.ts';
 import { toneColor, type Tone } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
 import { assistantAnswer, assistantHero, insightList, suggestionList } from '../widgets/assistant.ts';
@@ -239,11 +240,6 @@ function weekTitle(w: WeekSummary): string {
   return `${dayMonth(w.week)} – ${dayMonth(addDays(w.week, 6))}`;
 }
 
-/** Ends a sentence with a full stop, unless it already ends with one, as an amount in «руб.» does. */
-function stop(text: string): string {
-  return text.endsWith('.') ? text : `${text}.`;
-}
-
 function sumOf(list: ReviewedExpense[]): number {
   return list.reduce((s, e) => s + e.operation.amount, 0);
 }
@@ -397,7 +393,7 @@ function spendRow(page: Page, o: Operation): Html {
     title: markingTitle(o),
     // Nothing here has a category yet, so the row says the account and what the amount hints at instead.
     details: [o.account, hint === 'marketplace' ? 'похоже на Ozon или WB' : hint ? `сумма «${hint.regular}»` : null].filter(Boolean).join(' · '),
-    ...categoryLook(o.category),
+    ...withLogo(o, categoryLook(o.category)),
     kind: 'expense',
     amount: o.amount,
     symbol: d.symbol,
@@ -515,7 +511,7 @@ function opened(d: ReviewData): Opened | null {
   const { rest } = folded(part);
   if (key === 'more' && rest.length) return { part, piece: null, rest, expense: null };
   const shop = key?.startsWith('shop-') ? part.expenses.filter((o) => `shop-${shopKey(o.payee)}` === key) : [];
-  if (shop.length) return { part, piece: { key: key!, by: 'shop', name: shopName(shop[0]!.payee), amount: sum(shop), expenses: shop }, rest: null, expense: null };
+  if (shop.length) return { part, piece: { key: key!, by: 'shop', name: shopLabel(shop[0]!), amount: sum(shop), expenses: shop }, rest: null, expense: null };
   return { part, piece: null, rest: null, expense: null };
 }
 
@@ -588,7 +584,7 @@ function pieceTile(page: Page, part: WeekPart, piece: WeekPiece): Html[] {
         body: amountList({
           label: 'Получатели',
           symbol: d.symbol,
-          items: [...shops].map(([key, expenses]) => ({ label: shopName(expenses[0]!.payee), amount: sum(expenses), note: `${expenses.length} шт.`, href: here({ tile: `${id}:shop-${key}` }) })),
+          items: [...shops].map(([key, expenses]) => ({ label: shopLabel(expenses[0]!), amount: sum(expenses), note: `${expenses.length} шт.`, href: here({ tile: `${id}:shop-${key}` }) })),
         }),
       }),
       piece.subcategory ? subcategoryForm(page, piece.subcategory) : null,
@@ -667,7 +663,7 @@ function subcategoryChoices(page: Page, category: { id: TagId; title: string }, 
     inlineForm({ label: 'Новая подкатегория', action: href('/review/subcategory', { category: category.id, ...target }), name: 'title', placeholder: 'Например, Лента', maxLength: 80, submitLabel: 'Добавить' }),
     footnote({
       text: shop
-        ? `Все траты ${shopName(first.payee)} из «${category.title}» пойдут в подкатегорию сами, и новые тоже.`
+        ? `Все траты ${shopLabel(first)} из «${category.title}» пойдут в подкатегорию сами, и новые тоже.`
         : 'У перевода подкатегория своя у каждой траты: следующие переводы получат её подсказкой.',
     }),
   ];
@@ -718,7 +714,7 @@ function hintItem(page: Page, h: Hint): { icon: IconName; tone: Tone; title: str
       actions: [{ label: 'Перенести', action: href('/review/move', { spending, category: h.category.id, ...('id' in sub ? { subcategory: String(sub.id) } : { title: sub.title }) }) }, dismiss],
     };
   }
-  const name = shopName(h.expenses[0]!.payee);
+  const name = shopLabel(h.expenses[0]!);
   const times = h.times === 1 ? 'Так размечена трата' : `Так размечены ${h.times}${h.times < h.of ? ` из ${h.of}` : ''} ${plural(h.times, EXPENSES)}, последняя —`;
   return {
     icon: 'repeat',

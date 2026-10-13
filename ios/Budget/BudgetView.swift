@@ -116,7 +116,7 @@ struct MonthView: View {
             LilacDayHeading(title: group.title, subtitle: group.subtitle)
             ForEach(Array(group.items.enumerated()), id: \.element.id) { index, expense in
                 Button { sheet = .spending(expense.spending) } label: {
-                    LilacRow(marker: .dot(Palette.color(expense.row.color)), title: expense.row.title, details: expense.row.details,
+                    LilacRow(marker: .expense(expense.row), title: expense.row.title, details: expense.row.details,
                              amount: expense.row.amount, symbol: s.symbol, first: index == 0, chevron: false,
                              amountColor: expense.optional ? Palette.optional : .primary)
                 }

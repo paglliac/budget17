@@ -1,5 +1,6 @@
 // What the user types into forms, checked and turned into values; an error says what to fix.
 
+import { domainToUnicode } from 'node:url';
 import type { CategoryPhoto } from './categories.ts';
 import { daysInMonth } from './dates.ts';
 import type { DateString } from './zenmoney/types.ts';
@@ -29,6 +30,30 @@ export function parsePhoto(text: string): Parsed<CategoryPhoto> {
   const signature = type === 'image/png' ? [0x89, 0x50, 0x4e, 0x47] : [0xff, 0xd8, 0xff];
   if (!signature.every((byte, i) => data[i] === byte)) return { error: 'Нужна картинка JPEG или PNG' };
   return { value: { type, data } };
+}
+
+/**
+ * A site as the user types it, for the icon of a shop: lenta.com, www.lenta.com or https://lenta.com/catalog are all
+ * lenta.com; a Cyrillic one, such as пятёрочка.рф, is kept in punycode, as sites are asked for by it (see siteText to
+ * show it). An empty field means none.
+ */
+export function parseSite(text: string): Parsed<string | null> {
+  const typed = text.trim();
+  if (!typed) return { value: null };
+  let host: string;
+  try {
+    host = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(typed) ? typed : `https://${typed}`).hostname;
+  } catch {
+    return { error: 'Адрес сайта, например lenta.com' };
+  }
+  const site = host.toLowerCase().replace(/^www\./, '');
+  if (!/^(?:[a-z\d](?:[a-z\d-]*[a-z\d])?\.)+(?:[a-z]{2,}|xn--[a-z\d-]+)$/.test(site)) return { error: 'Адрес сайта, например lenta.com' };
+  return { value: site };
+}
+
+/** A site as people read it, Cyrillic letters and all: xn--80atldfl1bydt.xn--p1ai is пятёрочка.рф. */
+export function siteText(site: string): string {
+  return domainToUnicode(site) || site;
 }
 
 export const MAX_DESCRIPTION = 200;

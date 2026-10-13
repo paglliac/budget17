@@ -1,9 +1,10 @@
-// Settings: the day a week begins on, round figures on the app's main page, the user's own name in transfers to
-// themselves, the token Claude signs in by, and the categories expenses and incomes are sorted into. The day is picked
-// in one click and posts to /budget/week-start/:day, round figures to /budget/round-figures/on or /off; the name opens
-// by ?edit=self-payee and posts to /budget/self-payee, the token by ?edit=claude-token to /budget/claude-token, and
-// only its last characters are ever shown (see submitBudget). The amount of one week is changed on the week itself
-// (see dashboard.ts). ZenMoney's categories can be renamed or hidden, and the user adds their own; ZenMoney
+// Settings, on two tabs: «Основные» here and «Магазины» (see shops.ts). The main tab has the day a week begins on,
+// round figures on the app's main page, the user's own name in transfers to themselves, the token Claude signs in by,
+// and the categories expenses and incomes are sorted into. The day is picked in one click and posts to
+// /budget/week-start/:day, round figures to /budget/round-figures/on or /off; the name opens by ?edit=self-payee and
+// posts to /budget/self-payee, the token by ?edit=claude-token to /budget/claude-token, and only its last characters
+// are ever shown (see submitBudget). The amount of one week is changed on the week itself (see dashboard.ts).
+// ZenMoney's categories can be renamed or hidden, and the user adds their own; ZenMoney
 // itself is never changed. They are listed in the order marking offers them, the most popular first, the incomes'
 // apart; hidden ones go together under «Скрытые». A row opens for editing by ?edit=<category id>, or
 // income-<category id> for an income category, since one ZenMoney category may sort both; forms post to /categories
@@ -25,7 +26,7 @@ import { categoryColor, toneColor } from '../tones.ts';
 import { choiceGroup, colorPicker, emptyState, field, iconPicker, pageIntro, photoField, section } from '../widgets/basics.ts';
 import { entryForm, entryList, entryRow } from '../widgets/entries.ts';
 import { appShell, stack, topBar } from '../widgets/shell.ts';
-import { appRail, userName, type Href } from './chrome.ts';
+import { appRail, settingsTabs, userName, type Href } from './chrome.ts';
 import { allExpenses, allIncomes, type SavedMarking } from './marking.ts';
 
 /** A category form shown again with its errors after a submission failed; id is null for a new category. */
@@ -254,6 +255,7 @@ export function renderSettings(d: SettingsData, href: Href): Html {
 
   const body = appShell({
     rail: appRail('settings', d.userName, href),
+    tabs: settingsTabs('main', href),
     main: [
       topBar({ crumbs: [{ label: 'Бюджет' }, { label: 'Настройки', icon: 'sliders' }] }),
       pageIntro({ title: 'Настройки', text: `${budgetSentence(d.budget)} ${settingsSentence(d)}` }),

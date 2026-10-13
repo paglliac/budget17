@@ -17,6 +17,7 @@ import type { ClaudeAnswer, ClaudeDecision, ClaudeReview, ClaudeSaved } from './
 import type { MonthString } from './dates.ts';
 import { isIncomeModel, type Income, type IncomeInput } from './income.ts';
 import type { RegularExpense, RegularExpenseInput } from './regular.ts';
+import type { ShopLook, ShopSetup } from './shops.ts';
 import { alignWeek, type Envelope, type Purchase, type PurchaseInput, type WeekStart, type Wish, type WishInput } from './week.ts';
 import type { ChosenPlan, Step } from './wish-plans.ts';
 import type { DateString, TagId } from './zenmoney/types.ts';
@@ -146,6 +147,38 @@ const SCHEMA = `
     CHECK ((photo IS NULL) = (photo_type IS NULL) AND (photo IS NULL) = (photo_version IS NULL))
   ) STRICT;
 
+  -- How the user named and dressed a shop, by its key (shopOf in payees.ts), so that every shop of a chain is one: a
+  -- name, the site its logo comes from (empty for none), and a photo shown instead of the logo, a JPEG or PNG with its
+  -- version, which changes with it. A null keeps what the shop would have.
+  CREATE TABLE IF NOT EXISTS shop_look (
+    shop TEXT PRIMARY KEY,
+    title TEXT,
+    site TEXT,
+    photo BLOB,
+    photo_type TEXT CHECK (photo_type IN ('image/jpeg', 'image/png')),
+    photo_version TEXT,
+    CHECK ((photo IS NULL) = (photo_type IS NULL) AND (photo IS NULL) = (photo_version IS NULL))
+  ) STRICT;
+
+  -- Shops the user merged into another, by key: their operations are of that shop, named and drawn as it is. A shop
+  -- merged into is never merged itself, so a root always stands alone.
+  CREATE TABLE IF NOT EXISTS shop_merge (
+    shop TEXT PRIMARY KEY,
+    root TEXT NOT NULL,
+    CHECK (shop <> root)
+  ) STRICT;
+
+  -- Icons of shops' sites as Yandex's service of site icons sent them (see shops.ts), a PNG with its version; none
+  -- when the service has no icon of the site. asked_at says when it was asked, so a site without one is asked again
+  -- some days later.
+  CREATE TABLE IF NOT EXISTS site_icon (
+    site TEXT PRIMARY KEY,
+    icon BLOB,
+    version TEXT,
+    asked_at TEXT NOT NULL,
+    CHECK ((icon IS NULL) = (version IS NULL))
+  ) STRICT;
+
   -- Parts of a category the user made in the app, such as Продукты › Лента; ZenMoney has none. Ids are never reused.
   CREATE TABLE IF NOT EXISTS subcategory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -230,8 +263,8 @@ const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> 
 /**
  * What the user sets up in the app itself: regular expenses, incomes, the day a week begins on, what a week allows,
  * the weeks' purchases, wishes with their days and plans, where spending counts, what expenses paid or bought or which category they go into, which could
- * have been done without, what the user wrote about them, and the categories themselves with their icons, colours and photos. It lives in its own
- * SQLite file, apart from the ZenMoney copy, so make resync never deletes it.
+ * have been done without, what the user wrote about them, the categories themselves with their icons, colours and photos, and the names, logos and
+ * merges of shops, with the icons of their sites kept. It lives in its own SQLite file, apart from the ZenMoney copy, so make resync never deletes it.
  */
 export class Settings {
   readonly #db: DatabaseSync;
@@ -741,6 +774,91 @@ export class Settings {
   categoryPhoto(id: TagId): CategoryPhoto | null {
     const row = this.#db.prepare('SELECT photo, photo_type FROM category_look WHERE tag_id = ? AND photo IS NOT NULL').get(id);
     return row ? { type: row.photo_type === 'image/png' ? 'image/png' : 'image/jpeg', data: row.photo as Uint8Array } : null;
+  }
+
+  /** How the user named, dressed and merged shops, and the versions of the sites' icons kept so far. */
+  shopSetup(): ShopSetup {
+    const text = (value: unknown) => (value === null ? null : String(value));
+    const looks = new Map(
+      this.#db
+        .prepare('SELECT shop, title, site, photo_version FROM shop_look')
+        .all()
+        .map((row) => [String(row.shop), { title: text(row.title), site: text(row.site), photo: text(row.photo_version) }] as const),
+    );
+    const icons = new Map(
+      this.#db
+        .prepare('SELECT site, version FROM site_icon WHERE version IS NOT NULL')
+        .all()
+        .map((row) => [String(row.site), String(row.version)] as const),
+    );
+    const merges = new Map(this.#db.prepare('SELECT shop, root FROM shop_merge').all().map((row) => [String(row.shop), String(row.root)] as const));
+    return { looks, icons, merges };
+  }
+
+  /**
+   * Merges a shop into another, or into the one that other is merged into, along with the shops merged into it; a
+   * shop is not merged into itself.
+   */
+  mergeShop(shop: string, into: string): void {
+    const found = this.#db.prepare('SELECT root FROM shop_merge WHERE shop = ?').get(into);
+    const root = found ? String(found.root) : into;
+    if (root === shop) return;
+    this.#db.prepare('UPDATE shop_merge SET root = ? WHERE root = ?').run(root, shop);
+    this.#db.prepare('INSERT INTO shop_merge (shop, root) VALUES (?, ?) ON CONFLICT (shop) DO UPDATE SET root = excluded.root').run(shop, root);
+  }
+
+  /** Takes a shop out of the one it was merged into, with the name and look it had before. */
+  splitShop(shop: string): void {
+    this.#db.prepare('DELETE FROM shop_merge WHERE shop = ?').run(shop);
+  }
+
+  /** Names a shop and gives it the site its logo comes from, empty for none; null leaves either what it would be. */
+  dressShop(shop: string, look: Pick<ShopLook, 'title' | 'site'>): void {
+    this.#db
+      .prepare('INSERT INTO shop_look (shop, title, site) VALUES (?, ?, ?) ON CONFLICT (shop) DO UPDATE SET title = excluded.title, site = excluded.site')
+      .run(shop, look.title, look.site);
+  }
+
+  /** Puts a photo on a shop instead of its logo, or takes it off with null. */
+  setShopPhoto(shop: string, photo: CategoryPhoto | null): void {
+    const version = photo ? createHash('sha1').update(photo.data).digest('hex').slice(0, 12) : null;
+    this.#db
+      .prepare(
+        'INSERT INTO shop_look (shop, photo, photo_type, photo_version) VALUES (?, ?, ?, ?) ON CONFLICT (shop) DO UPDATE SET photo = excluded.photo, photo_type = excluded.photo_type, photo_version = excluded.photo_version',
+      )
+      .run(shop, photo?.data ?? null, photo?.type ?? null, version);
+  }
+
+  /** Forgets how the user named and dressed a shop, so it is as the bank names it or as its chain is. */
+  forgetShop(shop: string): void {
+    this.#db.prepare('DELETE FROM shop_look WHERE shop = ?').run(shop);
+  }
+
+  /** The photo put on a shop; null when it has none. */
+  shopPhoto(shop: string): CategoryPhoto | null {
+    const row = this.#db.prepare('SELECT photo, photo_type FROM shop_look WHERE shop = ? AND photo IS NOT NULL').get(shop);
+    return row ? { type: row.photo_type === 'image/png' ? 'image/png' : 'image/jpeg', data: row.photo as Uint8Array } : null;
+  }
+
+  /** The icon kept of a site; null when there is none. */
+  siteIcon(site: string): CategoryPhoto | null {
+    const row = this.#db.prepare('SELECT icon FROM site_icon WHERE site = ? AND icon IS NOT NULL').get(site);
+    return row ? { type: 'image/png', data: row.icon as Uint8Array } : null;
+  }
+
+  /** When each site was last asked for its icon, by site. */
+  siteIconsAsked(): Map<string, string> {
+    return new Map(this.#db.prepare('SELECT site, asked_at FROM site_icon').all().map((row) => [String(row.site), String(row.asked_at)] as const));
+  }
+
+  /** Keeps the icon of a site, or that it has none, as asked at `askedAt`. */
+  putSiteIcon(site: string, icon: CategoryPhoto | null, askedAt: Date): void {
+    const version = icon ? createHash('sha1').update(icon.data).digest('hex').slice(0, 12) : null;
+    this.#db
+      .prepare(
+        'INSERT INTO site_icon (site, icon, version, asked_at) VALUES (?, ?, ?, ?) ON CONFLICT (site) DO UPDATE SET icon = excluded.icon, version = excluded.version, asked_at = excluded.asked_at',
+      )
+      .run(site, icon?.data ?? null, version, askedAt.toISOString());
   }
 
   addOwnCategory(title: string, kind: CategoryKind = 'expense'): OwnCategory {
