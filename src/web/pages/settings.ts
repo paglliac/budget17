@@ -1,9 +1,10 @@
 // Settings, on two tabs: «Основные» here and «Магазины» (see shops.ts). The main tab has the day a week begins on,
-// round figures on the app's main page, the user's own name in transfers to themselves, the token Claude signs in by,
-// and the categories expenses and incomes are sorted into. The day is picked in one click and posts to
-// /budget/week-start/:day, round figures to /budget/round-figures/on or /off; the name opens by ?edit=self-payee and
-// posts to /budget/self-payee, the token by ?edit=claude-token to /budget/claude-token, and only its last characters
-// are ever shown (see submitBudget). The amount of one week is changed on the week itself (see dashboard.ts).
+// round figures on the app's main page, where the extras' widget tells plenty and tight, the user's own name in
+// transfers to themselves, the token Claude signs in by, and the categories expenses and incomes are sorted into. The
+// day is picked in one click and posts to /budget/week-start/:day, round figures to /budget/round-figures/on or /off;
+// the levels open by ?edit=extras-levels and post to /budget/extras-levels, the name by ?edit=self-payee to
+// /budget/self-payee, the token by ?edit=claude-token to /budget/claude-token, and only its last characters are ever
+// shown (see submitBudget). The amount of one week is changed on the week itself (see dashboard.ts).
 // ZenMoney's categories can be renamed or hidden, and the user adds their own; ZenMoney
 // itself is never changed. They are listed in the order marking offers them, the most popular first, the incomes'
 // apart; hidden ones go together under «Скрытые». A row opens for editing by ?edit=<category id>, or
@@ -13,9 +14,9 @@
 
 import { mainCurrency } from '../../balances.ts';
 import { byPopularity, categoryCatalog, recentCount, type CategoryEntry, type CategoryKind, type CategoryLook, type CategoryPhoto } from '../../categories.ts';
-import { parsePhoto, parseTitle } from '../../input.ts';
+import { amountText, parseAmount, parsePhoto, parseTitle } from '../../input.ts';
 import type { Settings } from '../../settings.ts';
-import { WEEK_LIMIT, type WeekStart } from '../../week.ts';
+import { EXTRAS_LEVELS, WEEK_LIMIT, type ExtrasLevels, type WeekStart } from '../../week.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { money, plural, WEEKDAYS, WEEKDAYS_ON } from '../format.ts';
@@ -53,13 +54,23 @@ export interface BudgetSetup {
   weekStart: WeekStart;
   /** The app's main page shows its figures to the hundred, its parts still adding up to the whole (see roundParts). */
   roundFigures: boolean;
+  /** Where the extras' widget tells plenty and tight by what is left at the month's end. */
+  extrasLevels: ExtrasLevels;
   /** The user's own name in transfers to their accounts in other banks; the month review sets those apart. */
   selfPayee: string | null;
   symbol: string;
 }
 
+/** The levels of the extras shown again with their errors after a submission failed, as typed. */
+export interface LevelsForm {
+  plenty: string;
+  tight: string;
+  errors: Partial<Record<'plenty' | 'tight', string>>;
+}
+
 export interface SettingsData {
   budget: BudgetSetup;
+  levels: LevelsForm | null;
   /** The last characters of the token Claude signs in by; null when none is set. */
   claudeToken: string | null;
   /** Categories most popular first, with how many expenses went into each lately. */
@@ -72,14 +83,20 @@ export interface SettingsData {
   userName: string | null;
 }
 
-export function loadBudgetSetup(data: EntityCollections, saved: Pick<SavedMarking, 'weekStart' | 'selfPayee' | 'roundFigures'>): BudgetSetup {
-  return { weekStart: saved.weekStart, roundFigures: saved.roundFigures ?? false, selfPayee: saved.selfPayee ?? null, symbol: mainCurrency(data).symbol };
+export function loadBudgetSetup(data: EntityCollections, saved: Pick<SavedMarking, 'weekStart' | 'selfPayee' | 'roundFigures' | 'extrasLevels'>): BudgetSetup {
+  return {
+    weekStart: saved.weekStart,
+    roundFigures: saved.roundFigures ?? false,
+    extrasLevels: saved.extrasLevels ?? EXTRAS_LEVELS,
+    selfPayee: saved.selfPayee ?? null,
+    symbol: mainCurrency(data).symbol,
+  };
 }
 
 export function loadSettingsPage(
   data: EntityCollections,
   saved: SavedMarking,
-  options: { today: DateString; edit?: string | null; form?: CategoryForm; claudeToken?: string | null },
+  options: { today: DateString; edit?: string | null; form?: CategoryForm; levels?: LevelsForm; claudeToken?: string | null },
 ): SettingsData {
   const counted = (kind: CategoryKind, operations: ReturnType<typeof allExpenses>): CategoryCount[] =>
     byPopularity(categoryCatalog(data.tag ?? [], saved.categories, kind), operations, options.today).map((category) => ({
@@ -91,10 +108,11 @@ export function loadSettingsPage(
   const form = options.form;
   return {
     budget: loadBudgetSetup(data, saved),
+    levels: options.levels ?? null,
     claudeToken: options.claudeToken ? options.claudeToken.slice(-TOKEN_SHOWN) : null,
     categories: counted('expense', allExpenses(data, saved)),
     incomeCategories: counted('income', allIncomes(data, saved)),
-    edit: form?.id ? categoryKey(form.id, form.kind) : (options.edit ?? null),
+    edit: form?.id ? categoryKey(form.id, form.kind) : options.levels ? 'extras-levels' : (options.edit ?? null),
     form: options.form ?? null,
     userName: userName(data),
   };
@@ -106,11 +124,27 @@ const TOKEN_MAX = 500;
 
 /**
  * Applies a form posted to /budget/week-start/:day, 0 for Monday to 6 for Sunday, to /budget/round-figures/on or
- * /budget/round-figures/off, to /budget/self-payee with the
- * user's name in `name`, an empty name forgetting it, or to /budget/claude-token with the token in `token`, spaces and
- * line breaks of a paste taken out; an empty one changes nothing, and /budget/claude-token/delete forgets it.
+ * /budget/round-figures/off, to /budget/extras-levels with `plenty` and `tight`, plenty no lower than tight, to
+ * /budget/self-payee with the user's name in `name`, an empty name forgetting it, or to /budget/claude-token with the
+ * token in `token`, spaces and line breaks of a paste taken out; an empty one changes nothing, and
+ * /budget/claude-token/delete forgets it.
  */
-export function submitBudget(settings: Settings, path: string, body: URLSearchParams = new URLSearchParams()): { status: 'saved' } | { status: 'missing' } {
+export function submitBudget(
+  settings: Settings,
+  path: string,
+  body: URLSearchParams = new URLSearchParams(),
+): { status: 'saved' } | { status: 'missing' } | { status: 'invalid'; form: LevelsForm } {
+  if (path === '/budget/extras-levels') {
+    const form: LevelsForm = { plenty: body.get('plenty') ?? '', tight: body.get('tight') ?? '', errors: {} };
+    const plenty = parseAmount(form.plenty);
+    const tight = parseAmount(form.tight);
+    if ('error' in plenty) form.errors.plenty = plenty.error;
+    if ('error' in tight) form.errors.tight = tight.error;
+    if ('value' in plenty && 'value' in tight && plenty.value < tight.value) form.errors.plenty = 'Не меньше, чем «впритык»';
+    if (!('value' in plenty) || !('value' in tight) || Object.keys(form.errors).length > 0) return { status: 'invalid', form };
+    settings.setExtrasLevels({ plenty: plenty.value, tight: tight.value });
+    return { status: 'saved' };
+  }
   if (path === '/budget/self-payee') {
     const name = (body.get('name') ?? '').trim().slice(0, 80);
     settings.setSelfPayee(name || null);
@@ -266,6 +300,10 @@ export function renderSettings(d: SettingsData, href: Href): Html {
           items: [
             weekStartChoice(d.budget, href),
             roundFiguresChoice(d.budget, href),
+            entryList({
+              label: 'Прогноз доп. бюджета',
+              items: [d.edit === 'extras-levels' ? extrasLevelsForm(d, href) : extrasLevelsRow(d.budget, href)],
+            }),
             entryList({ label: 'Переводы себе', items: [d.edit === 'self-payee' ? selfPayeeForm(d.budget, href) : selfPayeeRow(d.budget, href)] }),
           ],
         }),
@@ -310,6 +348,35 @@ function roundFiguresChoice(b: BudgetSetup, href: Href): Html {
   return choiceGroup({
     label: 'Главная приложения',
     choices: [{ label: 'Круглые цифры', detail: 'до сотен', current: b.roundFigures, toggle: true, action: href(`/budget/round-figures/${b.roundFigures ? 'off' : 'on'}`) }],
+  });
+}
+
+/** Where the extras' widget tells plenty and tight by what is left at the month's end; the row opens a form. */
+function extrasLevelsRow(b: BudgetSetup, href: Href): Html {
+  const { plenty, tight } = b.extrasLevels;
+  return entryRow({
+    id: 'extras-levels',
+    title: 'Прогноз доп. бюджета',
+    details: `к концу месяца остаётся от ${money(plenty, b.symbol)} — «Есть запас», меньше ${money(tight, b.symbol)} — «Впритык», ниже нуля — «Нужно сократить»`,
+    icon: 'wallet',
+    color: toneColor('violet'),
+    href: href('/settings', { edit: 'extras-levels' }),
+  });
+}
+
+function extrasLevelsForm(d: SettingsData, href: Href): Html {
+  const { plenty, tight } = d.budget.extrasLevels;
+  return entryForm({
+    id: 'extras-levels',
+    action: href('/budget/extras-levels'),
+    submitLabel: 'Сохранить',
+    icon: 'wallet',
+    color: toneColor('violet'),
+    fields: [
+      field({ label: `«Есть запас», если к концу месяца остаётся от, ${d.budget.symbol}`, name: 'plenty', value: d.levels?.plenty ?? amountText(plenty), type: 'decimal', required: true, error: d.levels?.errors.plenty }),
+      field({ label: `«Впритык», если остаётся меньше, ${d.budget.symbol}`, name: 'tight', value: d.levels?.tight ?? amountText(tight), type: 'decimal', required: true, error: d.levels?.errors.tight }),
+    ],
+    cancelHref: href('/settings'),
   });
 }
 

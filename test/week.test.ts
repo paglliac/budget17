@@ -6,6 +6,9 @@ import {
   adviseWish,
   alignWeek,
   envelopeOf,
+  EXTRAS_LEVELS,
+  extrasOutlook,
+  extrasPath,
   monthOfWeek,
   summarizeExtras,
   summarizeWeek,
@@ -176,6 +179,38 @@ describe('summarizeExtras', () => {
     assert.equal(m.spent, 160_000, 'the week of 28 September belongs to October');
     assert.equal(m.planned, 20_000);
     assert.equal(m.free, 100_000 - 160_000 - 20_000);
+  });
+});
+
+describe('extrasOutlook', () => {
+  it('tells plenty, calm, tight or short by what the plan leaves at the month’s end', () => {
+    const left = (free: number) => extrasOutlook({ month: '2026-10', spent: 20_000, planned: 80_000 - free, free, spending: [], purchases: [] }, EXTRAS_LEVELS);
+
+    assert.deepEqual(left(30_000), { left: 80_000, end: 30_000, state: 'plenty' });
+    assert.equal(left(29_999).state, 'calm');
+    assert.equal(left(10_000).state, 'calm');
+    assert.equal(left(9_999).state, 'tight');
+    assert.equal(left(0).state, 'tight');
+    assert.equal(left(-1).state, 'short');
+  });
+});
+
+describe('extrasPath', () => {
+  it('sets each day’s share aside and takes what is spent through today, then goes straight to the month’s end', () => {
+    // October's five weeks from 28 September give 20 000 a week; 120 000 go on 4 October, 40 000 on the 5th.
+    const m = summarizeExtras(budget({ purchases: [] }, [['last-week', 'extra'], ['transfer', 'extra']]), '2026-10');
+    const path = extrasPath(m, 0, today).map((p) => [p.share * 35, Math.round(p.amount), p.week]);
+
+    assert.deepEqual(path, [
+      [0, 0, false],
+      [7, -100_000, true],
+      [9, -134_286, false],
+      [14, -120_000, true],
+      [21, -100_000, true],
+      [28, -80_000, true],
+      [35, -60_000, true],
+    ]);
+    assert.equal(extrasOutlook(m, EXTRAS_LEVELS).state, 'short');
   });
 });
 

@@ -4,9 +4,9 @@ import WidgetKit
 
 // The widgets in the app's lilac look, after the reference the user sent on 2026-10-09: the week, with what is left of
 // it and its days; today, with what was spent and the expenses that wait for a category in a ring; what this month
-// saved, with the months before it; the next regular payment; and, after the main page's card of 2026-10-13, what is
-// free of this month's extras. On the Lock Screen each is a card: an icon on a tile, a figure or a title, and a line
-// under it. They read /api/widget from the server the app signed in to, through the
+// saved, with the months before it; the next regular payment; and where this month's extras are headed, after the
+// pictures of 2026-10-13 (see ExtrasForecast.swift). On the Lock Screen each is a card: an icon on a tile, a figure or
+// a title, and a line under it. They read /api/widget from the server the app signed in to, through the
 // Keychain they share, every 15 minutes, as often as iOS lets it, and whenever the app changes something; offline they
 // show what they read last, quieter.
 
@@ -89,7 +89,7 @@ struct ExtrasWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: WidgetKind.extras.rawValue, provider: Provider()) { WidgetView(entry: $0, kind: .extras) }
             .configurationDisplayName("Доп. бюджет")
-            .description("Сколько свободно в дополнительных этого месяца.")
+            .description("Сколько из дополнительных останется к концу месяца.")
             .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular])
     }
 }
@@ -199,6 +199,8 @@ struct WidgetContent: View {
         .containerBackground(for: .widget) {
             if lockScreen {
                 Color.clear
+            } else if kind == .extras, let forecast = entry.data?.extras?.forecast {
+                ExtrasBackdrop(tone: OutlookTone(state: forecast.state))
             } else {
                 WidgetBackground(glow: kind == .week)
             }
@@ -236,13 +238,25 @@ struct WidgetContent: View {
         case (.payment, _):
             PaymentFace(payment: data.payment, symbol: data.symbol)
         case (.extras, .accessoryRectangular):
-            if let extras = data.extras {
+            if let forecast = data.extras?.forecast {
+                LockCard(icon: OutlookTone(state: forecast.state).icon, title: forecast.title, note: "\(forecast.brief) \(forecast.figure)")
+            } else if let extras = data.extras {
                 LockCard(icon: LilacSymbol.wallet, title: Money.text(extras.amount, data.symbol), note: "\(extras.label) · \(extras.note)")
             } else {
                 LockCard(icon: LilacSymbol.wallet, title: "—", note: "")
             }
+        case (.extras, .systemMedium):
+            if let forecast = data.extras?.forecast {
+                ExtrasForecastFace(forecast: forecast, symbol: data.symbol)
+            } else {
+                ExtrasFace(extras: data.extras, symbol: data.symbol, wide: true)
+            }
         case (.extras, _):
-            ExtrasFace(extras: data.extras, symbol: data.symbol, wide: family == .systemMedium)
+            if let forecast = data.extras?.forecast {
+                ExtrasForecastSmallFace(forecast: forecast, symbol: data.symbol)
+            } else {
+                ExtrasFace(extras: data.extras, symbol: data.symbol, wide: false)
+            }
         }
     }
 
@@ -576,9 +590,9 @@ struct PaymentFace: View {
     }
 }
 
-/// «Доп. бюджет» as the main page's card tells it: the wallet on its tile, what is free of this month's extras, or how
-/// far past them in red, and what they are out of. Under it a bar of what is spent and what the plan holds; wide, with
-/// their figures.
+/// «Доп. бюджет» as the main page's card tells it, for a server from before the forecast: the wallet on its tile, what
+/// is free of this month's extras, or how far past them in red, and what they are out of. Under it a bar of what is
+/// spent and what the plan holds; wide, with their figures.
 struct ExtrasFace: View {
     let extras: WidgetData.Extras?
     let symbol: String
@@ -700,7 +714,7 @@ struct LockCard: View {
     Entry(date: .now, data: .sample)
 }
 
-#Preview(as: .systemSmall) {
+#Preview(as: .systemMedium) {
     ExtrasWidget()
 } timeline: {
     Entry(date: .now, data: .sample)

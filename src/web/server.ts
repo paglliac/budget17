@@ -195,6 +195,7 @@ function savedMarking(settings: Settings): SavedMarking {
     weekStart: settings.weekStart(),
     selfPayee: settings.selfPayee(),
     roundFigures: settings.roundFigures(),
+    extrasLevels: settings.extrasLevels(),
     subcategories: settings.subcategorySetup(),
     dismissedHints: settings.dismissedHints(),
     shops: settings.shopSetup(),
@@ -393,10 +394,17 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     return { status: 'invalid', errors: result.form.errors, page };
   }
   if (path.startsWith('/budget/')) {
-    const saved = loadSettings((settings) => submitBudget(settings, path, body)).status === 'saved';
+    const result = loadSettings((settings) => submitBudget(settings, path, body));
     // A new Claude token may answer what waited for one.
-    if (saved && path === '/budget/claude-token') reviewRequested();
-    return saved ? { status: 'saved', next: href('/settings') } : { status: 'missing', message: 'Такой настройки нет' };
+    if (result.status === 'saved' && path === '/budget/claude-token') reviewRequested();
+    if (result.status === 'saved') return { status: 'saved', next: href('/settings') };
+    if (result.status === 'missing') return { status: 'missing', message: 'Такой настройки нет' };
+    const page = () =>
+      renderSettings(
+        loadSettingsPage(loadCollections(demo, today), loadSettings(savedMarking), { today, levels: result.form, claudeToken: loadSettings((s) => s.claudeToken()) }),
+        href,
+      ).toString();
+    return { status: 'invalid', errors: result.form.errors, page };
   }
   if (/^\/regular(\/|$)/.test(path)) {
     using settings = new Settings(SETTINGS_PATH);

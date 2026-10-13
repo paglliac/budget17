@@ -527,7 +527,8 @@ describe('api', () => {
       note: 'на 70 000 ₽',
     });
     assert.deepEqual(widget.payment, { title: 'Школа, ЛДК', amount: 45_000, date: '7 октября', when: 'завтра' });
-    assert.deepEqual(widget.extras, {
+    const { forecast, ...extras } = widget.extras;
+    assert.deepEqual(extras, {
       label: 'Доп. бюджет',
       amount: 80_000,
       over: false,
@@ -536,10 +537,67 @@ describe('api', () => {
       spent: 0,
       planned: 20_000,
     });
+    assert.deepEqual(
+      { ...forecast, path: forecast.path.map((p: { share: number; amount: number; week: boolean }) => [p.share * 35, p.amount, p.week]) },
+      {
+        state: 'plenty',
+        label: 'Финансовый помощник',
+        action: 'Прогноз',
+        title: 'Есть запас',
+        lead: 'Даже с учётом запланированного вы, вероятно, отложите',
+        brief: 'отложите',
+        figure: '≈ 80 000 ₽',
+        left: { amount: 100_000, over: false, note: 'осталось' },
+        // October's five weeks from 28 September: 20 000 come a week, nothing is spent through today, the 9th day, and
+        // from there the line goes straight to what the jacket leaves.
+        path: [
+          [0, 0, false],
+          [7, 20_000, true],
+          [9, 25_714, false],
+          [14, 36_154, true],
+          [21, 50_769, true],
+          [28, 65_385, true],
+          [35, 80_000, true],
+        ],
+      },
+    );
 
     const sorted = { ...saved(), categorizations: new Map([['transfer', { tag: 'groceries' }], ['last-week', { tag: 'groceries' }]]) };
     const done = plain(widgetScreen(data(), sorted, { today })).pending;
     assert.deepEqual([done.count, done.sorted, done.label, done.title, done.note], [0, 1, 'Всё разобрано', 'Все операции разобраны', 'Отличная работа!']);
+  });
+
+  it('tells where the extras are headed by what the plan leaves at the month’s end, against the levels the user set', () => {
+    const planned = (amount: number, marks: Array<[string, Envelope]> = []) => {
+      const s = saved(marks);
+      return { ...s, purchases: s.purchases.map((p) => (p.id === 3 ? { ...p, amount } : p)) };
+    };
+    const forecast = (s: SavedBudget) => plain(widgetScreen(data(), s, { today })).extras.forecast;
+    const said = (s: SavedBudget) => {
+      const f = forecast(s);
+      return [f.state, f.title, f.lead, f.figure];
+    };
+
+    assert.deepEqual(said(planned(81_600)), ['calm', 'Спокойно', 'Если всё пойдёт по плану, вы, вероятно, отложите', '≈ 18 000 ₽'], '18 400 left');
+    assert.deepEqual(said(planned(97_000)), ['tight', 'Впритык', 'Если не появятся новые траты, получится отложить', '≈ 3 000 ₽']);
+    assert.deepEqual(said(planned(99_640)), ['tight', 'Впритык', 'Если не появятся новые траты, получится отложить', '≈ 400 ₽'], 'under a thousand, to the hundred');
+    assert.deepEqual(said(planned(112_000)), ['short', 'Нужно сократить', 'С текущими планами к концу месяца будет дефицит', '−12 000 ₽']);
+    assert.deepEqual(said({ ...planned(97_000), extrasLevels: { plenty: 2_000, tight: 1_000 } }).slice(0, 2), ['plenty', 'Есть запас'], 'the user’s levels');
+
+    // The transfer of 40 000 and last week's 30 000 are spent from the extras; with nothing planned the sentences say so.
+    const spent = { ...saved([['transfer', 'extra'], ['last-week', 'extra']]), purchases: [] };
+    assert.deepEqual(said(spent), ['plenty', 'Есть запас', 'Если не появятся новые траты, вы отложите', '≈ 30 000 ₽']);
+    assert.deepEqual(forecast(spent).left, { amount: 30_000, over: false, note: 'осталось' });
+    const over = plain(widgetScreen({ ...data(), transaction: [...(data().transaction ?? []), transaction({ id: 'car', date: '2026-10-02', outcome: 45_000, payee: 'Автосалон' })] }, {
+      ...spent,
+      marks: new Map([...spent.marks, ['car', 'extra']]),
+    }, { today })).extras.forecast;
+    assert.deepEqual([over.state, over.lead, over.figure, over.left], [
+      'short',
+      'Доп. бюджет уже потрачен, дефицит',
+      '−15 000 ₽',
+      { amount: 15_000, over: true, note: 'сверх 100 000 ₽' },
+    ]);
   });
 
   it('gives the savings widget income above spending by month, against the month before', () => {
@@ -593,6 +651,8 @@ describe('api', () => {
     assert.equal(screen.limit, 45_000);
     assert.equal(screen.roundFigures, false);
     assert.equal(plain(budgetSettingsScreen(data(), { weekStart: 0, roundFigures: true })).roundFigures, true);
+    assert.deepEqual(screen.extrasLevels, { plenty: 30_000, tight: 10_000 });
+    assert.deepEqual(plain(budgetSettingsScreen(data(), { weekStart: 0, extrasLevels: { plenty: 50_000, tight: 5_000 } })).extrasLevels, { plenty: 50_000, tight: 5_000 });
   });
 
   it('gives categories with the hidden ones apart, and the income ones', () => {

@@ -2,7 +2,7 @@ import Foundation
 
 /// What the widgets show, as /api/widget sends it: the week with its days, what was spent today, the expenses of this
 /// month that wait for a category, what this month saved against the months before it, the next regular payment, and
-/// the extras of this month.
+/// the extras of this month with where they are headed.
 struct WidgetData: Codable, Hashable {
     let symbol: String
     let week: Week
@@ -102,6 +102,45 @@ struct WidgetData: Codable, Hashable {
         let limit: Double
         let spent: Double
         let planned: Double
+        /// A server from before the forecast sends none.
+        var forecast: Forecast? = nil
+    }
+
+    /// Where the month's extras are headed by its end, as the server tells it: «Есть запас», «Спокойно», «Впритык» or
+    /// «Нужно сократить» with its sentence and figure, what is left of them now, and the line of what they set aside.
+    struct Forecast: Codable, Hashable {
+        /// plenty, calm, tight or short.
+        let state: String
+        /// Финансовый помощник.
+        let label: String
+        /// Прогноз.
+        let action: String
+        /// Есть запас.
+        let title: String
+        /// Даже с учётом запланированного вы, вероятно, отложите.
+        let lead: String
+        /// отложите; дефицит.
+        let brief: String
+        /// ≈ 38 000 ₽; −12 000 ₽.
+        let figure: String
+        let left: Left
+        /// From the month's first day to its end; the last point is what will be left.
+        let path: [Point]
+
+        /// What is left of the extras before the plan, «осталось», or how far past them in red.
+        struct Left: Codable, Hashable {
+            let amount: Double
+            let over: Bool
+            let note: String
+        }
+
+        struct Point: Codable, Hashable {
+            /// Where in the month, 0 to 1.
+            let share: Double
+            let amount: Double
+            /// The end of a week, drawn as a dot.
+            let week: Bool
+        }
     }
 
     static let sample = WidgetData(
@@ -126,6 +165,16 @@ struct WidgetData: Codable, Hashable {
             }
         ),
         payment: Payment(title: "Ипотека", amount: 29_000, date: "21 октября", when: "через 12 дней"),
-        extras: Extras(label: "Доп. бюджет", amount: 68_500, over: false, note: "из 100 000 ₽", limit: 100_000, spent: 17_600, planned: 13_900)
+        extras: Extras(
+            label: "Доп. бюджет", amount: 68_500, over: false, note: "из 100 000 ₽", limit: 100_000, spent: 17_600, planned: 13_900,
+            forecast: Forecast(
+                state: "plenty", label: "Финансовый помощник", action: "Прогноз", title: "Есть запас",
+                lead: "Даже с учётом запланированного вы, вероятно, отложите", brief: "отложите", figure: "≈\u{00A0}69\u{00A0}000\u{00A0}₽",
+                left: Forecast.Left(amount: 82_400, over: false, note: "осталось"),
+                path: [(0, 0, false), (0.25, 21_000, true), (0.4, 26_000, false), (0.5, 33_000, true), (0.75, 51_000, true), (1, 68_500, true)].map {
+                    Forecast.Point(share: $0.0, amount: $0.1, week: $0.2)
+                }
+            )
+        )
     )
 }

@@ -110,6 +110,14 @@ describe('Settings', () => {
     assert.equal(settings.roundFigures(), false);
   });
 
+  it('keeps where the extras’ widget has plenty and is tight, 30 000 and 10 000 until set', () => {
+    using settings = new Settings(':memory:');
+    assert.deepEqual(settings.extrasLevels(), { plenty: 30_000, tight: 10_000 });
+    settings.setExtrasLevels({ plenty: 40_000, tight: 5_000 });
+    settings.setExtrasLevels({ plenty: 45_000, tight: 5_000 });
+    assert.deepEqual(settings.extrasLevels(), { plenty: 45_000, tight: 5_000 });
+  });
+
   it('sets what a week allows and gives the usual back', () => {
     using settings = new Settings(':memory:');
     settings.setWeekLimit('2026-10-12', 30_000);

@@ -694,10 +694,19 @@ struct BudgetSettingsScreen: Decodable {
     let weekdays: [Weekday]
     /// What a week allows unless it has an amount of its own.
     let limit: Double
+    /// Where the extras' widget tells plenty and tight; nil from a server that cannot. Posts to
+    /// /api/budget/extras-levels as plenty and tight.
+    var extrasLevels: ExtrasLevels? = nil
 
     struct Weekday: Decodable, Hashable {
         let value: Int
         let label: String
+    }
+
+    /// What left of the extras at the month's end is plenty from, and what is tight below.
+    struct ExtrasLevels: Decodable, Hashable {
+        let plenty: Double
+        let tight: Double
     }
 }
 

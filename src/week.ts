@@ -5,7 +5,7 @@
 // takes its amount out of the plan. The money the plans of wishes hold comes as purchases too (see wish-plans.ts).
 // Pure functions; what the user plans and marks is kept by src/settings.ts.
 
-import { addDays, monthOf, weekday, type MonthString } from './dates.ts';
+import { addDays, daysBetween, monthOf, weekday, type MonthString } from './dates.ts';
 import type { Operation } from './ledger.ts';
 import { paidBy, paymentDate, type RegularExpense } from './regular.ts';
 import type { DateString } from './zenmoney/types.ts';
@@ -198,6 +198,62 @@ export function summarizeExtras(budget: Budget, month: MonthString): ExtrasSumma
   const spent = sum(spending.map((o) => o.amount));
   const planned = sum(purchases.map((p) => p.left));
   return { month, spent, planned, free: MONTH_LIMIT - spent - planned, spending, purchases };
+}
+
+/** Where a month's extras are headed by its end: plenty is left, a calm amount, little, or the plan holds more than is left. */
+export type ExtrasState = 'plenty' | 'calm' | 'tight' | 'short';
+
+/** What left at a month's end has plenty from, and what is tight below; short is below zero. */
+export interface ExtrasLevels {
+  plenty: number;
+  tight: number;
+}
+
+/** The levels unless the user set others in the settings. */
+export const EXTRAS_LEVELS: ExtrasLevels = { plenty: 30_000, tight: 10_000 };
+
+export interface ExtrasOutlook {
+  /** What is left of MONTH_LIMIT after what is spent, the plan not taken yet. */
+  left: number;
+  /** What will be left at the month's end once the plan is bought; what else comes nobody knows, so nothing. */
+  end: number;
+  state: ExtrasState;
+}
+
+/** A month's extras by its end, after what is spent and what the plan holds for them. */
+export function extrasOutlook(m: ExtrasSummary, levels: ExtrasLevels): ExtrasOutlook {
+  const end = m.free;
+  const state = end < -0.5 ? 'short' : end < levels.tight ? 'tight' : end < levels.plenty ? 'calm' : 'plenty';
+  return { left: MONTH_LIMIT - m.spent, end, state };
+}
+
+/** A point of the line a month's extras draw: where in the month, 0 at its first day to 1 at the end of its last. */
+export interface ExtrasPoint {
+  share: number;
+  amount: number;
+  /** The end of one of the month's weeks; the last point is the month's end. */
+  week: boolean;
+}
+
+/**
+ * What a month's extras have set aside, as if each day of the month's weeks brought its share of MONTH_LIMIT and each
+ * expense took its amount: rising while less is spent than comes, falling when more. Up to today as spent, from today
+ * straight to what will be left at the month's end once the plan is bought. A point at the start, at the end of every
+ * week and at the end of today if it does not end a week.
+ */
+export function extrasPath(m: ExtrasSummary, start: WeekStart, today: DateString): ExtrasPoint[] {
+  const weeks = weeksOfMonth(m.month, start);
+  const first = weeks[0];
+  if (first === undefined) return [];
+  const days = weeks.length * 7;
+  const setAside = (day: number) => (MONTH_LIMIT * day) / days - sum(m.spending.filter((o) => o.date < addDays(first, day)).map((o) => o.amount));
+  // Days of the month gone by the end of today.
+  const gone = Math.min(Math.max(daysBetween(first, today) + 1, 0), days);
+  const now = setAside(gone);
+  const at = (day: number) => (day <= gone && day < days ? setAside(day) : now + ((m.free - now) * (day - gone)) / (days - gone));
+  const ends = weeks.map((_, i) => 7 * (i + 1));
+  const points = [0, ...ends, ...(gone > 0 && !ends.includes(gone) ? [gone] : [])].sort((a, b) => a - b);
+  return points.map((day) => ({ share: day / days, amount: day === days ? m.free : at(day), week: day > 0 && day % 7 === 0 }));
 }
 
 /** When to buy a wish. */

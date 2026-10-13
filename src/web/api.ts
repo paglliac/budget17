@@ -11,7 +11,26 @@ import { INCOME_MODEL_IDS, incomeModel, incomeValues, monthlyIncome, type Income
 import { listOperations, type Operation } from '../ledger.ts';
 import { paymentDate, regularTotals, regularValues, type RegularExpense } from '../regular.ts';
 import { NO_SHOPS } from '../shops.ts';
-import { adviceTarget, envelopeOf, MONTH_LIMIT, monthOfWeek, WEEK_LIMIT, weekLimit, weekOf, type Envelope, type ExtrasSummary, type PurchaseStatus, type WeekSummary, type Wish } from '../week.ts';
+import {
+  adviceTarget,
+  envelopeOf,
+  EXTRAS_LEVELS,
+  extrasOutlook,
+  extrasPath,
+  MONTH_LIMIT,
+  monthOfWeek,
+  WEEK_LIMIT,
+  weekLimit,
+  weekOf,
+  type Envelope,
+  type ExtrasLevels,
+  type ExtrasState,
+  type ExtrasSummary,
+  type PurchaseStatus,
+  type WeekStart,
+  type WeekSummary,
+  type Wish,
+} from '../week.ts';
 import { covered, savingsTaken, stepMonth, type Step } from '../wish-plans.ts';
 import type { DateString, EntityCollections } from '../zenmoney/types.ts';
 import { capitalize, dayHeading, dayMonth, fromToday, money, monthName, num, plural, ROUND_STEP, roundParts, timeOn, weekLabel, WEEKDAYS, WEEKDAYS_FULL } from './format.ts';
@@ -256,6 +275,39 @@ function roundExtras(m: ExtrasSummary): ExtrasSummary {
 function extrasCard(m: ExtrasSummary, symbol: string) {
   const over = m.free < -0.5;
   return { label: 'Доп. бюджет', amount: over ? -m.free : m.free, over, note: `${over ? 'сверх' : 'из'} ${money(MONTH_LIMIT, symbol)}` };
+}
+
+/** The words of the extras' widget for where the month is headed: its title, what leads to the figure, and that in a word. */
+const OUTLOOK_WORDS: Record<ExtrasState, { title: string; lead: string; unplanned: string; brief: string }> = {
+  plenty: { title: 'Есть запас', lead: 'Даже с учётом запланированного вы, вероятно, отложите', unplanned: 'Если не появятся новые траты, вы отложите', brief: 'отложите' },
+  calm: { title: 'Спокойно', lead: 'Если всё пойдёт по плану, вы, вероятно, отложите', unplanned: 'Если не появятся новые траты, вы отложите', brief: 'отложите' },
+  tight: { title: 'Впритык', lead: 'Если не появятся новые траты, получится отложить', unplanned: 'Если не появятся новые траты, получится отложить', brief: 'отложите' },
+  short: { title: 'Нужно сократить', lead: 'С текущими планами к концу месяца будет дефицит', unplanned: 'Доп. бюджет уже потрачен, дефицит', brief: 'дефицит' },
+};
+
+/**
+ * Where a month's extras are headed, as the extras' widget tells it: plenty, calm, tight or short by what will be left
+ * at the month's end once the plan is bought, against the levels the user set; that, about to the thousand, after its
+ * lead; what is left of them now, before the plan; and the line of what they set aside through the month (see
+ * extrasPath). Under a thousand, to the hundred.
+ */
+function extrasForecast(m: ExtrasSummary, levels: ExtrasLevels, start: WeekStart, today: DateString, symbol: string) {
+  const outlook = extrasOutlook(m, levels);
+  const words = OUTLOOK_WORDS[outlook.state];
+  const step = Math.abs(outlook.end) < 1_000 ? 100 : 1_000;
+  const end = Math.round(outlook.end / step) * step;
+  const over = outlook.left < -0.5;
+  return {
+    state: outlook.state,
+    label: 'Финансовый помощник',
+    action: 'Прогноз',
+    title: words.title,
+    lead: m.planned > 0.5 ? words.lead : words.unplanned,
+    brief: words.brief,
+    figure: outlook.state === 'short' ? money(end, symbol) : `≈\u00A0${money(end, symbol)}`,
+    left: { amount: over ? -outlook.left : outlook.left, over, note: over ? `сверх ${money(MONTH_LIMIT, symbol)}` : 'осталось' },
+    path: extrasPath(m, start, today).map((p) => ({ ...p, amount: Math.round(p.amount) })),
+  };
 }
 
 /** How many expenses of this month wait for a category, as the card that opens them says it: «3 новые». */
@@ -711,7 +763,8 @@ const SAVINGS_MONTHS = 10;
  * what went into the week today and when the server last synced. The expenses of this month that wait for a category,
  * with the share of its expenses that do not. Savings: what this month's income is above its spending, as the
  * operations count them, against the month before and with the months before it. The next regular payment. The extras
- * of this month as the main page's card tells them, with what is spent of them and what the plan holds for them.
+ * of this month as the main page's card tells them, with what is spent of them and what the plan holds for them, and
+ * where they are headed by the month's end.
  */
 export function widgetScreen(data: EntityCollections, saved: SavedBudget, options: { today: DateString; syncedAt?: string | null }) {
   const { today } = options;
@@ -745,7 +798,13 @@ export function widgetScreen(data: EntityCollections, saved: SavedBudget, option
     },
     savings: savingsOf(data, saved, today, d.symbol),
     payment: nextPayment(data, saved, today),
-    extras: { ...extrasCard(d.extras, d.symbol), limit: MONTH_LIMIT, spent: d.extras.spent, planned: d.extras.planned },
+    extras: {
+      ...extrasCard(d.extras, d.symbol),
+      limit: MONTH_LIMIT,
+      spent: d.extras.spent,
+      planned: d.extras.planned,
+      forecast: extrasForecast(d.extras, saved.extrasLevels ?? EXTRAS_LEVELS, saved.weekStart, today, d.symbol),
+    },
   };
 }
 
@@ -832,14 +891,16 @@ function shopJSON(f: ShopForm) {
 
 /**
  * The day a week begins on, to pick from the days Monday first; it posts to /api/budget/week-start/:day. Round figures
- * on the main page post to /api/budget/round-figures/on or /off.
+ * on the main page post to /api/budget/round-figures/on or /off. Where the extras' widget tells plenty and tight posts
+ * to /api/budget/extras-levels as plenty and tight.
  */
-export function budgetSettingsScreen(data: EntityCollections, saved: Pick<SavedMarking, 'weekStart' | 'roundFigures'>) {
+export function budgetSettingsScreen(data: EntityCollections, saved: Pick<SavedMarking, 'weekStart' | 'roundFigures' | 'extrasLevels'>) {
   const b = loadBudgetSetup(data, saved);
   return {
     symbol: b.symbol,
     weekStart: b.weekStart,
     roundFigures: b.roundFigures,
+    extrasLevels: b.extrasLevels,
     weekdays: WEEKDAYS_FULL.map((day, value) => ({ value, label: capitalize(day) })),
     limit: WEEK_LIMIT,
   };

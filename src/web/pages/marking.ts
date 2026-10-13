@@ -18,7 +18,7 @@ import { operationKind } from '../../operations.ts';
 import { nearestPayment, type RegularExpense } from '../../regular.ts';
 import type { Settings } from '../../settings.ts';
 import type { ShopSetup } from '../../shops.ts';
-import { envelopeOf, purchaseStatus, weekOf, type Envelope, type Purchase, type WeekStart, type Wish } from '../../week.ts';
+import { envelopeOf, purchaseStatus, weekOf, type Envelope, type ExtrasLevels, type Purchase, type WeekStart, type Wish } from '../../week.ts';
 import type { ChosenPlan } from '../../wish-plans.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { dayMonth, money, timeOn, weekLabel } from '../format.ts';
@@ -55,6 +55,8 @@ export interface SavedMarking {
   selfPayee?: string | null;
   /** The app's main page shows its figures to the hundred; off when not given. */
   roundFigures?: boolean;
+  /** Where the extras' widget tells plenty and tight by what is left at the month's end; EXTRAS_LEVELS when not given. */
+  extrasLevels?: ExtrasLevels;
   /** How the user split categories; none when not given. */
   subcategories?: SubcategorySetup;
   /** Suggestions of the month review the user turned down. */

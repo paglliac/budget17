@@ -18,7 +18,7 @@ import type { MonthString } from './dates.ts';
 import { isIncomeModel, type Income, type IncomeInput } from './income.ts';
 import type { RegularExpense, RegularExpenseInput } from './regular.ts';
 import { APP_LOGOS, type ShopLook, type ShopSetup } from './shops.ts';
-import { alignWeek, type Envelope, type Purchase, type PurchaseInput, type WeekStart, type Wish, type WishInput } from './week.ts';
+import { alignWeek, EXTRAS_LEVELS, type Envelope, type ExtrasLevels, type Purchase, type PurchaseInput, type WeekStart, type Wish, type WishInput } from './week.ts';
 import type { ChosenPlan, Step } from './wish-plans.ts';
 import type { DateString, TagId } from './zenmoney/types.ts';
 
@@ -383,6 +383,23 @@ export class Settings {
   setRoundFigures(on: boolean): void {
     if (on) this.#db.prepare("INSERT INTO preference (key, value) VALUES ('round_figures', '1') ON CONFLICT (key) DO UPDATE SET value = excluded.value").run();
     else this.#db.prepare("DELETE FROM preference WHERE key = 'round_figures'").run();
+  }
+
+  /** Where the extras' widget tells plenty and tight by what is left at the month's end; EXTRAS_LEVELS until set. */
+  extrasLevels(): ExtrasLevels {
+    const level = (key: string, fallback: number) => {
+      const value = Number(this.#db.prepare('SELECT value FROM preference WHERE key = ?').get(key)?.value);
+      return Number.isFinite(value) && value > 0 ? value : fallback;
+    };
+    return { plenty: level('extras_plenty', EXTRAS_LEVELS.plenty), tight: level('extras_tight', EXTRAS_LEVELS.tight) };
+  }
+
+  setExtrasLevels(levels: ExtrasLevels): void {
+    const put = this.#db.prepare('INSERT INTO preference (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value');
+    this.#transaction(() => {
+      put.run('extras_plenty', String(levels.plenty));
+      put.run('extras_tight', String(levels.tight));
+    });
   }
 
   /** The token Claude signs in by on the user's subscription, from `claude setup-token`; null when none is set. */

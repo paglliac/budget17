@@ -38,6 +38,7 @@ function saved(settings: Settings): SavedMarking {
     weekStart: settings.weekStart(),
     selfPayee: settings.selfPayee(),
     roundFigures: settings.roundFigures(),
+    extrasLevels: settings.extrasLevels(),
   };
 }
 
@@ -166,6 +167,23 @@ describe('settings page budget', () => {
     assert.ok(on.includes('action="/budget/round-figures/off"') && on.includes('aria-pressed="true"'));
   });
 
+  it('tells where the extras’ widget has plenty and is tight, opening a form to change it', () => {
+    using settings = new Settings(':memory:');
+    assert.ok(
+      render(settings).includes(
+        '<b>Прогноз доп. бюджета</b><small>к концу месяца остаётся от 30 000 ₽ — «Есть запас», меньше 10 000 ₽ — «Впритык», ниже нуля — «Нужно сократить»</small>',
+      ),
+    );
+
+    const form = render(settings, { edit: 'extras-levels' });
+    assert.ok(form.includes('action="/budget/extras-levels"') && form.includes('name="plenty" value="30000"') && form.includes('name="tight" value="10000"'));
+
+    const result = submitBudget(settings, '/budget/extras-levels', new URLSearchParams({ plenty: '5 000', tight: '8000' }));
+    assert.ok(result.status === 'invalid');
+    const again = render(settings, { levels: result.form });
+    assert.ok(again.includes('name="plenty" value="5 000"') && again.includes('Не меньше, чем «впритык»'), 'the form stays open with what was typed');
+  });
+
   it('keeps the user’s own name in transfers to themselves, opening a form to change it', () => {
     using settings = new Settings(':memory:');
     assert.ok(render(settings).includes('<b>Переводы себе</b><small>имя не указано</small>'));
@@ -208,6 +226,19 @@ describe('submitBudget', () => {
     assert.deepEqual(submitBudget(settings, '/budget/round-figures/off'), { status: 'saved' });
     assert.equal(settings.roundFigures(), false);
     assert.deepEqual(submitBudget(settings, '/budget/round-figures/yes'), { status: 'missing' });
+  });
+
+  it('sets where the extras’ widget has plenty and is tight, plenty no lower than tight', () => {
+    using settings = new Settings(':memory:');
+
+    assert.deepEqual(submitBudget(settings, '/budget/extras-levels', new URLSearchParams({ plenty: '50 000', tight: '7500,50' })), { status: 'saved' });
+    assert.deepEqual(settings.extrasLevels(), { plenty: 50_000, tight: 7_500.5 });
+    assert.deepEqual(submitBudget(settings, '/budget/extras-levels', new URLSearchParams({ plenty: '', tight: 'много' })), {
+      status: 'invalid',
+      form: { plenty: '', tight: 'много', errors: { plenty: 'Укажите сумму', tight: 'Сумма в рублях, например 13 000' } },
+    });
+    assert.deepEqual(submitBudget(settings, '/budget/extras-levels', new URLSearchParams({ plenty: '10 000', tight: '10 000' })), { status: 'saved' }, 'no calm then');
+    assert.deepEqual(settings.extrasLevels(), { plenty: 10_000, tight: 10_000 });
   });
 
   it('saves the user’s own name trimmed, and forgets it when sent empty', () => {
