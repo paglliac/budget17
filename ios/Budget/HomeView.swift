@@ -7,8 +7,9 @@ enum HomeRoute: Hashable {
 }
 
 /// The main page, the week: the days of the week, a large circle with what is free on its lilac lens and what is
-/// reserved beside it, then what was spent today and how many expenses wait for a category. It fits the screen: the
-/// reserved part opens the plan tab on the shown week, and a day or today's spending opens the spending.
+/// reserved beside it, then cards of what was spent today and of the expenses that wait for a category, or, once all
+/// are sorted, of the extras. It fits the screen: the reserved part opens the plan tab on the shown week, a day or
+/// today's spending opens the spending, and the extras open the month on them.
 struct HomeView: View {
     @Binding var mode: BudgetView.Mode
     @Binding var week: String?
@@ -16,6 +17,8 @@ struct HomeView: View {
     @Binding var sheet: BudgetSheet?
     let openPending: () -> Void
     let openPlan: (String?) -> Void
+    /// Opens a month on its extras; nil is the current one.
+    let openExtras: (String?) -> Void
     @Environment(Session.self) private var session
     @Environment(\.tabBarHeight) private var tabBarHeight
     @State private var picking = false
@@ -66,9 +69,12 @@ struct HomeView: View {
                         syncing: session.isSyncing,
                         openSpending: s.phase == "ahead" ? nil : { path.append(.spending(nil)) },
                         sync: { Task { await session.sync() } },
-                        openSort: openPending
+                        openSort: openPending,
+                        openExtras: openExtras
                     )
-                    .padding(.top, 12)
+                    .padding(.top, 16)
+                    // Clear of the raised «+».
+                    .padding(.bottom, 14)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 12)
@@ -220,8 +226,10 @@ struct HomeHero: View {
     }
 }
 
-/// Under the circle: what was spent today (in a past week, in all of it) with when the data came from ZenMoney, and how
-/// many expenses wait for a category, which opens «Разобрать».
+/// Under the circle, two cards after the user's picture of 2026-10-13: what was spent today (in a past week, in all of
+/// it) with when the data came from ZenMoney, which opens the week's spending, and beside it «Разобрать операции» with
+/// how many expenses wait for a category, which opens them. Once all are sorted the extras of the week's month take its
+/// place and open the month on them.
 struct HomeFooter: View {
     let home: WeekHome
     let symbol: String
@@ -229,66 +237,124 @@ struct HomeFooter: View {
     let openSpending: (() -> Void)?
     let sync: () -> Void
     let openSort: () -> Void
+    let openExtras: (String?) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Rectangle().fill(Lilac.hairline).frame(height: 0.5)
-            HStack(alignment: .center, spacing: 18) {
-                if let spent = home.spent {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Button { openSpending?() } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(spent.label).font(.subheadline).foregroundStyle(Lilac.muted)
-                                LilacAmount(amount: spent.amount, symbol: symbol, size: 24)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("spent")
-                        if let synced = home.synced {
-                            Button(action: sync) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "arrow.triangle.2.circlepath")
-                                        .rotationEffect(.degrees(syncing ? 360 : 0))
-                                        .animation(syncing ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: syncing)
-                                    Text("Обновлено \(Dates.moment(synced))").monospacedDigit()
-                                }
-                                .font(.footnote)
-                                .foregroundStyle(Lilac.muted)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Обновлено \(Dates.moment(synced)), обновить")
-                        }
+        HStack(spacing: 12) {
+            if let spent = home.spent {
+                Button { openSpending?() } label: { spentCard(spent) }
+                    .buttonStyle(.card)
+                    .accessibilityIdentifier("spent")
+            }
+            if let extras = home.extras, home.pending.count == 0 {
+                Button { openExtras(extras.month) } label: { extrasCard(extras) }
+                    .buttonStyle(.card)
+                    .accessibilityIdentifier("extras")
+            } else {
+                Button(action: openSort) { pendingCard }
+                    .buttonStyle(.card)
+                    .accessibilityIdentifier("pending")
+            }
+        }
+        // Both cards as tall as the taller one.
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func spentCard(_ spent: Figure) -> some View {
+        HomeCard(icon: "chart.bar.fill") {
+            Text(spent.label).font(.footnote).foregroundStyle(Lilac.muted).lineLimit(2)
+            LilacAmount(amount: spent.amount, symbol: symbol, size: 24)
+            if let synced = home.synced {
+                // Pressed, the server fetches from ZenMoney; the card around it opens the spending.
+                Button(action: sync) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .rotationEffect(.degrees(syncing ? 360 : 0))
+                            .animation(syncing ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: syncing)
+                        Text(Dates.moment(synced)).monospacedDigit()
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Rectangle().fill(Lilac.hairline).frame(width: 0.5, height: 72)
-                }
-                Button(action: openSort) {
-                    HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            if home.pending.count > 0 {
-                                Text("\(home.pending.count)").font(.system(size: 30, weight: .bold)).monospacedDigit()
-                            } else {
-                                Image(systemName: "checkmark.circle.fill").font(.system(size: 26)).foregroundStyle(Lilac.accent)
-                            }
-                            Text(home.pending.label)
-                                .font(.subheadline)
-                                .foregroundStyle(Lilac.muted)
-                                .lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right").font(.body.weight(.medium)).foregroundStyle(Lilac.muted)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .font(.caption)
+                    .foregroundStyle(Lilac.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .padding(.vertical, 2)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("pending")
+                .accessibilityLabel("Обновлено \(Dates.moment(synced)), обновить")
             }
-            .padding(.vertical, 16)
         }
+    }
+
+    /// «Разобрать операции» and «3 новые» on lilac; a server from before the cards says how many wait as it did.
+    @ViewBuilder
+    private var pendingCard: some View {
+        let pending = home.pending
+        let waiting = pending.count > 0
+        HomeCard(icon: waiting ? "doc.text" : "checkmark", badge: waiting, highlighted: waiting, chevron: true) {
+            Text(pending.title ?? (waiting ? "\(pending.count) \(pending.label)" : pending.label))
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+            if waiting, let note = pending.note {
+                Text(note).font(.footnote.weight(.medium)).foregroundStyle(Lilac.accent).monospacedDigit()
+            }
+        }
+    }
+
+    private func extrasCard(_ extras: WeekHome.Extras) -> some View {
+        HomeCard(icon: LilacSymbol.wallet, tile: Lilac.track, iconColor: Color.primary.opacity(0.6)) {
+            Text(extras.label).font(.footnote).foregroundStyle(Lilac.muted).lineLimit(1)
+            LilacAmount(amount: extras.amount, symbol: symbol, size: 20, color: extras.over ? Lilac.red : nil)
+            Text(extras.note).font(.footnote).foregroundStyle(Lilac.muted).lineLimit(1).minimumScaleFactor(0.8)
+        }
+    }
+}
+
+/// A card under the circle: an icon on a tile and a few lines beside it, on white; on lilac, with a red dot on the
+/// tile, when it waits for the user.
+struct HomeCard<Content: View>: View {
+    let icon: String
+    var tile: Color = Lilac.tint
+    var iconColor: Color = Lilac.accent
+    var badge = false
+    var highlighted = false
+    var chevron = false
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(iconColor)
+                .frame(width: 40, height: 40)
+                .background(highlighted ? Lilac.surface : tile, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .overlay(alignment: .topTrailing) {
+                    if badge {
+                        Circle().fill(Lilac.red).frame(width: 9, height: 9)
+                            .overlay(Circle().strokeBorder(Lilac.surface, lineWidth: 1.5))
+                            .offset(x: 2, y: -2)
+                    }
+                }
+            HStack(spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) { content() }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if chevron {
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Lilac.muted)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(highlighted ? Lilac.tint.opacity(0.6) : Lilac.surface)
+                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Lilac.surface, lineWidth: highlighted ? 1.5 : 0))
+                .shadow(color: .black.opacity(0.05), radius: 10, y: 4)
+        }
+        .foregroundStyle(Color.primary)
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 }
 

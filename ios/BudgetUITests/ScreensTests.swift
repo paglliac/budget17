@@ -23,6 +23,17 @@ final class ScreensTests: XCTestCase {
         XCTAssert(reserved.waitForExistence(timeout: 15), "the main page loads")
         shot("home")
 
+        // With every expense sorted, the extras' card opens the month on them.
+        let extras = app.buttons["extras"]
+        if extras.exists {
+            extras.tap()
+            XCTAssert(app.buttons["Добавить в дополнительные"].waitForExistence(timeout: 10), "the month opens")
+            sleep(1)
+            shot("month-extras")
+            pill("Неделя").tap()
+            XCTAssert(reserved.waitForExistence(timeout: 5), "«Неделя» brings the week back")
+        }
+
         app.buttons["week-limit"].tap()
         if app.buttons["form-save"].waitForExistence(timeout: 5) {
             shot("week-limit")

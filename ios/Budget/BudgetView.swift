@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The main tab: the week or the month, as «Неделя» and «Месяц» switch them, each stepping back and forth. A return
-/// brings back the main page: the current week with nothing opened over it.
+/// brings back the main page: the current week with nothing opened over it. The extras' card of the main page and their
+/// widget open the month on its extras.
 struct BudgetView: View {
     enum Mode: Hashable { case week, month }
 
@@ -11,10 +12,14 @@ struct BudgetView: View {
     let openPlan: (String?) -> Void
     /// Counts the returns to the main page.
     let returns: Int
+    /// Counts the opens of this month's extras from their widget.
+    let extrasOpens: Int
     @State private var mode = Mode.week
     /// nil is the current week or month.
     @State private var week: String?
     @State private var month: String?
+    /// The month is to show its extras once it opens.
+    @State private var focusExtras = false
     /// The pages opened from the week.
     @State private var path: [HomeRoute] = []
     @State private var sheet: BudgetSheet?
@@ -22,8 +27,8 @@ struct BudgetView: View {
     var body: some View {
         Group {
             switch mode {
-            case .week: HomeView(mode: $mode, week: $week, path: $path, sheet: $sheet, openPending: openPending, openPlan: openPlan)
-            case .month: MonthView(mode: $mode, month: $month, sheet: $sheet) { opened in
+            case .week: HomeView(mode: $mode, week: $week, path: $path, sheet: $sheet, openPending: openPending, openPlan: openPlan, openExtras: openExtras)
+            case .month: MonthView(mode: $mode, month: $month, focusExtras: $focusExtras, sheet: $sheet) { opened in
                 week = opened
                 mode = .week
             }
@@ -37,6 +42,19 @@ struct BudgetView: View {
                 week = nil
             }
         }
+        .onChange(of: extrasOpens) {
+            path = []
+            openExtras(nil)
+        }
+    }
+
+    /// A month on its extras; nil is the current one.
+    private func openExtras(_ target: String?) {
+        focusExtras = true
+        withAnimation(.snappy) {
+            month = target
+            mode = .month
+        }
     }
 }
 
@@ -45,39 +63,49 @@ struct BudgetView: View {
 struct MonthView: View {
     @Binding var mode: BudgetView.Mode
     @Binding var month: String?
+    /// Set, the month scrolls to its extras and clears it.
+    @Binding var focusExtras: Bool
     @Binding var sheet: BudgetSheet?
     let openWeek: (String) -> Void
 
     var body: some View {
         Screen(path: "month", query: ["month": month]) { (s: MonthScreen) in
             GeometryReader { geometry in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(spacing: 8) {
-                            ModeSwitch(mode: $mode)
-                            Spacer(minLength: 8)
-                            LilacRoundButton(systemImage: "chevron.left", label: "Раньше") { go(s.prev.value, s) }
-                            LilacRoundButton(systemImage: "chevron.right", label: "Позже") { if let next = s.next { go(next.value, s) } }
-                                .disabled(s.next == nil)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(spacing: 8) {
+                                ModeSwitch(mode: $mode)
+                                Spacer(minLength: 8)
+                                LilacRoundButton(systemImage: "chevron.left", label: "Раньше") { go(s.prev.value, s) }
+                                LilacRoundButton(systemImage: "chevron.right", label: "Позже") { if let next = s.next { go(next.value, s) } }
+                                    .disabled(s.next == nil)
+                            }
+                            .padding(.top, 6)
+                            HStack {
+                                Text(s.title).font(.title3.weight(.semibold))
+                                Spacer()
+                                if s.month != s.thisMonth { LilacChip(text: "Сейчас") { month = nil } }
+                            }
+                            .padding(.top, 14)
+                            if let flow = s.flow {
+                                IncomeFlow(flow: flow, symbol: s.symbol).padding(.top, 12)
+                            }
+                            weeks(s)
+                            extras(s)
                         }
-                        .padding(.top, 6)
-                        HStack {
-                            Text(s.title).font(.title3.weight(.semibold))
-                            Spacer()
-                            if s.month != s.thisMonth { LilacChip(text: "Сейчас") { month = nil } }
-                        }
-                        .padding(.top, 14)
-                        if let flow = s.flow {
-                            IncomeFlow(flow: flow, symbol: s.symbol).padding(.top, 12)
-                        }
-                        weeks(s)
-                        extras(s)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 24)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 24)
+                    .scrollIndicators(.hidden)
+                    .overlay(alignment: .top) { TopFade(height: geometry.safeAreaInsets.top) }
+                    .onChange(of: focusExtras, initial: true) { _, focus in
+                        guard focus else { return }
+                        focusExtras = false
+                        // After the page is laid out.
+                        Task { @MainActor in withAnimation(.snappy) { proxy.scrollTo("extras", anchor: .top) } }
+                    }
                 }
-                .scrollIndicators(.hidden)
-                .overlay(alignment: .top) { TopFade(height: geometry.safeAreaInsets.top) }
             }
         }
         .background(LilacBackground())
@@ -107,6 +135,7 @@ struct MonthView: View {
                 sheet = .purchase(PurchaseDraft(purchase: nil, week: s.newPurchaseWeek, envelope: "extra", choices: s.weekChoices, actions: [], symbol: s.symbol))
             }
         }
+        .id("extras")
         LilacSummary(label: nil, amount: s.total.amount, symbol: s.symbol, note: s.total.note, size: 26)
         LilacShareBar(parts: s.total.parts ?? []).padding(.top, 12).padding(.bottom, 4)
         ForEach(Array(s.purchases.enumerated()), id: \.element.id) { index, item in

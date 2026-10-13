@@ -4,8 +4,9 @@ import WidgetKit
 
 // The widgets in the app's lilac look, after the reference the user sent on 2026-10-09: the week, with what is left of
 // it and its days; today, with what was spent and the expenses that wait for a category in a ring; what this month
-// saved, with the months before it; the next regular payment. On the Lock Screen each is a card: an icon on a tile, a
-// figure or a title, and a line under it. They read /api/widget from the server the app signed in to, through the
+// saved, with the months before it; the next regular payment; and, after the main page's card of 2026-10-13, what is
+// free of this month's extras. On the Lock Screen each is a card: an icon on a tile, a figure or a title, and a line
+// under it. They read /api/widget from the server the app signed in to, through the
 // Keychain they share, every 15 minutes, as often as iOS lets it, and whenever the app changes something; offline they
 // show what they read last, quieter.
 
@@ -16,6 +17,7 @@ struct BudgetWidgets: WidgetBundle {
         TodayWidget()
         SavingsWidget()
         PaymentWidget()
+        ExtrasWidget()
     }
 }
 
@@ -25,6 +27,7 @@ enum WidgetKind: String {
     case today
     case savings
     case payment
+    case extras
 
     /// Where a tap on the widget leads in the app.
     var link: URL {
@@ -32,16 +35,18 @@ enum WidgetKind: String {
         case .week, .today: WidgetLink.week
         case .savings: WidgetLink.operations
         case .payment: WidgetLink.regular
+        case .extras: WidgetLink.extras
         }
     }
 }
 
-/// Where a tap leads: the week, the expenses to sort, the operations, the regular payments.
+/// Where a tap leads: the week, the expenses to sort, the operations, the regular payments, this month's extras.
 enum WidgetLink {
     static let week = URL(string: "budget://week")!
     static let sort = URL(string: "budget://sort")!
     static let operations = URL(string: "budget://operations")!
     static let regular = URL(string: "budget://regular")!
+    static let extras = URL(string: "budget://extras")!
 }
 
 struct WeekWidget: Widget {
@@ -77,6 +82,15 @@ struct PaymentWidget: Widget {
             .configurationDisplayName("Ближайший платёж")
             .description("Какой регулярный платёж следующий.")
             .supportedFamilies([.systemSmall, .accessoryRectangular])
+    }
+}
+
+struct ExtrasWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: WidgetKind.extras.rawValue, provider: Provider()) { WidgetView(entry: $0, kind: .extras) }
+            .configurationDisplayName("Доп. бюджет")
+            .description("Сколько свободно в дополнительных этого месяца.")
+            .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular])
     }
 }
 
@@ -221,6 +235,14 @@ struct WidgetContent: View {
             }
         case (.payment, _):
             PaymentFace(payment: data.payment, symbol: data.symbol)
+        case (.extras, .accessoryRectangular):
+            if let extras = data.extras {
+                LockCard(icon: LilacSymbol.wallet, title: Money.text(extras.amount, data.symbol), note: "\(extras.label) · \(extras.note)")
+            } else {
+                LockCard(icon: LilacSymbol.wallet, title: "—", note: "")
+            }
+        case (.extras, _):
+            ExtrasFace(extras: data.extras, symbol: data.symbol, wide: family == .systemMedium)
         }
     }
 
@@ -267,12 +289,14 @@ struct WidgetAmount: View {
     let amount: Double
     let symbol: String
     let size: CGFloat
+    /// Red whatever its sign, as how far past the extras.
+    var red = false
 
     var body: some View {
         Text(Money.text(amount, symbol))
             .font(.system(size: size, weight: .bold))
             .monospacedDigit()
-            .foregroundStyle(amount < -0.5 ? Lilac.red : Color.primary)
+            .foregroundStyle(amount < -0.5 || red ? Lilac.red : Color.primary)
             .lineLimit(1)
             .minimumScaleFactor(0.5)
             .contentTransition(.numericText(value: amount))
@@ -552,6 +576,88 @@ struct PaymentFace: View {
     }
 }
 
+/// «Доп. бюджет» as the main page's card tells it: the wallet on its tile, what is free of this month's extras, or how
+/// far past them in red, and what they are out of. Under it a bar of what is spent and what the plan holds; wide, with
+/// their figures.
+struct ExtrasFace: View {
+    let extras: WidgetData.Extras?
+    let symbol: String
+    let wide: Bool
+
+    var body: some View {
+        if let extras {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 12) {
+                    IconTile(icon: LilacSymbol.wallet, size: wide ? 40 : 34)
+                    if wide { figures(extras) }
+                }
+                if !wide {
+                    Spacer(minLength: 6)
+                    figures(extras)
+                }
+                Spacer(minLength: wide ? 8 : 6)
+                ExtrasBar(extras: extras).frame(height: wide ? 8 : 6)
+                if wide {
+                    HStack(spacing: 12) {
+                        legend("потрачено", extras.spent, Lilac.accent)
+                        legend("в плане", extras.planned, Lilac.soft)
+                    }
+                    .padding(.top, 8)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                IconTile(icon: LilacSymbol.wallet, size: 34)
+                Spacer()
+                Text("—").font(.title3.weight(.semibold)).foregroundStyle(Lilac.muted)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private func figures(_ extras: WidgetData.Extras) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(extras.label).font((wide ? Font.subheadline : .footnote).weight(.medium))
+            WidgetAmount(amount: extras.amount, symbol: symbol, size: wide ? 30 : 24, red: extras.over)
+            Text(extras.note).font(wide ? .footnote : .caption).foregroundStyle(Lilac.muted).lineLimit(1).minimumScaleFactor(0.8)
+        }
+    }
+
+    private func legend(_ label: String, _ amount: Double, _ color: Color) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text("\(label) \(Money.number(amount))").monospacedDigit()
+        }
+        .font(.caption)
+        .foregroundStyle(Lilac.muted)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+    }
+}
+
+/// The month's extras as a bar on a track: what is spent deep, what the plan holds lighter, and what is free left bare.
+struct ExtrasBar: View {
+    let extras: WidgetData.Extras
+
+    var body: some View {
+        GeometryReader { geometry in
+            let whole = max(extras.limit, extras.spent + extras.planned, 1)
+            let width = geometry.size.width
+            HStack(spacing: 2) {
+                if extras.spent > 0.5 {
+                    Capsule().fill(Lilac.accent).frame(width: max(width * extras.spent / whole, 6)).widgetAccentable()
+                }
+                if extras.planned > 0.5 {
+                    Capsule().fill(Lilac.soft).frame(width: max(width * extras.planned / whole, 6))
+                }
+            }
+            .frame(width: width, alignment: .leading)
+            .background(Lilac.track, in: Capsule())
+        }
+    }
+}
+
 /// A Lock Screen card as the reference draws its cards: an icon on a tile, a title or a figure, and a line under it.
 struct LockCard: View {
     let icon: String
@@ -590,6 +696,12 @@ struct LockCard: View {
 
 #Preview(as: .systemSmall) {
     SavingsWidget()
+} timeline: {
+    Entry(date: .now, data: .sample)
+}
+
+#Preview(as: .systemSmall) {
+    ExtrasWidget()
 } timeline: {
     Entry(date: .now, data: .sample)
 }

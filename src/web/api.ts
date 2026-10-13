@@ -22,6 +22,7 @@ import {
   extrasTotal,
   loadDashboard,
   monthWeekLine,
+  parseWeek,
   PLAN_AHEAD,
   PURCHASE_KINDS,
   purchaseActions,
@@ -250,10 +251,27 @@ function roundExtras(m: ExtrasSummary): ExtrasSummary {
   return { ...m, spent, planned, free };
 }
 
+/** A month's extras as a card tells them: what is free of the month's amount, or, past it, how far past it, in red. */
+function extrasCard(m: ExtrasSummary, symbol: string) {
+  const over = m.free < -0.5;
+  return { label: 'Доп. бюджет', amount: over ? -m.free : m.free, over, note: `${over ? 'сверх' : 'из'} ${money(MONTH_LIMIT, symbol)}` };
+}
+
+/** How many expenses of this month wait for a category, as the card that opens them says it: «3 новые». */
+function pendingCard(count: number) {
+  return {
+    count,
+    label: count === 0 ? 'Всё разобрано' : `${plural(count, ['трата ждёт', 'траты ждут', 'трат ждут'])} разбора`,
+    title: 'Разобрать операции',
+    note: `${count} ${plural(count, ['новая', 'новые', 'новых'])}`,
+  };
+}
+
 /**
  * The top of the week in the app: what is free with how full the week is, what the plan holds by kind, what was spent
- * today (in a past week, in all of it), how many expenses wait for a category, and when the data came from ZenMoney.
- * With round figures the week comes rounded, and so does today.
+ * today (in a past week, in all of it), how many expenses wait for a category, the extras of the week's month, which
+ * take the place of the expenses to sort once all are sorted, and when the data came from ZenMoney. With round figures
+ * the week comes rounded, and so do today and the extras.
  */
 function weekHome(d: ReturnType<typeof loadDashboard>, w: WeekSummary, data: EntityCollections, saved: SavedBudget, options: BudgetOptions) {
   const { today } = options;
@@ -275,7 +293,9 @@ function weekHome(d: ReturnType<typeof loadDashboard>, w: WeekSummary, data: Ent
         : phase === 'past'
           ? { label: 'Потрачено за неделю', amount: w.spent }
           : null,
-    pending: { count: pending, label: pending === 0 ? 'Всё разобрано' : `${plural(pending, ['трата ждёт', 'траты ждут', 'трат ждут'])} разбора` },
+    pending: pendingCard(pending),
+    // The month the card opens; null is the current week's, as the app asks for the current month.
+    extras: { ...extrasCard(saved.roundFigures ? roundExtras(d.extras) : d.extras, d.symbol), month: d.extras.month === monthOfWeek(d.current) ? null : d.extras.month },
     syncedAt: options.syncedAt ?? null,
   };
 }
@@ -286,7 +306,9 @@ function weekHome(d: ReturnType<typeof loadDashboard>, w: WeekSummary, data: Ent
  */
 export function weekScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { week?: string | null }) {
   const { today } = options;
-  const d = loadDashboard(data, saved, { ...options, week: options.week });
+  // The extras are of the month the shown week is in.
+  const shown = parseWeek(options.week, weekOf(today, saved.weekStart), saved.weekStart);
+  const d = loadDashboard(data, saved, { ...options, week: options.week, month: monthOfWeek(shown) });
   const { current } = d;
   const w = saved.roundFigures ? roundWeek(d.week) : d.week;
   const phase = w.week > current ? 'ahead' : w.week < current ? 'past' : 'current';
@@ -687,7 +709,8 @@ const SAVINGS_MONTHS = 10;
  * What the widgets show. The week: what is left of it, with its days, today among them and those with spending. Today:
  * what went into the week today and when the server last synced. The expenses of this month that wait for a category,
  * with the share of its expenses that do not. Savings: what this month's income is above its spending, as the
- * operations count them, against the month before and with the months before it. The next regular payment.
+ * operations count them, against the month before and with the months before it. The next regular payment. The extras
+ * of this month as the main page's card tells them, with what is spent of them and what the plan holds for them.
  */
 export function widgetScreen(data: EntityCollections, saved: SavedBudget, options: { today: DateString; syncedAt?: string | null }) {
   const { today } = options;
@@ -721,6 +744,7 @@ export function widgetScreen(data: EntityCollections, saved: SavedBudget, option
     },
     savings: savingsOf(data, saved, today, d.symbol),
     payment: nextPayment(data, saved, today),
+    extras: { ...extrasCard(d.extras, d.symbol), limit: MONTH_LIMIT, spent: d.extras.spent, planned: d.extras.planned },
   };
 }
 

@@ -186,12 +186,15 @@ struct Figure: Decodable, Hashable {
 }
 
 /// The top of the week: what is free, what the plan holds by kind, what was spent today (in a past week, in all of
-/// it; nothing in a week ahead), how many expenses wait for a category, and when the server last synced.
+/// it; nothing in a week ahead), how many expenses wait for a category, the extras of the week's month, and when the
+/// server last synced.
 struct WeekHome: Decodable, Hashable {
     let free: Free
     let reserved: Reserved
     let spent: Figure?
     let pending: Pending
+    /// In the place of the expenses to sort once all are sorted; a server from before them sends none.
+    let extras: Extras?
     /// An ISO moment.
     let syncedAt: String?
 
@@ -204,7 +207,21 @@ struct WeekHome: Decodable, Hashable {
 
     struct Pending: Decodable, Hashable {
         let count: Int
+        /// 3 траты ждут разбора; Всё разобрано.
         let label: String
+        /// Разобрать операции, over «3 новые»; a server from before the cards sends neither.
+        let title: String?
+        let note: String?
+    }
+
+    /// Доп. бюджет: what is free of the month's extras, «из 100 000 ₽»; past them, how far past, red, «сверх 100 000 ₽».
+    struct Extras: Decodable, Hashable {
+        let label: String
+        let amount: Double
+        let over: Bool
+        let note: String
+        /// The month the card opens; nil is the current one.
+        let month: String?
     }
 
     /// What is free, with how full the week is for the wave on the circle: «enough», «low» (less than a day's share of

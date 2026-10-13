@@ -154,13 +154,36 @@ describe('api', () => {
         flexible: { label: 'гибкое', amount: 0 },
       },
       spent: { label: 'Сегодня потрачено', amount: 40_473 },
-      pending: { count: 2, label: 'траты ждут разбора' },
+      pending: { count: 2, label: 'траты ждут разбора', title: 'Разобрать операции', note: '2 новые' },
+      extras: { label: 'Доп. бюджет', amount: 80_000, over: false, note: 'из 100 000 ₽', month: null },
       syncedAt: '2026-10-05T11:42:00.000Z',
     });
     assert.equal(week.plan[0].details, 'Обязательная · оплачено 473 ₽ из 8 000 ₽');
 
     const past = plain(weekScreen(data(), saved(), { ...budget, week: '2026-09-28' }));
     assert.deepEqual([past.home.free.label, past.home.spent], ['Итог недели', { label: 'Потрачено за неделю', amount: 30_000 }]);
+  });
+
+  it('gives the main page the extras of the shown week’s month, for when nothing waits to be sorted', () => {
+    const sorted = { ...saved(), categorizations: new Map([['transfer', { tag: 'groceries' }], ['last-week', { tag: 'groceries' }]]) };
+    const week = plain(weekScreen(data(), sorted, budget));
+    assert.deepEqual(week.home.pending, { count: 0, label: 'Всё разобрано', title: 'Разобрать операции', note: '0 новых' });
+    assert.deepEqual(week.home.extras, { label: 'Доп. бюджет', amount: 80_000, over: false, note: 'из 100 000 ₽', month: null }, 'the jacket is planned from them');
+
+    // The week of 28 September has its Thursday in October, the current month the card opens as null; the one before it is September's.
+    assert.equal(plain(weekScreen(data(), sorted, { ...budget, week: '2026-09-28' })).home.extras.month, null);
+    assert.deepEqual(plain(weekScreen(data(), sorted, { ...budget, week: '2026-09-21' })).home.extras, {
+      label: 'Доп. бюджет',
+      amount: 100_000,
+      over: false,
+      note: 'из 100 000 ₽',
+      month: '2026-09',
+    });
+
+    // 40 000 and 30 000 moved there and 20 000 planned are 90 000; a 15 000 purchase more goes 5 000 past them.
+    const over = saved([['transfer', 'extra'], ['last-week', 'extra']]);
+    over.purchases.push({ id: 5, title: 'Велосипед', amount: 15_000, week: '2026-10-12', envelope: 'extra', kind: 'flexible', done: false });
+    assert.deepEqual(plain(weekScreen(data(), over, budget)).home.extras, { label: 'Доп. бюджет', amount: 5_000, over: true, note: 'сверх 100 000 ₽', month: null });
   });
 
   it('rounds the figures on top to the hundred when asked, adding up to what the week allows', () => {
@@ -180,6 +203,10 @@ describe('api', () => {
     assert.deepEqual(week.limit, { amount: 45_000, usual: 45_000 }, 'what the week allows is the user’s own figure');
     assert.deepEqual(week.days[0].items.map((o: { amount: number }) => o.amount), [473, 40_000], 'expenses keep their amounts');
     assert.deepEqual(week.plan, plain(weekScreen(data(), { ...paid, roundFigures: false }, { ...budget, today: '2026-10-05' })).plan, 'and so do purchases');
+
+    const lamp = saved();
+    lamp.purchases.push({ id: 5, title: 'Лампа', amount: 1_234, week: '2026-10-05', envelope: 'extra', kind: 'flexible', done: false });
+    assert.equal(plain(weekScreen(data(), { ...lamp, roundFigures: true }, budget)).home.extras.amount, 78_800, '21 234 planned of the extras leave 78 766');
 
     const later = plain(weekScreen(data(), { ...saved(), roundFigures: true }, { ...budget, today: '2026-10-06' }));
     assert.deepEqual(later.home.spent, { label: 'Сегодня потрачено', amount: 0 });
@@ -499,6 +526,15 @@ describe('api', () => {
       note: 'на 70 000 ₽',
     });
     assert.deepEqual(widget.payment, { title: 'Школа, ЛДК', amount: 45_000, date: '7 октября', when: 'завтра' });
+    assert.deepEqual(widget.extras, {
+      label: 'Доп. бюджет',
+      amount: 80_000,
+      over: false,
+      note: 'из 100 000 ₽',
+      limit: 100_000,
+      spent: 0,
+      planned: 20_000,
+    });
 
     const sorted = { ...saved(), categorizations: new Map([['transfer', { tag: 'groceries' }], ['last-week', { tag: 'groceries' }]]) };
     const done = plain(widgetScreen(data(), sorted, { today })).pending;

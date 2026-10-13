@@ -1,7 +1,8 @@
 import Foundation
 
 /// What the widgets show, as /api/widget sends it: the week with its days, what was spent today, the expenses of this
-/// month that wait for a category, what this month saved against the months before it, and the next regular payment.
+/// month that wait for a category, what this month saved against the months before it, the next regular payment, and
+/// the extras of this month.
 struct WidgetData: Codable, Hashable {
     let symbol: String
     let week: Week
@@ -9,6 +10,8 @@ struct WidgetData: Codable, Hashable {
     let pending: Pending
     let savings: Savings
     let payment: Payment?
+    /// A server from before the extras' widget sends none.
+    let extras: Extras?
 
     struct Week: Codable, Hashable {
         /// Неделя.
@@ -89,6 +92,18 @@ struct WidgetData: Codable, Hashable {
         let when: String
     }
 
+    /// Доп. бюджет: what is free of the month's extras, «из 100 000 ₽», or how far past them, «сверх 100 000 ₽», with
+    /// what is spent of them and what the plan holds for them.
+    struct Extras: Codable, Hashable {
+        let label: String
+        let amount: Double
+        let over: Bool
+        let note: String
+        let limit: Double
+        let spent: Double
+        let planned: Double
+    }
+
     static let sample = WidgetData(
         symbol: "₽",
         week: Week(
@@ -110,6 +125,7 @@ struct WidgetData: Codable, Hashable {
                 Month(month: "2026-\(String(format: "%02d", index + 1))", amount: Double(thousands) * 1000)
             }
         ),
-        payment: Payment(title: "Ипотека", amount: 29_000, date: "21 октября", when: "через 12 дней")
+        payment: Payment(title: "Ипотека", amount: 29_000, date: "21 октября", when: "через 12 дней"),
+        extras: Extras(label: "Доп. бюджет", amount: 68_500, over: false, note: "из 100 000 ₽", limit: 100_000, spent: 17_600, planned: 13_900)
     )
 }

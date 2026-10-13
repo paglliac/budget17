@@ -23,3 +23,10 @@ enum Lilac {
     static let waveLow = Color(light: 0xD7C5FB, dark: 0x4B3E95)
     static let waveOver = Color(light: 0xFF5D5A, dark: 0xE5484D)
 }
+
+enum LilacSymbol {
+    /// The extras' wallet, as the user's picture draws it; iOS 17 has only the pass.
+    static var wallet: String {
+        if #available(iOS 18, macOS 15, *) { "wallet.bifold" } else { "wallet.pass" }
+    }
+}
