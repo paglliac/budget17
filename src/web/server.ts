@@ -35,6 +35,7 @@ import {
   spendingScreen,
   uncategorizedScreen,
   weekScreen,
+  weekWhyScreen,
   widgetScreen,
   wishScreen,
   wishesScreen,
@@ -438,6 +439,8 @@ function apiScreen(path: string, params: URLSearchParams, { today, demo }: Conte
     }
     case '/api/week':
       return weekScreen(collections(), loadSettings(savedBudget), { ...budget, week: params.get('week') });
+    case '/api/week-why':
+      return weekWhyScreen(collections(), loadSettings(savedBudget), { ...budget, week: params.get('week'), basis: params.get('basis') });
     case '/api/month':
       return monthScreen(collections(), loadSettings(savedBudget), { ...budget, month: params.get('month'), incomes: loadSettings((s) => s.incomes()) });
     case '/api/operations':

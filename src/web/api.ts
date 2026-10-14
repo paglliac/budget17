@@ -31,6 +31,7 @@ import {
   type WeekSummary,
   type Wish,
 } from '../week.ts';
+import { whyByPlan, whySinceEvening, type Cause, type WhyBasis } from '../week-why.ts';
 import { covered, savingsTaken, stepMonth, type Step } from '../wish-plans.ts';
 import type { DateString, EntityCollections } from '../zenmoney/types.ts';
 import { capitalize, dayHeading, dayMonth, fromToday, money, monthName, num, plural, ROUND_STEP, roundParts, timeOn, weekLabel, WEEKDAYS, WEEKDAYS_FULL } from './format.ts';
@@ -38,6 +39,7 @@ import { CATEGORY_ICONS, categoryIcon, ENTRY_ICONS, entryIcon, type IconName } f
 import { recentMonths } from './pages/chrome.ts';
 import {
   adviceText,
+  budgetOf,
   dueLabel,
   extrasTotal,
   loadDashboard,
@@ -393,6 +395,133 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
     source: options.source,
     canSync: options.canSync,
   };
+}
+
+/** The two ways the prototype tells a week's fall, as its switch names them. */
+const WHY_BASES: ReadonlyArray<{ value: WhyBasis; label: string }> = [
+  { value: 'plan', label: 'От плана' },
+  { value: 'evening', label: 'Со вчера' },
+];
+
+/** What a category's title names, by the icon its words give; Стоматолог and Здоровье и спорт are both health. */
+function kindOfTitle(title: string): string | null {
+  const icon = categoryIcon(title);
+  return icon === 'tag' ? null : icon;
+}
+
+/**
+ * Why a week went below zero (prototype/week-why), opened from the red figure on the app's circle: what it was headed
+ * for, where it is, and the causes that add up to the change, below zero first, the free rest opened when it is first. `basis` picks how it is told (see
+ * week-why.ts); a week ahead has no evening, so only the plan. An expense opens to be marked, the free rest opens to
+ * its categories, a purchase or the plan opens the plan. With round figures the three figures on top are to the
+ * hundred, what is free as on the circle; the causes keep their amounts.
+ */
+export function weekWhyScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { week?: string | null; basis?: string | null }) {
+  const { today } = options;
+  const shown = parseWeek(options.week, weekOf(today, saved.weekStart), saved.weekStart);
+  const d = loadDashboard(data, saved, { ...options, week: shown, month: monthOfWeek(shown) });
+  const { current, symbol } = d;
+  const phase = shown > current ? 'ahead' : shown < current ? 'past' : 'current';
+  const bases = phase === 'ahead' ? WHY_BASES.filter((b) => b.value === 'plan') : WHY_BASES;
+  const basis = bases.find((b) => b.value === options.basis)?.value ?? 'plan';
+  const budget = budgetOf(data, saved, { today, from: shown });
+  const why = basis === 'evening' ? whySinceEvening(budget, shown, today, kindOfTitle) : whyByPlan(budget, shown, kindOfTitle);
+  const round = (amount: number) => (saved.roundFigures ? Math.round(amount / ROUND_STEP) * ROUND_STEP : amount);
+  const now = saved.roundFigures ? roundWeek(d.week).free : why.now;
+  const was = round(why.was);
+  const wasLabel =
+    why.basis === 'plan' ? 'По плану' : why.since === null ? 'В начале недели' : why.since === addDays(today, -1) ? 'Вчера вечером' : `${dayMonth(why.since)} вечером`;
+  // The free rest opens to its categories when it is what took the week down the most.
+  const causes = why.causes.map((cause, i) => ({ ...causeRow(cause, d.marking, symbol), opened: i === 0 && cause.kind === 'free' && cause.amount < 0 }));
+  const minus = why.causes.filter((c) => c.amount < 0).reduce((sum, c) => sum + c.amount, 0);
+  const plus = why.causes.filter((c) => c.amount > 0).reduce((sum, c) => sum + c.amount, 0);
+  return {
+    symbol,
+    week: shown,
+    phase,
+    title: 'Почему неделя ушла в минус',
+    subtitle: `Неделя ${weekLabel(shown)}`,
+    basis,
+    bases,
+    was: { label: wasLabel, amount: was },
+    now: { label: phase === 'current' ? 'Сейчас' : phase === 'past' ? 'Итог недели' : 'Будет', amount: now },
+    change: { label: 'Изменение', amount: now - was },
+    causes,
+    contribution: {
+      label: 'Вклад в изменение',
+      parts: why.causes.map((c) => ({ value: Math.abs(c.amount), tone: c.amount < 0 ? 'red' : 'green' })),
+      minus: { label: 'в минус', amount: minus },
+      plus: { label: 'в плюс', amount: plus },
+    },
+  };
+}
+
+/**
+ * A cause as a row: an expense by its title in the week with what tells why, the free rest with its categories under
+ * it, a purchase with what it was planned for and what it cost. The amount is what the cause did to what is free. Its
+ * id is the same whichever way the fall is told, so what is opened stays with its cause.
+ */
+function causeRow(cause: Cause, m: Pick<Marking, 'marks' | 'purchases'>, symbol: string) {
+  const id = `cause-${cause.kind === 'misplaced' || cause.kind === 'spending' ? cause.spending.id : cause.kind === 'purchase' ? `purchase-${cause.status.purchase.id}` : cause.kind}`;
+  const fields = { amount: cause.amount, spending: null as string | null, parts: [] as Row[], plan: false };
+  switch (cause.kind) {
+    case 'misplaced':
+    case 'spending': {
+      const o = cause.spending;
+      const why =
+        cause.kind === 'misplaced'
+          ? `в плане «${cause.purchase.title}» ${money(cause.left, symbol)} из доп.`
+          : cause.purchase && Math.abs(cause.amount + o.amount) >= 0.5
+            ? `из плана «${cause.purchase.title}» ${money(cause.amount + o.amount, symbol)}`
+            : markingDetails(o);
+      return { ...expenseRow(m, o), id, details: why, ...fields, spending: o.id };
+    }
+    case 'free': {
+      const byCategory = new Map<string, { category: Operation['category']; spending: Operation[] }>();
+      for (const o of cause.spending) {
+        const key = o.category?.id ?? '';
+        byCategory.set(key, { category: o.category, spending: [...(byCategory.get(key)?.spending ?? []), o] });
+      }
+      const parts = [...byCategory.values()]
+        .map(({ category, spending }) => ({ category, spending, amount: spending.reduce((sum, o) => sum + o.amount, 0) }))
+        .sort((a, b) => b.amount - a.amount)
+        .map(({ category, spending, amount }, i) =>
+          row({
+            id: `${id}-${i}`,
+            title: category?.title ?? 'Без категории',
+            details: `${spending.length} ${plural(spending.length, ['трата', 'траты', 'трат'])}`,
+            ...categoryLook(category),
+            amount: -amount,
+          }),
+        );
+      return {
+        ...row({ id, title: 'Свободные траты', details: `${money(cause.spent, symbol)} из ${money(cause.allowed, symbol)}`, icon: 'wallet', color: toneColor('violet') }),
+        ...fields,
+        parts,
+      };
+    }
+    case 'purchase': {
+      const p = cause.status.purchase;
+      return {
+        ...row({
+          id,
+          title: p.title,
+          details: `план ${money(p.amount, symbol)} → ${money(cause.status.covered, symbol)}`,
+          icon: categoryIcon(p.title),
+          color: categoryColor(`purchase-${p.id}`, null, p.title),
+          mark: p.envelope,
+        }),
+        ...fields,
+        plan: true,
+      };
+    }
+    case 'plan':
+      return {
+        ...row({ id, title: 'План больше недели', details: `${money(cause.planned, symbol)} из ${money(cause.limit, symbol)}`, icon: 'calendar', color: toneColor('violet') }),
+        ...fields,
+        plan: true,
+      };
+  }
 }
 
 /**

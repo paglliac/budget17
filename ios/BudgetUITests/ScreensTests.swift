@@ -23,6 +23,29 @@ final class ScreensTests: XCTestCase {
         XCTAssert(reserved.waitForExistence(timeout: 15), "the main page loads")
         shot("home")
 
+        // A week past its amount tells why from its red figure, by the plan and since the evening.
+        let why = app.buttons["week-why"]
+        if why.exists {
+            why.tap()
+            if app.buttons["why-plan"].waitForExistence(timeout: 10) {
+                shot("week-why")
+                app.swipeUp()
+                let free = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Свободные траты'")).firstMatch
+                if free.exists { free.tap() }
+                shot("week-why-more")
+                app.swipeDown()
+                if pill("Со вчера").exists {
+                    pill("Со вчера").tap()
+                    sleep(2)
+                    shot("week-why-evening")
+                }
+            } else {
+                XCTFail("why the week went below zero opens")
+            }
+            tab("Главная")
+            XCTAssert(reserved.wait(for: \.isHittable, toEqual: true, timeout: 5), "«Главная» returns to the main page")
+        }
+
         // With every expense sorted, the extras' card opens the month on them.
         let extras = app.buttons["extras"]
         if extras.exists {

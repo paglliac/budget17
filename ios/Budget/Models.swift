@@ -242,6 +242,58 @@ struct WeekHome: Decodable, Hashable {
     }
 }
 
+/// Why a week went below zero (prototype/week-why): what it was headed for, where it is and the change, told the way
+/// `basis` picks of `bases`; the causes that add up to the change, below zero first, and how much each did as a bar.
+struct WeekWhyScreen: Decodable {
+    let symbol: String
+    let week: String
+    /// past, current or ahead.
+    let phase: String
+    let title: String
+    let subtitle: String
+    let basis: String
+    let bases: [Option]
+    let was: Figure
+    let now: Figure
+    let change: Figure
+    let causes: [WhyCause]
+    let contribution: Contribution
+
+    struct Contribution: Decodable, Hashable {
+        let label: String
+        /// Each cause by its size, red below zero, green above, in the order of the causes.
+        let parts: [Part]
+        let minus: Figure
+        let plus: Figure
+
+        struct Part: Decodable, Hashable {
+            let value: Double
+            let tone: String
+        }
+    }
+}
+
+/// A cause of a week's fall: its amount is what it did to what is free. An expense opens to be marked, the free rest
+/// opens to its categories, a purchase or the plan opens the plan.
+struct WhyCause: Decodable, Hashable, Identifiable {
+    let row: Row
+    let spending: String?
+    let parts: [Row]
+    let plan: Bool
+    /// Shown opened to its parts at first, as the free rest is when it took the week down the most.
+    let opened: Bool
+    var id: String { row.id }
+
+    init(from decoder: Decoder) throws {
+        row = try Row(from: decoder)
+        let c = try decoder.extra()
+        spending = try c.optional("spending")
+        parts = try c.optional("parts") ?? []
+        plan = try c.optional("plan") ?? false
+        opened = try c.optional("opened") ?? false
+    }
+}
+
 /// What a week allows and the usual amount. Another amount posts to /api/week-limits/:week, the usual one back to
 /// /api/week-limits/:week/delete.
 struct WeekLimit: Decodable, Hashable {
