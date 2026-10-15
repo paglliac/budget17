@@ -397,12 +397,6 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
   };
 }
 
-/** What a category's title names, by the icon its words give; Стоматолог and Здоровье и спорт are both health. */
-function kindOfTitle(title: string): string | null {
-  const icon = categoryIcon(title);
-  return icon === 'tag' ? null : icon;
-}
-
 /**
  * Why a week went below zero (prototype/week-why), opened from the red figure on the app's circle: what was free just
  * before it went there, where it is and the change, then up to three sections, each left out when empty: the expense
@@ -417,7 +411,7 @@ export function weekWhyScreen(data: EntityCollections, saved: SavedBudget, optio
   const d = loadDashboard(data, saved, { ...options, week: shown, month: monthOfWeek(shown) });
   const { current, symbol } = d;
   const phase = shown > current ? 'ahead' : shown < current ? 'past' : 'current';
-  const why = weekWhy(budgetOf(data, saved, { today, from: shown }), shown, kindOfTitle);
+  const why = weekWhy(budgetOf(data, saved, { today, from: shown }), shown);
   const round = (amount: number) => (saved.roundFigures ? Math.round(amount / ROUND_STEP) * ROUND_STEP : amount);
   const now = saved.roundFigures ? roundWeek(d.week).free : why.now;
   const was = why.last.length === 0 ? now : round(why.was);
@@ -425,7 +419,7 @@ export function weekWhyScreen(data: EntityCollections, saved: SavedBudget, optio
   const days = new Set(why.last.flatMap((s) => (s.kind === 'spending' ? [s.spending.date] : [])));
   const total = (rows: Array<{ amount: number | null }>) => rows.reduce((sum, r) => sum + (r.amount ?? 0), 0);
   const last = why.last.map((s) => stepRow(s, d.marking, symbol, days.size > 1 ? today : null));
-  const over = why.over.map((o) => overspendRow(o, d.marking, symbol));
+  const over = why.over.map((o) => overspendRow(o, symbol));
   const optional = why.optional.map((o) => ({
     ...expenseRow(d.marking, o),
     id: `optional-${o.id}`,
@@ -466,20 +460,16 @@ function stepRow(step: WhyStep, m: Pick<Marking, 'marks' | 'purchases'>, symbol:
     };
   }
   const o = step.spending;
-  const details = step.misplaced
-    ? `в плане «${step.misplaced.purchase.title}» ${money(step.misplaced.left, symbol)} из доп.`
-    : step.purchase && Math.abs(step.amount + o.amount) >= 0.5
-      ? `из плана «${step.purchase.title}» ${money(step.amount + o.amount, symbol)}`
-      : markingDetails(o);
+  const details =
+    step.purchase && Math.abs(step.amount + o.amount) >= 0.5 ? `из плана «${step.purchase.title}» ${money(step.amount + o.amount, symbol)}` : markingDetails(o);
   return { ...expenseRow(m, o), id: `last-${o.id}`, details, amount: step.amount, plan: false, day: today === null ? null : dayTitle(o.date, today) };
 }
 
 /**
- * What cost more than planned as a row: a purchase with what it was planned for and what it cost, an expense the week
- * paid by the purchase of the extras it may have paid, or the plan past the week. The amount is how far past the plan.
- * The expense opens to be marked, so it can be linked; the others open the plan.
+ * What cost more than planned as a row: a purchase with what it was planned for and what it cost, or the plan past the
+ * week. The amount is how far past the plan; it opens the plan.
  */
-function overspendRow(o: Overspend, m: Pick<Marking, 'marks' | 'purchases'>, symbol: string) {
+function overspendRow(o: Overspend, symbol: string) {
   const fields = { amount: o.amount, spending: null as string | null, optional: false, plan: true, day: null };
   switch (o.kind) {
     case 'purchase': {
@@ -489,21 +479,6 @@ function overspendRow(o: Overspend, m: Pick<Marking, 'marks' | 'purchases'>, sym
         ...fields,
       };
     }
-    case 'misplaced':
-      return {
-        ...row({
-          id: `over-${o.spending.id}`,
-          title: o.purchase.title,
-          details: `план ${money(o.left, symbol)} из доп. → ${money(o.spending.amount, symbol)}`,
-          icon: categoryIcon(o.purchase.title),
-          color: categoryColor(`purchase-${o.purchase.id}`, null, o.purchase.title),
-          mark: envelopeOf(m, o.spending),
-        }),
-        ...fields,
-        spending: o.spending.id,
-        optional: o.spending.optional,
-        plan: false,
-      };
     case 'plan':
       return {
         ...row({ id: 'over-plan', title: 'План больше недели', details: `${money(o.planned, symbol)} из ${money(o.limit, symbol)}`, icon: 'calendar', color: toneColor('violet') }),
