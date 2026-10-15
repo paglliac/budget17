@@ -3,7 +3,7 @@
 DB := data/zenmoney.db
 
 .DEFAULT_GOAL := help
-.PHONY: help install sync balances web claude-review resync pull-data test typecheck ios-check ios-install check
+.PHONY: help install sync balances web claude-review resync pull-data restore-data test typecheck ios-check ios-install check
 
 help: ## Список команд
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-13s %s\n", $$1, $$2}'
@@ -29,6 +29,9 @@ resync: ## Удалить копию ZenMoney и скачать всё зано�
 
 pull-data: ## Базы с сервера budget.gang.su в data/ этой копии (VDS=… — другой ssh-хост)
 	@VDS=$(VDS) scripts/pull-data.sh
+
+restore-data: ## Снимок баз из .scratch в data/ этой копии, даты — на сегодня (DATASET=week-minus/2026-10-14, TODAY=…)
+	@node scripts/restore-data.ts $(if $(DATASET),--dataset $(DATASET)) $(if $(TODAY),--today $(TODAY))
 
 test: ## Тесты
 	npm test
