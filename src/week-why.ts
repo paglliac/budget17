@@ -1,9 +1,8 @@
-// Why a week went below zero (prototype/week-why): what made what is free of it fall past nothing, told two ways for
-// the user to compare. By the plan, the week ends at zero when its purchases cost what was planned and the free rest,
-// what the week allows beyond them, is spent as the user likes; the causes are what went otherwise. Since the evening,
-// what was free at the end of the day before and every expense since, with what it took. Either way an expense
-// counted in the week that may have paid a purchase planned in the extras is told as such: then the week paid for what
-// the extras held money for. Pure functions over a Budget (see week.ts).
+// Why a week went below zero (prototype/week-why), three ways at once. The expense that took what is free of the week
+// below zero for the last time and every one after it, whatever day they came, so a day missed hides nothing; the
+// purchases that cost more than planned, an expense the week paid for a purchase planned in the extras among them;
+// and the week's expenses the user marked optional, with where the week would be without them. Pure functions over a
+// Budget (see week.ts).
 
 import { addDays } from './dates.ts';
 import type { Operation } from './ledger.ts';
@@ -11,31 +10,44 @@ import { paymentChoices } from './categorization.ts';
 import { envelopeOf, summarizeWeek, type Budget, type Purchase, type PurchaseStatus } from './week.ts';
 import type { DateString } from './zenmoney/types.ts';
 
-/** What a week's fall is told against: its plan, or the evening of the day before. */
-export type WhyBasis = 'plan' | 'evening';
+/** What made what is free of the week change: an expense with what it took of it, or the plan held at the start. */
+export type WhyStep =
+  | {
+      kind: 'spending';
+      /** What it took of what is free: less than the expense when the plan held money for its purchase. */
+      amount: number;
+      spending: Operation;
+      /** The purchase of the week it paid; null when it paid none. */
+      purchase: Purchase | null;
+      /** A purchase of the extras planned about then that it may have paid instead (see misplacedSpending). */
+      misplaced: { purchase: Purchase; left: number } | null;
+    }
+  /** What the plan held at the week's start, when it alone was more than the week allows. */
+  | { kind: 'plan'; amount: number };
 
-export type Cause =
-  /** An expense counted in the week that may have paid a purchase of the extras planned about then and not bought yet. */
-  | { kind: 'misplaced'; amount: number; spending: Operation; purchase: Purchase; left: number }
-  /** What the free rest of the week came to: what it allowed less what was spent of it, below zero past it. */
-  | { kind: 'free'; amount: number; allowed: number; spent: number; spending: Operation[] }
-  /** The purchases of the week planned for more than the week allows: how far the plan alone is past it. */
-  | { kind: 'plan'; amount: number; planned: number; limit: number }
-  /** A purchase of the week's money that cost more than planned (below zero), or less and finished (above). */
+export type Overspend =
+  /** A purchase of the week's money that cost more than planned. */
   | { kind: 'purchase'; amount: number; status: PurchaseStatus }
-  /** An expense since the evening with what it took of what is free: less than its amount when the plan held it. */
-  | { kind: 'spending'; amount: number; spending: Operation; purchase: Purchase | null };
+  /** An expense the week paid that may have paid a purchase of the extras, for more than was left of it. */
+  | { kind: 'misplaced'; amount: number; spending: Operation; purchase: Purchase; left: number }
+  /** The purchases of the week planned for more than the week allows. */
+  | { kind: 'plan'; amount: number; planned: number; limit: number };
 
 export interface WeekWhy {
-  basis: WhyBasis;
-  /** What the week was headed for: nothing left by the plan, or what was free at the end of `since`. */
+  /** What was free just before the week went below zero for the last time; the week's amount when the plan alone was past it. */
   was: number;
-  /** The day `was` is the evening of; null by the plan, and since the evening on the week's first day. */
+  /** The day of the expense that took the week below zero; null when the plan alone was past it from the start. */
   since: DateString | null;
   /** What is free of the week now; of a past week, how it ended. */
   now: number;
-  /** Those below zero first, the largest first, then those above; they add up to now − was. */
-  causes: Cause[];
+  /** From `was` to `now`, in the order they came: the expense that crossed zero, or the plan, first. */
+  last: WhyStep[];
+  /** What cost more than planned, the largest first; amounts below zero. */
+  over: Overspend[];
+  /** The week's own expenses the user marked optional, the largest first. */
+  optional: Operation[];
+  /** Where the week would be without them. */
+  withoutOptional: number;
 }
 
 /**
@@ -45,45 +57,14 @@ export interface WeekWhy {
 export type KindOf = (title: string) => string | null;
 
 /**
- * Why a week stands where it does against its plan, from nothing: the expenses that may have paid a purchase of the
- * extras, purchases that cost more or less than planned, the plan itself when it is more than the week allows, and
- * what the rest of the expenses counted in the week came to against the free rest.
+ * Why a week stands where it does. What is free is walked through the week's expenses in the order they came, against
+ * the plan as it is now: it starts at the week's amount less what its purchases hold, an expense counted in the week
+ * takes all of it, one paying a purchase of the week takes only what goes past the plan. Purchases finished are taken
+ * as finished from the start, since when they were is not kept.
  */
-export function whyByPlan(budget: Budget, week: DateString, kindOf: KindOf): WeekWhy {
+export function weekWhy(budget: Budget, week: DateString, kindOf: KindOf): WeekWhy {
   const w = summarizeWeek(budget, week);
   const end = addDays(week, 6);
-  const fromWeek = w.purchases.filter((p) => p.purchase.envelope === 'week');
-  const ofPlan = new Set(fromWeek.map((p) => p.purchase.id));
-  const misplaced = misplacedSpending(budget, week, kindOf);
-  const causes: Cause[] = [...misplaced.values()].map(({ spending, purchase, left }) => ({ kind: 'misplaced', amount: -spending.amount, spending, purchase, left }));
-  for (const status of fromWeek) {
-    // What the purchase gave back to the week beyond what the week's own expenses paid of it.
-    const paidHere = sum(status.paid.filter((o) => o.date >= week && o.date <= end && envelopeOf(budget, o) === 'week').map((o) => o.amount));
-    const amount = status.purchase.amount - status.left - paidHere;
-    if (Math.abs(amount) >= 0.5) causes.push({ kind: 'purchase', amount, status });
-  }
-  const planned = sum(fromWeek.map((p) => p.purchase.amount));
-  const rest = w.limit - planned;
-  if (rest < -0.5) causes.push({ kind: 'plan', amount: rest, planned, limit: w.limit });
-  const free = w.spending.filter((o) => envelopeOf(budget, o) === 'week' && !(o.purchase && ofPlan.has(o.purchase.id)) && !misplaced.has(o.id));
-  const spent = sum(free.map((o) => o.amount));
-  const allowed = Math.max(rest, 0);
-  if (spent >= 0.5 || allowed >= 0.5) causes.push({ kind: 'free', amount: allowed - spent, allowed, spent, spending: free });
-  return { basis: 'plan', was: 0, since: null, now: w.free, causes: ordered(causes) };
-}
-
-/**
- * Why a week stands where it does against the evening before its last day so far: yesterday's in the current week,
- * the one before its last day in a past one. Every expense since that counts in the week or pays one of its
- * purchases is a cause, with what it took of what is free; on the week's first day `was` is its start. Purchases
- * finished are taken as finished then too, since when they were is not kept.
- */
-export function whySinceEvening(budget: Budget, week: DateString, today: DateString, kindOf: KindOf): WeekWhy {
-  const w = summarizeWeek(budget, week);
-  const end = addDays(week, 6);
-  const last = today < end ? today : end;
-  const since = addDays(last, -1) >= week ? addDays(last, -1) : null;
-  const from = since ?? addDays(week, -1);
   const fromWeek = new Map(w.purchases.filter((p) => p.purchase.envelope === 'week').map((p) => [p.purchase.id, p]));
   // What the plan holds for each purchase as its expenses come; a finished one holds nothing.
   const covered = new Map<number, number>();
@@ -91,7 +72,6 @@ export function whySinceEvening(budget: Budget, week: DateString, today: DateStr
     const paid = covered.get(status.purchase.id) ?? 0;
     return status.purchase.done || paid >= status.purchase.amount - 0.005 ? 0 : status.purchase.amount - paid;
   };
-  const byDate = [...budget.expenses].sort((a, b) => a.date.localeCompare(b.date) || a.created - b.created);
   const pay = (o: Operation) => {
     const status = o.purchase ? fromWeek.get(o.purchase.id) : undefined;
     if (!status) return 0;
@@ -100,25 +80,53 @@ export function whySinceEvening(budget: Budget, week: DateString, today: DateStr
     return before - leftOf(status);
   };
   const counts = (o: Operation) => o.date >= week && o.date <= end && envelopeOf(budget, o) === 'week';
-  let spent = 0;
-  for (const o of byDate.filter((o) => o.date <= from)) {
-    pay(o);
-    if (counts(o)) spent += o.amount;
-  }
-  const was = w.limit - spent - sum([...fromWeek.values()].map(leftOf));
+  const byDate = [...budget.expenses].sort((a, b) => a.date.localeCompare(b.date) || a.created - b.created);
+  for (const o of byDate.filter((o) => o.date < week)) pay(o);
+  const held = sum([...fromWeek.values()].map(leftOf));
   const misplaced = misplacedSpending(budget, week, kindOf);
-  const causes: Cause[] = [];
-  for (const o of byDate.filter((o) => o.date > from)) {
+
+  const steps: WhyStep[] = held >= 0.5 ? [{ kind: 'plan', amount: -held }] : [];
+  for (const o of byDate.filter((o) => o.date >= week && o.date <= end)) {
     const amount = pay(o) - (counts(o) ? o.amount : 0);
     if (Math.abs(amount) < 0.5) continue;
     const found = misplaced.get(o.id);
-    causes.push(
-      found
-        ? { kind: 'misplaced', amount, spending: o, purchase: found.purchase, left: found.left }
-        : { kind: 'spending', amount, spending: o, purchase: o.purchase ? (fromWeek.get(o.purchase.id)?.purchase ?? null) : null },
-    );
+    const purchase = o.purchase ? (fromWeek.get(o.purchase.id)?.purchase ?? null) : null;
+    steps.push({ kind: 'spending', amount, spending: o, purchase, misplaced: found ? { purchase: found.purchase, left: found.left } : null });
   }
-  return { basis: 'evening', was, since, now: w.free, causes: ordered(causes) };
+  // The last step that took what is free from zero or more below it; the plan's when the week never was above zero.
+  let free = w.limit;
+  let crossed = -1;
+  steps.forEach((s, i) => {
+    if (free >= -0.005 && free + s.amount < -0.005) crossed = i;
+    free += s.amount;
+  });
+  const fromPlan = crossed === 0 && steps[0]?.kind === 'plan';
+  const last = crossed < 0 ? [] : steps.slice(crossed);
+  const was = crossed < 0 ? w.free : w.limit + sum(steps.slice(0, crossed).map((s) => s.amount));
+  const since = crossed < 0 || fromPlan ? null : (steps[crossed] as Extract<WhyStep, { kind: 'spending' }>).spending.date;
+
+  const over: Overspend[] = [];
+  for (const { spending, purchase, left } of misplaced.values()) {
+    if (spending.amount > left + 0.5) over.push({ kind: 'misplaced', amount: left - spending.amount, spending, purchase, left });
+  }
+  for (const status of fromWeek.values()) {
+    if (status.covered > status.purchase.amount + 0.5) over.push({ kind: 'purchase', amount: status.purchase.amount - status.covered, status });
+  }
+  if (held > w.limit + 0.5) over.push({ kind: 'plan', amount: w.limit - held, planned: held, limit: w.limit });
+  over.sort((a, b) => a.amount - b.amount);
+
+  const optional = steps
+    .flatMap((s) => (s.kind === 'spending' && s.spending.optional && s.amount < 0 ? [s] : []))
+    .sort((a, b) => b.spending.amount - a.spending.amount);
+  return {
+    was,
+    since,
+    now: w.free,
+    last,
+    over,
+    optional: optional.map((s) => s.spending),
+    withoutOptional: w.free - sum(optional.map((s) => s.amount)),
+  };
 }
 
 /**
@@ -169,10 +177,6 @@ function words(text: string): string[] {
     .split(/[^\p{L}]+/u)
     .filter((word) => word.length >= 4)
     .map((word) => word.slice(0, 5));
-}
-
-function ordered(causes: Cause[]): Cause[] {
-  return causes.sort((a, b) => (a.amount < 0) !== (b.amount < 0) ? (a.amount < 0 ? -1 : 1) : Math.abs(b.amount) - Math.abs(a.amount));
 }
 
 function sum(values: number[]): number {

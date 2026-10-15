@@ -1,29 +1,28 @@
 import SwiftUI
 
 /// Why a week went below zero (prototype/week-why), after the user's picture of 2026-10-14, opened from the red figure
-/// on the main circle: on top what the week was headed for, where it is and the change between; then the causes that
-/// add up to the change, each on a red or green tile, with a bar of how much each did; then the week's spending and
-/// plan. The switch on top picks how the fall is told, against the plan or since the evening, for the user to compare.
+/// on the main circle: on top what was free just before the week went there, where it is and the change between; then
+/// a card for each section the server gives, the last expenses, what cost more than planned and the optional ones,
+/// each row on a tile red, or orange when optional; then the week's spending and plan. A long run of last expenses
+/// shows its first few and opens to the rest.
 struct WeekWhyView: View {
     let week: String
     @Binding var sheet: BudgetSheet?
     let openSpending: () -> Void
     let openPlan: () -> Void
-    @State private var basis = "plan"
-    /// Causes opened or closed by hand against how the server shows them, such as the free rest with its categories.
-    @State private var toggled: Set<String> = []
+    /// Sections opened past their first few rows.
+    @State private var unfolded: Set<String> = []
     @Environment(\.tabBarHeight) private var tabBarHeight
 
+    /// How many rows a section shows before it opens to the rest.
+    private static let folded = 5
+
     var body: some View {
-        Screen(path: "week-why", query: ["week": week, "basis": basis]) { (s: WeekWhyScreen) in
+        Screen(path: "week-why", query: ["week": week]) { (s: WeekWhyScreen) in
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    if s.bases.count > 1 {
-                        LilacSegmented(items: s.bases.map { Segment(value: $0.value, label: $0.label) }, selection: $basis)
-                            .accessibilityIdentifier("why-basis")
-                    }
                     WhyHero(screen: s)
-                    causes(s)
+                    ForEach(s.sections) { section in self.section(section, symbol: s.symbol) }
                     checks
                 }
                 .padding(.horizontal, 20)
@@ -37,19 +36,46 @@ struct WeekWhyView: View {
         .lilacTitle("Почему неделя ушла в минус")
     }
 
-    private func causes(_ s: WeekWhyScreen) -> some View {
-        WhyCard {
-            Text("Главные факторы").font(.title3.weight(.semibold)).padding(.bottom, 4)
-            ForEach(Array(s.causes.enumerated()), id: \.element.id) { index, cause in
-                Button { open(cause) } label: { WhyCauseRow(cause: cause, symbol: s.symbol, first: index == 0, opened: isOpen(cause)) }
-                    .buttonStyle(.card)
-                    .accessibilityIdentifier(cause.id)
-                if isOpen(cause) {
-                    ForEach(cause.parts, id: \.id) { part in WhyPartRow(part: part, symbol: s.symbol) }
+    private func section(_ section: WhySection, symbol: String) -> some View {
+        let whole = unfolded.contains(section.id) || section.rows.count <= Self.folded + 1
+        let rows = whole ? section.rows : Array(section.rows.prefix(Self.folded))
+        return WhyCard {
+            HStack(alignment: .firstTextBaseline) {
+                Text(section.title).font(.title3.weight(.semibold))
+                Spacer(minLength: 8)
+                if let total = section.total {
+                    Text(Money.text(total, symbol, sign: true))
+                        .font(.body.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(section.id == "optional" ? Palette.optional : Lilac.red)
                 }
             }
-            if s.causes.count > 1 {
-                WhyContribution(contribution: s.contribution, symbol: s.symbol).padding(.top, 10)
+            .padding(.bottom, 4)
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
+                if let day = item.day, day != (index > 0 ? rows[index - 1].day : nil) {
+                    Text(day).font(.subheadline.weight(.medium)).foregroundStyle(Lilac.muted).padding(.top, index > 0 ? 10 : 4)
+                }
+                Button { open(item) } label: { WhyRowView(item: item, symbol: symbol, first: index == 0 || item.day != rows[index - 1].day) }
+                    .buttonStyle(.card)
+                    .accessibilityIdentifier(item.id)
+            }
+            if !whole {
+                Button {
+                    withAnimation(.snappy) { _ = unfolded.insert(section.id) }
+                } label: {
+                    Text("Ещё \(section.rows.count - rows.count)")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Lilac.accent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Lilac.tint, in: Capsule())
+                }
+                .buttonStyle(.card)
+                .padding(.top, 6)
+                .accessibilityIdentifier("\(section.id)-more")
+            }
+            if let without = section.without {
+                WhyWithout(figure: without, symbol: symbol).padding(.top, 10)
             }
         }
     }
@@ -66,18 +92,10 @@ struct WeekWhyView: View {
         }
     }
 
-    private func isOpen(_ cause: WhyCause) -> Bool {
-        !cause.parts.isEmpty && cause.opened != toggled.contains(cause.id)
-    }
-
-    private func open(_ cause: WhyCause) {
-        if let spending = cause.spending {
+    private func open(_ item: WhyRow) {
+        if let spending = item.spending {
             sheet = .spending(spending)
-        } else if !cause.parts.isEmpty {
-            withAnimation(.snappy) {
-                if toggled.contains(cause.id) { toggled.remove(cause.id) } else { toggled.insert(cause.id) }
-            }
-        } else if cause.plan {
+        } else if item.plan {
             openPlan()
         }
     }
@@ -159,18 +177,18 @@ private struct WhyHero: View {
     }
 }
 
-/// A cause: its icon on a tile red below zero and green above, its title over what tells why, and its signed amount.
-private struct WhyCauseRow: View {
-    let cause: WhyCause
+/// A row: its icon on a tile red below zero, orange when optional, green above, its title over what tells why, and
+/// its signed amount.
+private struct WhyRowView: View {
+    let item: WhyRow
     let symbol: String
     let first: Bool
-    let opened: Bool
 
     var body: some View {
-        let r = cause.row
-        let tone = (r.amount ?? 0) < -0.5 ? Lilac.red : Palette.color("green")
+        let r = item.row
+        let tone = item.optional ? Palette.optional : (r.amount ?? 0) < -0.5 ? Lilac.red : Palette.color("green")
         HStack(spacing: 12) {
-            Image(systemName: r.icon == "wallet" ? LilacSymbol.wallet : Icons.symbol(r.icon))
+            Image(systemName: Icons.symbol(r.icon))
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(tone)
                 .frame(width: 42, height: 42)
@@ -186,10 +204,9 @@ private struct WhyCauseRow: View {
                 .monospacedDigit()
                 .foregroundStyle(tone)
                 .fixedSize()
-            Image(systemName: cause.parts.isEmpty ? "chevron.right" : "chevron.down")
+            Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Lilac.muted.opacity(0.7))
-                .rotationEffect(.degrees(opened && !cause.parts.isEmpty ? 180 : 0))
         }
         .padding(.vertical, 11)
         .overlay(alignment: .top) {
@@ -199,75 +216,22 @@ private struct WhyCauseRow: View {
     }
 }
 
-/// A part of a cause opened, such as a category of the free rest: smaller, under the cause, its amount quiet.
-private struct WhyPartRow: View {
-    let part: Row
+/// Where the week would be without a section's rows, on a quiet panel: green when it would be above zero.
+private struct WhyWithout: View {
+    let figure: Figure
     let symbol: String
 
     var body: some View {
-        HStack(spacing: 12) {
-            LilacMarker.dot(Palette.color(part.color)).view.frame(width: 22, height: 22)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(part.title).font(.subheadline)
-                Text(part.details).font(.footnote).foregroundStyle(Lilac.muted)
-            }
+        HStack(alignment: .firstTextBaseline) {
+            Text(figure.label).font(.subheadline).foregroundStyle(Lilac.muted)
             Spacer(minLength: 8)
-            Text(Money.text(part.amount ?? 0, symbol)).font(.subheadline).monospacedDigit().foregroundStyle(Lilac.muted)
-        }
-        .padding(.leading, 54)
-        .padding(.trailing, 20)
-        .padding(.vertical, 6)
-    }
-}
-
-/// How much each cause did, as parts of one bar, red below zero and green above, with the sums of each under it.
-private struct WhyContribution: View {
-    let contribution: WeekWhyScreen.Contribution
-    let symbol: String
-
-    var body: some View {
-        let c = contribution
-        let parts = c.parts.filter { $0.value > 0.5 }
-        let total = max(parts.reduce(0) { $0 + $1.value }, 1)
-        VStack(alignment: .leading, spacing: 12) {
-            Text(c.label).font(.subheadline.weight(.medium)).foregroundStyle(Color.primary.opacity(0.8))
-            GeometryReader { geometry in
-                let width = geometry.size.width - CGFloat(max(parts.count - 1, 0)) * 2
-                HStack(spacing: 2) {
-                    ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
-                        let color = Palette.color(part.tone)
-                        Rectangle()
-                            .fill(color.opacity(shade(index, parts)))
-                            .frame(width: max(width * part.value / total, 4))
-                    }
-                }
-                .clipShape(Capsule())
-            }
-            .frame(height: 18)
-            HStack(alignment: .top, spacing: 12) {
-                legend(c.minus, tone: Lilac.red)
-                legend(c.plus, tone: Palette.color("green"))
-            }
+            Text(Money.text(figure.amount, symbol, sign: true))
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(figure.amount < -0.5 ? Lilac.red : Palette.color("green"))
         }
         .padding(14)
         .background(Lilac.canvas, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-
-    /// The largest part of a colour full, the next ones lighter, as the picture shades them.
-    private func shade(_ index: Int, _ parts: [WeekWhyScreen.Contribution.Part]) -> Double {
-        let before = parts[..<index].filter { $0.tone == parts[index].tone }.count
-        return max(0.85 - Double(before) * 0.2, 0.35)
-    }
-
-    private func legend(_ f: Figure, tone: Color) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Circle().fill(tone.opacity(0.7)).frame(width: 9, height: 9)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(Money.text(f.amount, symbol, sign: true)).font(.subheadline.weight(.semibold)).monospacedDigit()
-                Text(f.label).font(.footnote).foregroundStyle(Lilac.muted)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

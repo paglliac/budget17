@@ -215,34 +215,31 @@ describe('api', () => {
     assert.equal(later.home.free.amount, -3_500, '45 000 − 40 473 − 8 000');
   });
 
-  it('tells why a week went below zero against its plan or since the evening, a week ahead by the plan only', () => {
-    const why = plain(weekWhyScreen(data(), saved(), budget));
+  it('tells why a week went below zero: the last expenses, what cost more than planned and the optional ones', () => {
+    const why = plain(weekWhyScreen(data(), { ...saved(), optionalSpending: new Set(['pyaterochka']) }, budget));
     assert.equal(why.title, 'Почему неделя ушла в минус');
+    // 45 000 less the 8 000 the boots hold, less Пятёрочка, was free when the transfer took the week below zero.
     assert.deepEqual([why.was, why.now, why.change], [
-      { label: 'По плану', amount: 0 },
+      { label: 'Вчера', amount: 36_527 },
       { label: 'Сейчас', amount: -3_473 },
-      { label: 'Изменение', amount: -3_473 },
+      { label: 'Изменение', amount: -40_000 },
     ]);
-    // 45 000 less the plan of 13 000 left 32 000 free; 40 473 went there. The gift, finished, gave its 5 000 back.
-    assert.deepEqual(why.causes.map((c: { title: string; details: string; amount: number }) => [c.title, c.details, c.amount]), [
-      ['Свободные траты', '40 473 ₽ из 32 000 ₽', -8_473],
-      ['Подарок', 'план 5 000 ₽ → 0 ₽', 5_000],
-    ]);
-    assert.deepEqual(why.causes[0].parts.map((p: { title: string; details: string; amount: number }) => [p.title, p.details, p.amount]), [
-      ['Без категории', '1 трата', -40_000],
-      ['Продукты', '1 трата', -473],
-    ]);
-    assert.deepEqual(why.contribution.parts, [{ value: 8_473, tone: 'red' }, { value: 5_000, tone: 'green' }]);
-    assert.deepEqual(why.bases.map((b: { value: string }) => b.value), ['plan', 'evening']);
+    const rows = (section: { rows: Array<{ title: string; details: string; amount: number }> }) => section.rows.map((r) => [r.title, r.details, r.amount]);
+    assert.deepEqual(why.sections.map((s: { id: string }) => s.id), ['last', 'optional'], 'nothing cost more than planned');
+    assert.deepEqual(rows(why.sections[0]), [['Александр А.', 'без категории', -40_000]]);
+    assert.deepEqual(rows(why.sections[1]), [['Пятёрочка', 'Продукты', -473]]);
+    assert.deepEqual(why.sections[1].without, { label: 'Без них', amount: -3_000 });
+    assert.equal(why.sections[1].rows[0].spending, 'pyaterochka', 'an expense opens to be marked');
 
-    const evening = plain(weekWhyScreen(data(), saved(), { ...budget, basis: 'evening' }));
-    assert.equal(evening.was.label, 'Вчера вечером');
-    assert.equal(evening.was.amount + evening.causes.reduce((sum: number, c: { amount: number }) => sum + c.amount, 0), evening.now.amount);
-
-    const ahead = plain(weekWhyScreen(data(), saved(), { ...budget, week: '2026-10-19', basis: 'evening' }));
-    assert.equal(ahead.basis, 'plan');
-    assert.deepEqual(ahead.bases.map((b: { value: string }) => b.value), ['plan']);
-    assert.equal(ahead.now.label, 'Будет');
+    // A week ahead with a haircut planned for more than it allows: from its amount, the plan first and past it.
+    const small = saved();
+    small.weekLimits = new Map([['2026-10-19', 1_000]]);
+    const ahead = plain(weekWhyScreen(data(), small, { ...budget, week: '2026-10-19' }));
+    assert.deepEqual([ahead.was, ahead.now], [{ label: 'Бюджет недели', amount: 1_000 }, { label: 'Будет', amount: -500 }]);
+    assert.deepEqual(ahead.sections.map((s: { rows: Array<{ title: string; details: string; amount: number }> }) => rows(s)), [
+      [['План недели', '', -1_500]],
+      [['План больше недели', '1 500 ₽ из 1 000 ₽', -500]],
+    ]);
   });
 
   it('tells how full the week is for the wave on the circle', () => {

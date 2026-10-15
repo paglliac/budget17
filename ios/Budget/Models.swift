@@ -242,8 +242,9 @@ struct WeekHome: Decodable, Hashable {
     }
 }
 
-/// Why a week went below zero (prototype/week-why): what it was headed for, where it is and the change, told the way
-/// `basis` picks of `bases`; the causes that add up to the change, below zero first, and how much each did as a bar.
+/// Why a week went below zero (prototype/week-why): what was free just before it went there, where it is and the
+/// change; then the sections the server gives, each left out when empty: the last expenses, what cost more than planned
+/// and the optional ones.
 struct WeekWhyScreen: Decodable {
     let symbol: String
     let week: String
@@ -251,46 +252,41 @@ struct WeekWhyScreen: Decodable {
     let phase: String
     let title: String
     let subtitle: String
-    let basis: String
-    let bases: [Option]
     let was: Figure
     let now: Figure
     let change: Figure
-    let causes: [WhyCause]
-    let contribution: Contribution
-
-    struct Contribution: Decodable, Hashable {
-        let label: String
-        /// Each cause by its size, red below zero, green above, in the order of the causes.
-        let parts: [Part]
-        let minus: Figure
-        let plus: Figure
-
-        struct Part: Decodable, Hashable {
-            let value: Double
-            let tone: String
-        }
-    }
+    let sections: [WhySection]
 }
 
-/// A cause of a week's fall: its amount is what it did to what is free. An expense opens to be marked, the free rest
-/// opens to its categories, a purchase or the plan opens the plan.
-struct WhyCause: Decodable, Hashable, Identifiable {
+/// A section of why a week went below zero: its rows, the sum of them when it tells one, and where the week would be
+/// without them when that tells something.
+struct WhySection: Decodable, Hashable, Identifiable {
+    /// last, over or optional.
+    let id: String
+    let title: String
+    let total: Double?
+    let without: Figure?
+    let rows: [WhyRow]
+}
+
+/// A row of why a week went below zero; its amount is what it did to what is free, or how far past its plan. An
+/// expense opens to be marked, a purchase or the plan opens the plan.
+struct WhyRow: Decodable, Hashable, Identifiable {
     let row: Row
     let spending: String?
-    let parts: [Row]
     let plan: Bool
-    /// Shown opened to its parts at first, as the free rest is when it took the week down the most.
-    let opened: Bool
+    let optional: Bool
+    /// The day it came, when the section's expenses took more than one.
+    let day: String?
     var id: String { row.id }
 
     init(from decoder: Decoder) throws {
         row = try Row(from: decoder)
         let c = try decoder.extra()
         spending = try c.optional("spending")
-        parts = try c.optional("parts") ?? []
         plan = try c.optional("plan") ?? false
-        opened = try c.optional("opened") ?? false
+        optional = try c.optional("optional") ?? false
+        day = try c.optional("day")
     }
 }
 

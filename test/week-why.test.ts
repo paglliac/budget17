@@ -2,13 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Operation } from '../src/ledger.ts';
 import type { Budget, Envelope, Purchase } from '../src/week.ts';
-import { misplacedSpending, whyByPlan, whySinceEvening, type Cause, type KindOf } from '../src/week-why.ts';
+import { misplacedSpending, weekWhy, type KindOf, type Overspend, type WhyStep } from '../src/week-why.ts';
 
-// The user's week of 10–16 October 2026, from Saturday: a gift planned for 5 000 cost 6 600, yoga was finished
-// without paying, groceries were partly paid by expenses linked to them, and the dentist planned for 3 000 in the
-// extras was paid 10 000 on Wednesday without a link, so the week paid it.
+// The user's week of 10–16 October 2026, from Saturday, on 20 000 for it to go below zero: a gift planned for 5 000
+// cost 6 600, yoga was finished without paying, groceries were partly paid by expenses linked to them, and the
+// dentist planned for 3 000 in the extras was paid 10 000 on Wednesday without a link, so the week paid it.
 const week = '2026-10-10';
-const today = '2026-10-14';
 const health = { id: 'health', title: 'Здоровье и спорт', color: null };
 const groceries = { id: 'groceries', title: 'Продукты', color: null };
 const shopping = { id: 'shopping', title: 'Шоппинг', color: null };
@@ -27,80 +26,80 @@ const yoga = purchase(9, 'Йога', 2_500, { done: true });
 const food = purchase(12, 'Продукты', 8_000);
 const dentist = purchase(22, 'Стоматолог', 3_000, { envelope: 'extra' });
 
-function budget(marks: Array<[string, Envelope]> = []): Budget {
+function budget(marks: Array<[string, Envelope]> = [], limit = 20_000): Budget {
   return {
     expenses: [
       spending('sergey', '2026-10-10', 6_600, paying(gift)),
       spending('samokat', '2026-10-12', 2_652, { ...paying(food), category: groceries }),
-      spending('lenta', '2026-10-11', 1_143, { category: groceries }),
+      spending('lenta', '2026-10-11', 1_143, { category: groceries, optional: true }),
       spending('neurologist', '2026-10-11', 2_500, { category: health }),
       spending('subscriptions', '2026-10-14', 1_895, { category: { id: 'subs', title: 'Подписки', color: null } }),
       spending('dobryj-den', '2026-10-14', 10_000, { name: 'OOO Dobryj Den', category: health }),
       spending('samokat-2', '2026-10-14', 1_248, { ...paying(food), category: groceries }),
-      spending('yandex', '2026-10-14', 990, { category: shopping }),
+      spending('yandex', '2026-10-14', 990, { category: shopping, optional: true }),
     ],
     purchases: [gift, yoga, food, dentist],
     marks: new Map([['neurologist', 'extra'], ...marks]),
     regular: [],
     weekStart: 5,
-    weekLimits: new Map(),
+    weekLimits: new Map([[week, limit]]),
   };
 }
 
 /** Kinds as the app's icons give them: Стоматолог and Здоровье и спорт are both health. */
 const kindOf: KindOf = (title) => (/здоров|стомат/i.test(title) ? 'heart' : /продукт/i.test(title) ? 'cart' : null);
 
-const brief = (c: Cause) => [c.kind, Math.round(c.amount)];
-const total = (causes: Cause[]) => causes.reduce((sum, c) => sum + c.amount, 0);
+const step = (s: WhyStep) => [s.kind === 'plan' ? 'plan' : s.spending.id, Math.round(s.amount)];
+const over = (o: Overspend) => [o.kind, o.kind === 'plan' ? null : o.kind === 'purchase' ? o.status.purchase.title : o.purchase.title, Math.round(o.amount)];
+const total = (steps: WhyStep[]) => steps.reduce((sum, s) => sum + s.amount, 0);
 
 describe('why a week went below zero', () => {
-  it('by the plan: from nothing, the dentist the week paid, the gift past its plan, the free rest and yoga given back', () => {
-    const why = whyByPlan(budget(), week, kindOf);
-    // 45 000 − 6 600 − 2 652 − 1 143 − 1 895 − 10 000 − 1 248 − 990 spent, 8 000 − 3 900 of groceries still planned.
-    assert.equal(Math.round(why.now), 16_372);
-    assert.equal(why.was, 0);
-    assert.deepEqual(why.causes.map(brief), [
-      ['misplaced', -10_000],
-      ['purchase', -1_600],
-      // 45 000 − 5 000 − 2 500 − 8 000 allowed; 1 143 + 1 895 + 990 spent freely.
-      ['free', 25_472],
-      ['purchase', 2_500],
+  it('starts from the expense that took the week below zero, whatever day it came', () => {
+    const why = weekWhy(budget(), week, kindOf);
+    // 20 000 less what the plan held, 5 000 + 8 000 with yoga finished: 7 000; the gift took 1 600 past its plan,
+    // Lenta 1 143 and the subscriptions 1 895, so 2 362 was free when the dentist came.
+    assert.equal(Math.round(why.was), 2_362);
+    assert.equal(why.since, '2026-10-14');
+    assert.deepEqual(why.last.map(step), [['dobryj-den', -10_000], ['yandex', -990]], 'groceries linked to their plan take nothing of it');
+    assert.equal(Math.round(why.now), -8_628);
+    assert.equal(Math.round(why.was + total(why.last)), Math.round(why.now), 'the steps add up to the change');
+    const first = why.last[0]!;
+    assert.ok(first.kind === 'spending' && first.misplaced?.purchase.title === 'Стоматолог', 'the dentist may have paid the extras’ plan');
+  });
+
+  it('takes the last time the week went below zero, after a day it was missed', () => {
+    // Without the dentist the week went below zero on Tuesday with Lenta and stayed there.
+    const b = budget([], 15_000);
+    b.expenses = b.expenses.filter((o) => o.id !== 'dobryj-den');
+    const why = weekWhy(b, week, kindOf);
+    assert.equal(why.since, '2026-10-11');
+    assert.equal(Math.round(why.was), 400, '15 000 − 13 000 held, less the 1 600 the gift took past its plan');
+    assert.deepEqual(why.last.map(step), [['lenta', -1_143], ['subscriptions', -1_895], ['yandex', -990]]);
+  });
+
+  it('starts from the week’s amount when the plan alone was past it, the plan first', () => {
+    const why = weekWhy(budget([], 12_000), week, kindOf);
+    assert.equal(why.since, null);
+    assert.equal(why.was, 12_000);
+    assert.deepEqual(why.last.map(step).slice(0, 2), [['plan', -13_000], ['sergey', -1_600]]);
+    assert.equal(Math.round(why.was + total(why.last)), Math.round(why.now));
+    assert.deepEqual(why.over.map(over).at(-1), ['plan', null, -1_000], 'the plan past the week is past its plan too');
+  });
+
+  it('tells the purchases that cost more than planned, the dentist paid by the week against the extras’ plan', () => {
+    const why = weekWhy(budget(), week, kindOf);
+    assert.deepEqual(why.over.map(over), [
+      ['misplaced', 'Стоматолог', -7_000],
+      ['purchase', 'Подарок Серёге В.', -1_600],
     ]);
-    assert.equal(Math.round(total(why.causes)), Math.round(why.now - why.was), 'the causes add up to the change');
-    const misplaced = why.causes[0]!;
-    assert.ok(misplaced.kind === 'misplaced' && misplaced.purchase.title === 'Стоматолог' && misplaced.left === 3_000);
   });
 
-  it('by the plan: a plan past what the week allows is a cause of its own, and all free spending goes past it', () => {
-    const b = budget();
-    b.weekLimits = new Map([[week, 12_000]]);
-    const why = whyByPlan(b, week, kindOf);
-    const plan = why.causes.find((c) => c.kind === 'plan');
-    assert.ok(plan?.kind === 'plan');
-    assert.equal(plan.amount, 12_000 - 15_500);
-    const free = why.causes.find((c) => c.kind === 'free');
-    assert.ok(free?.kind === 'free' && free.allowed === 0 && Math.round(free.amount) === -4_028);
-    assert.equal(Math.round(total(why.causes)), Math.round(why.now));
-  });
-
-  it('since the evening: what was free yesterday, and today’s expenses with what each took of it', () => {
-    const why = whySinceEvening(budget(), week, today, kindOf);
-    assert.equal(why.since, '2026-10-13');
-    // Yesterday: 45 000 − 6 600 − 2 652 − 1 143 spent, 8 000 − 2 652 of groceries planned, yoga finished.
-    assert.equal(Math.round(why.was), 29_257);
-    assert.deepEqual(why.causes.map(brief), [
-      ['misplaced', -10_000],
-      ['spending', -1_895],
-      ['spending', -990],
-    ], 'the groceries linked to their plan take nothing of what is free');
-    assert.equal(Math.round(why.was + total(why.causes)), Math.round(why.now));
-  });
-
-  it('since the evening: a past week from the evening before its last day, the first day from the week’s start', () => {
-    assert.equal(whySinceEvening(budget(), week, '2026-10-20', kindOf).since, '2026-10-15');
-    const first = whySinceEvening(budget(), week, week, kindOf);
-    assert.equal(first.since, null);
-    assert.equal(first.was, 45_000 - 15_500 + 2_500, 'what the plan left free at the start, yoga finished');
+  it('tells the week’s expenses marked optional, largest first, and where the week would be without them', () => {
+    const why = weekWhy(budget(), week, kindOf);
+    assert.deepEqual(why.optional.map((o) => o.id), ['lenta', 'yandex']);
+    assert.equal(Math.round(why.withoutOptional), -8_628 + 1_143 + 990);
+    const outside = budget([['yandex', 'extra']]);
+    assert.deepEqual(weekWhy(outside, week, kindOf).optional.map((o) => o.id), ['lenta'], 'one the week did not pay is not its own');
   });
 
   it('ties an expense to a purchase of the extras by a word or by kind, never one moved or linked already', () => {
