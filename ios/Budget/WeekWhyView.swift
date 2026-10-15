@@ -1,37 +1,33 @@
 import SwiftUI
 
-/// Why a week went below zero (prototype/week-why), opened from the red figure on the main circle, in the look of the
-/// app's lists: what was free just before the week went there and where it is, side by side; then the sections the
-/// server gives, the last expenses, what cost more than planned and the optional ones, as rows of expenses on the
-/// page. A long run of last expenses shows its first few and opens to the rest. The prototype has two looks on a
-/// switch: «A · Списком» opens every section, «B · Свёрнуто» opens only the last expenses and folds the others into
-/// their headings with their sums, to open by a tap.
+/// Why a week went below zero (prototype/week-why), opened from the red figure on the main circle, as what to do about
+/// it: where the week is; «Проверь траты», the expenses the week counts only by default that are a lot, alone or as a
+/// run of small ones, each to open and mark or to confirm with «Верно»; then reminders, each only when it is a lot, to
+/// keep to the plan or to spend less on the optional, folded to their rows. What was confirmed is kept on the phone for
+/// the prototype and sent to the server, which leaves it out.
 struct WeekWhyView: View {
     let week: String
     @Binding var sheet: BudgetSheet?
     let openPlan: () -> Void
-    @AppStorage(WhyLook.key) private var look = WhyLook.list
-    /// Sections opened past their first few rows, or, in the folded look, opened at all.
+    @AppStorage(WhyChecked.key) private var checked = ""
+    /// Runs and reminders opened to their rows.
     @State private var opened: Set<String> = []
     @Environment(\.tabBarHeight) private var tabBarHeight
 
-    /// How many rows a section shows before it opens to the rest.
-    private static let folded = 5
-
     var body: some View {
-        Screen(path: "week-why", query: ["week": week]) { (s: WeekWhyScreen) in
+        Screen(path: "week-why", query: ["week": week, "checked": checked]) { (s: WeekWhyScreen) in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    LilacSegmented(items: [Segment(value: WhyLook.list, label: "A · Списком"), Segment(value: WhyLook.folded, label: "B · Свёрнуто")],
-                                   selection: $look)
-                        .accessibilityIdentifier("why-look")
-                        .padding(.top, 6)
-                    LilacFigures(items: [
-                        .init(label: s.was.label, amount: s.was.amount, sign: true),
-                        .init(label: s.now.label, amount: s.now.amount, sign: true, color: s.now.amount < -0.5 ? Lilac.red : .primary),
-                    ], symbol: s.symbol)
-                    .padding(.top, 22)
-                    ForEach(s.sections) { section in self.section(section, symbol: s.symbol) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(s.subtitle).font(.subheadline).foregroundStyle(Lilac.muted)
+                        LilacAmount(amount: s.now.amount, symbol: s.symbol, size: 44, color: s.now.amount < -0.5 ? Lilac.red : nil)
+                    }
+                    .padding(.top, 6)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("why-now")
+                    if let check = s.check { checks(check, symbol: s.symbol) }
+                    if !s.reminders.isEmpty { reminders(s.reminders, symbol: s.symbol).padding(.top, 22) }
+                    if let empty = s.empty { LilacEmpty(text: empty).padding(.top, 12) }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
@@ -44,79 +40,76 @@ struct WeekWhyView: View {
     }
 
     @ViewBuilder
-    private func section(_ section: WhySection, symbol: String) -> some View {
-        let foldable = look == WhyLook.folded && section.id != "last"
-        let shown = !foldable || opened.contains(section.id)
-        let whole = foldable || opened.contains(section.id) || section.rows.count <= Self.folded + 1
-        let rows = whole ? section.rows : Array(section.rows.prefix(Self.folded))
-        let tone = section.id == "optional" ? Palette.optional : Color.primary
-        if foldable {
-            Button { toggle(section.id) } label: {
-                LilacHeading(title: section.title) {
-                    HStack(spacing: 8) {
-                        if let total = section.total { Text(Money.text(total, symbol)).font(.body.weight(.semibold)).monospacedDigit().foregroundStyle(tone) }
-                        Image(systemName: "chevron.down")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Lilac.muted.opacity(0.7))
-                            .rotationEffect(.degrees(shown ? 180 : 0))
-                    }
+    private func checks(_ check: WeekWhyScreen.Checks, symbol: String) -> some View {
+        LilacHeading(check.title)
+        ForEach(Array(check.rows.enumerated()), id: \.element.id) { index, item in
+            let run = item.spending == nil
+            Button {
+                if let spending = item.spending { sheet = .spending(spending) } else { toggle(item.id) }
+            } label: {
+                LilacRow(marker: run ? .icon(item.row) : .expense(item.row), title: item.row.title, details: item.row.details,
+                         amount: item.row.amount, symbol: symbol, first: index == 0, chevron: false) {
+                    LilacInlineAction(label: "Верно") { confirm(item.checks) }
+                        .accessibilityIdentifier("\(item.id)-right")
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("\(section.id)-fold")
-        } else {
-            LilacHeading(title: section.title) {
-                if let total = section.total, section.rows.count > 1 {
-                    Text(Money.text(total, symbol)).font(.body.weight(.semibold)).monospacedDigit().foregroundStyle(tone)
+            .buttonStyle(.card)
+            .accessibilityIdentifier(item.id)
+            if run && opened.contains(item.id) {
+                ForEach(item.parts) { part in
+                    Button { sheet = .spending(part.spending) } label: {
+                        LilacRow(marker: .expense(part.row), title: part.row.title, details: part.row.details, amount: part.row.amount,
+                                 symbol: symbol, chevron: false, amountColor: part.optional ? Palette.optional : .primary)
+                    }
+                    .buttonStyle(.card)
+                    .padding(.leading, 30)
                 }
             }
         }
-        if shown {
-            ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
-                let newDay = item.day != nil && item.day != (index > 0 ? rows[index - 1].day : nil)
-                if newDay, let day = item.day { LilacDayHeading(title: day, subtitle: "") }
-                Button { open(item) } label: {
-                    LilacRow(
-                        marker: item.spending != nil ? .expense(item.row) : .icon(item.row),
-                        title: item.row.title,
-                        details: item.row.details,
-                        amount: item.row.amount,
-                        symbol: symbol,
-                        first: index == 0 || newDay,
-                        chevron: false,
-                        amountColor: item.optional ? Palette.optional : .primary
-                    )
-                }
-                .buttonStyle(.card)
-                .accessibilityIdentifier(item.id)
-            }
-            if !whole {
-                Button { toggle(section.id) } label: {
-                    Text("Ещё \(section.rows.count - rows.count)")
-                        .font(.body)
-                        .foregroundStyle(Lilac.accent)
-                        .padding(.vertical, 12)
-                        .padding(.leading, 44)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .overlay(alignment: .top) { Rectangle().fill(Lilac.hairline).frame(height: 0.5).padding(.leading, 44) }
+    }
+
+    private func reminders(_ reminders: [WhyReminder], symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(reminders) { reminder in
+                let tone = Palette.color(reminder.row.color)
+                let open = opened.contains(reminder.id)
+                VStack(alignment: .leading, spacing: 0) {
+                    Button { toggle(reminder.id) } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: Icons.symbol(reminder.row.icon))
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(tone)
+                                .frame(width: 36, height: 36)
+                                .background(tone.opacity(0.14), in: Circle())
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(reminder.row.title).font(.body.weight(.semibold))
+                                if !reminder.row.details.isEmpty { Text(reminder.row.details).font(.subheadline).foregroundStyle(Lilac.muted) }
+                            }
+                            Spacer(minLength: 8)
+                            Text(Money.text(reminder.row.amount ?? 0, symbol)).font(.body.weight(.semibold)).monospacedDigit().foregroundStyle(tone)
+                            Image(systemName: "chevron.down")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Lilac.muted.opacity(0.7))
+                                .rotationEffect(.degrees(open ? 180 : 0))
+                        }
+                        .padding(14)
                         .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier(reminder.id)
+                    if open {
+                        ForEach(Array(reminder.rows.enumerated()), id: \.element.id) { index, item in
+                            Button { openRow(item) } label: {
+                                LilacRow(marker: item.spending != nil ? .expense(item.row) : .icon(item.row), title: item.row.title,
+                                         details: item.row.details, amount: item.row.amount, symbol: symbol, first: index == 0, chevron: false,
+                                         amountColor: item.optional ? Palette.optional : .primary)
+                            }
+                            .buttonStyle(.card)
+                            .padding(.horizontal, 14)
+                        }
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("\(section.id)-more")
-            }
-            if let without = section.without {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(without.label).foregroundStyle(Lilac.muted)
-                    Spacer(minLength: 8)
-                    Text(Money.text(without.amount, symbol, sign: true))
-                        .font(.body.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(without.amount < -0.5 ? Lilac.red : Palette.color("green"))
-                }
-                .padding(.vertical, 13)
-                .padding(.leading, 44)
-                .overlay(alignment: .top) { Rectangle().fill(Lilac.hairline).frame(height: 0.5).padding(.leading, 44) }
+                .background(Lilac.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
         }
     }
@@ -127,7 +120,13 @@ struct WeekWhyView: View {
         }
     }
 
-    private func open(_ item: WhyRow) {
+    private func confirm(_ ids: [String]) {
+        var all = WhyChecked.ids(checked)
+        all.formUnion(ids)
+        withAnimation(.snappy) { checked = all.sorted().joined(separator: ",") }
+    }
+
+    private func openRow(_ item: WhyRow) {
         if let spending = item.spending {
             sheet = .spending(spending)
         } else if item.plan {
@@ -136,9 +135,11 @@ struct WeekWhyView: View {
     }
 }
 
-/// The look of why a week went below zero picked on its switch, kept on the phone (prototype/week-why).
-enum WhyLook {
-    static let key = "prototype-week-why-look"
-    static let list = "list"
-    static let folded = "folded"
+/// The expenses said to be counted right on why a week went below zero, kept on the phone (prototype/week-why).
+enum WhyChecked {
+    static let key = "prototype-week-why-checked"
+
+    static func ids(_ stored: String) -> Set<String> {
+        Set(stored.split(separator: ",").map(String.init))
+    }
 }

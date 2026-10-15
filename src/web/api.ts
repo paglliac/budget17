@@ -31,7 +31,7 @@ import {
   type WeekSummary,
   type Wish,
 } from '../week.ts';
-import { weekWhy, type Overspend, type WhyStep } from '../week-why.ts';
+import { weekWhy, type Check, type Overspend } from '../week-why.ts';
 import { covered, savingsTaken, stepMonth, type Step } from '../wish-plans.ts';
 import type { DateString, EntityCollections } from '../zenmoney/types.ts';
 import { capitalize, dayHeading, dayMonth, dayTitle, fromToday, money, monthName, num, plural, ROUND_STEP, roundParts, timeOn, weekLabel, WEEKDAYS, WEEKDAYS_FULL } from './format.ts';
@@ -398,71 +398,96 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
 }
 
 /**
- * Why a week went below zero (prototype/week-why), opened from the red figure on the app's circle: what was free just
- * before it went there and where it is, then up to three sections, each left out when empty: the expense that took it
- * below zero and those after it, by day when they took more than one; what cost more than planned; and the week's
- * expenses marked optional with where the week would be without them (see week-why.ts). The rows say what each took,
- * as lists of expenses do, without a sign. An expense opens to be marked, a purchase or the plan opens the plan. With
- * round figures the two figures on top and the one without the optional are to the hundred, what is free as on the
- * circle; the rows keep their amounts.
+ * Why a week went below zero (prototype/week-why), opened from the red figure on the app's circle, as what the user can
+ * do about it (see week-why.ts): where the week is, the expenses to check where they count, a lot alone or a run of
+ * small ones close together, each with the expenses «Верно» confirms; and reminders, each only when it is a lot: to
+ * keep to the plan, with the purchases that cost more, and to spend less on the optional, with where the week would be
+ * without them. An expense opens to be marked, a purchase or the plan opens the plan. `checked` are the expenses the
+ * user said are counted right, kept on the phone for the prototype. With nothing to check or remind of, `empty` says
+ * so. With round figures what is free is as on the circle and the week without the optional to the hundred; the rows
+ * keep their amounts.
  */
-export function weekWhyScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { week?: string | null }) {
+export function weekWhyScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { week?: string | null; checked?: string | null }) {
   const { today } = options;
   const shown = parseWeek(options.week, weekOf(today, saved.weekStart), saved.weekStart);
   const d = loadDashboard(data, saved, { ...options, week: shown, month: monthOfWeek(shown) });
   const { current, symbol } = d;
   const phase = shown > current ? 'ahead' : shown < current ? 'past' : 'current';
-  const why = weekWhy(budgetOf(data, saved, { today, from: shown }), shown);
+  const checked = new Set((options.checked ?? '').split(',').filter(Boolean));
+  const why = weekWhy(budgetOf(data, saved, { today, from: shown }), shown, checked);
   const round = (amount: number) => (saved.roundFigures ? Math.round(amount / ROUND_STEP) * ROUND_STEP : amount);
-  const now = saved.roundFigures ? roundWeek(d.week).free : why.now;
-  const was = why.last.length === 0 ? now : round(why.was);
-  const wasLabel = why.last.length === 0 ? 'сейчас' : why.since === null ? 'бюджет недели' : `было ${dayTitle(why.since, today).toLocaleLowerCase('ru')}`;
-  const days = new Set(why.last.flatMap((s) => (s.kind === 'spending' ? [s.spending.date] : [])));
   const total = (rows: Array<{ amount: number | null }>) => rows.reduce((sum, r) => sum + (r.amount ?? 0), 0);
-  const last = why.last.map((s) => stepRow(s, d.marking, symbol, days.size > 1 ? today : null));
-  const over = why.over.map((o) => overspendRow(o, symbol));
-  const optional = why.optional.map((o) => ({
-    ...expenseRow(d.marking, o),
-    id: `optional-${o.id}`,
-    amount: o.amount,
-    plan: false,
-    day: null,
-  }));
-  const sections = [
-    { id: 'last', title: 'Последние траты', total: null, without: null, rows: last },
-    { id: 'over', title: 'Перерасход по плану', total: total(over), without: null, rows: over },
-    { id: 'optional', title: 'Необязательные', total: total(optional), without: { label: 'без них', amount: round(why.withoutOptional) }, rows: optional },
-  ];
+  const check = why.check.map((c) => checkRow(c, d.marking, symbol, today));
+  const reminders = [];
+  if (why.remindPlan) {
+    const rows = why.over.map((o) => overspendRow(o, symbol));
+    const [first] = rows;
+    reminders.push({
+      ...row({
+        id: 'remind-plan',
+        title: 'Придерживайся плана',
+        details: rows.length === 1 ? (first?.title ?? '') : `${first?.title ?? ''} и ещё ${rows.length - 1}`,
+        icon: 'target',
+        color: 'red',
+        amount: total(rows),
+      }),
+      rows,
+    });
+  }
+  if (why.remindOptional) {
+    const without = round(why.withoutOptional);
+    const rows = why.optional.map((o) => ({ ...expenseRow(d.marking, o), id: `remind-optional-${o.id}`, plan: false }));
+    reminders.push({
+      ...row({
+        id: 'remind-optional',
+        title: 'Трать меньше на необязательное',
+        details: `без них ${money(without, symbol, { sign: true })}`,
+        icon: 'piggy',
+        color: 'orange',
+        amount: total(rows),
+      }),
+      rows,
+    });
+  }
   return {
     symbol,
     week: shown,
     phase,
     title: 'Почему неделя ушла в минус',
     subtitle: `Неделя ${weekLabel(shown)}`,
-    was: { label: wasLabel, amount: was },
-    now: { label: phase === 'current' ? 'сейчас' : phase === 'past' ? 'итог недели' : 'будет', amount: now },
-    sections: sections.filter((s) => s.rows.length > 0),
+    now: { label: phase === 'current' ? 'сейчас' : phase === 'past' ? 'итог недели' : 'будет', amount: saved.roundFigures ? roundWeek(d.week).free : why.now },
+    check: check.length > 0 ? { title: 'Проверь траты', rows: check } : null,
+    reminders,
+    empty: check.length + reminders.length === 0 ? 'Ни крупных трат, ни перерасходов' : null,
   };
 }
 
 /**
- * A step to below zero as a row: an expense by its title in the week with what tells why, under the day it came when
- * `today` is given, or the plan the week started with. The amount is what it took of what is free, above zero.
+ * An expense to check as a row: by its title with the day it came and what it is, or a run of small ones by how many
+ * came one after another, opened to them. `checks` are the expenses «Верно» confirms.
  */
-function stepRow(step: WhyStep, m: Pick<Marking, 'marks' | 'purchases'>, symbol: string, today: DateString | null) {
-  if (step.kind === 'plan') {
-    return {
-      ...row({ id: 'last-plan', title: 'План недели', details: '', icon: 'calendar', color: toneColor('violet'), amount: -step.amount }),
-      spending: null,
-      optional: false,
-      plan: true,
-      day: null,
-    };
+function checkRow(c: Check, m: Pick<Marking, 'marks' | 'purchases'>, symbol: string, today: DateString) {
+  if (c.kind === 'spending') {
+    const o = c.spending;
+    const details = [dayTitle(o.date, today), markingDetails(o)].filter(Boolean).join(' · ');
+    return { ...expenseRow(m, o), id: `check-${o.id}`, details, checks: [o.id], parts: [] as ExpenseRow[] };
   }
-  const o = step.spending;
-  const details =
-    step.purchase && Math.abs(step.amount + o.amount) >= 0.5 ? `из плана «${step.purchase.title}» ${money(step.amount + o.amount, symbol)}` : markingDetails(o);
-  return { ...expenseRow(m, o), id: `last-${o.id}`, details, amount: -step.amount, plan: false, day: today === null ? null : dayTitle(o.date, today) };
+  const [first] = c.spending;
+  const count = c.spending.length;
+  return {
+    ...row({
+      id: `check-run-${first?.id ?? ''}`,
+      title: `${count} ${plural(count, ['трата', 'траты', 'трат'])} подряд`,
+      details: first ? dayTitle(first.date, today) : '',
+      icon: 'layers',
+      color: toneColor('violet'),
+      amount: c.amount,
+    }),
+    spending: null,
+    optional: false,
+    checks: c.spending.map((o) => o.id),
+    parts: c.spending.map((o) => expenseRow(m, o)),
+  };
 }
 
 /**
@@ -470,7 +495,7 @@ function stepRow(step: WhyStep, m: Pick<Marking, 'marks' | 'purchases'>, symbol:
  * week. The amount is how far past the plan, above zero; it opens the plan.
  */
 function overspendRow(o: Overspend, symbol: string) {
-  const fields = { amount: -o.amount, spending: null as string | null, optional: false, plan: true, day: null };
+  const fields = { amount: o.amount, spending: null as string | null, optional: false, plan: true };
   switch (o.kind) {
     case 'purchase': {
       const p = o.status.purchase;

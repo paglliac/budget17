@@ -23,26 +23,17 @@ final class ScreensTests: XCTestCase {
         XCTAssert(reserved.waitForExistence(timeout: 15), "the main page loads")
         shot("home")
 
-        // A week past its amount tells why from its red figure: the last expenses, what cost more than planned and
-        // the optional ones, in two looks.
+        // A week past its amount tells why from its red figure: expenses to check and reminders, opened to their rows.
         let why = app.buttons["week-why"]
         if why.exists {
             why.tap()
-            let list = pill("A · Списком")
-            if list.exists {
-                list.tap()
-                sleep(1)
+            if app.descendants(matching: .any)["why-now"].waitForExistence(timeout: 10) {
+                sleep(2)
                 shot("week-why")
+                for id in ["remind-optional", "remind-plan"] where app.buttons[id].exists { app.buttons[id].tap() }
+                shot("week-why-reminders")
                 app.swipeUp()
                 shot("week-why-more")
-                app.swipeDown()
-                pill("B · Свёрнуто").tap()
-                sleep(1)
-                shot("week-why-folded")
-                let fold = app.buttons["optional-fold"]
-                if fold.exists { fold.tap() }
-                shot("week-why-unfolded")
-                pill("A · Списком").tap()
             } else {
                 XCTFail("why the week went below zero opens")
             }

@@ -440,7 +440,7 @@ function apiScreen(path: string, params: URLSearchParams, { today, demo }: Conte
     case '/api/week':
       return weekScreen(collections(), loadSettings(savedBudget), { ...budget, week: params.get('week') });
     case '/api/week-why':
-      return weekWhyScreen(collections(), loadSettings(savedBudget), { ...budget, week: params.get('week') });
+      return weekWhyScreen(collections(), loadSettings(savedBudget), { ...budget, week: params.get('week'), checked: params.get('checked') });
     case '/api/month':
       return monthScreen(collections(), loadSettings(savedBudget), { ...budget, month: params.get('month'), incomes: loadSettings((s) => s.incomes()) });
     case '/api/operations':
