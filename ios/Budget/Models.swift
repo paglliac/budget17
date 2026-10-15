@@ -242,9 +242,9 @@ struct WeekHome: Decodable, Hashable {
     }
 }
 
-/// Why a week went below zero (prototype/week-why): what was free just before it went there, where it is and the
-/// change; then the sections the server gives, each left out when empty: the last expenses, what cost more than planned
-/// and the optional ones.
+/// Why a week went below zero (prototype/week-why): what was free just before it went there and where it is; then the
+/// sections the server gives, each left out when empty: the last expenses, what cost more than planned and the optional
+/// ones.
 struct WeekWhyScreen: Decodable {
     let symbol: String
     let week: String
@@ -254,7 +254,6 @@ struct WeekWhyScreen: Decodable {
     let subtitle: String
     let was: Figure
     let now: Figure
-    let change: Figure
     let sections: [WhySection]
 }
 
@@ -269,7 +268,7 @@ struct WhySection: Decodable, Hashable, Identifiable {
     let rows: [WhyRow]
 }
 
-/// A row of why a week went below zero; its amount is what it did to what is free, or how far past its plan. An
+/// A row of why a week went below zero; its amount is what it took of what is free, or how far past its plan. An
 /// expense opens to be marked, a purchase or the plan opens the plan.
 struct WhyRow: Decodable, Hashable, Identifiable {
     let row: Row

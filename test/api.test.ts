@@ -219,26 +219,25 @@ describe('api', () => {
     const why = plain(weekWhyScreen(data(), { ...saved(), optionalSpending: new Set(['pyaterochka']) }, budget));
     assert.equal(why.title, 'Почему неделя ушла в минус');
     // 45 000 less the 8 000 the boots hold, less Пятёрочка, was free when the transfer took the week below zero.
-    assert.deepEqual([why.was, why.now, why.change], [
-      { label: 'Вчера', amount: 36_527 },
-      { label: 'Сейчас', amount: -3_473 },
-      { label: 'Изменение', amount: -40_000 },
+    assert.deepEqual([why.was, why.now], [
+      { label: 'было вчера', amount: 36_527 },
+      { label: 'сейчас', amount: -3_473 },
     ]);
     const rows = (section: { rows: Array<{ title: string; details: string; amount: number }> }) => section.rows.map((r) => [r.title, r.details, r.amount]);
     assert.deepEqual(why.sections.map((s: { id: string }) => s.id), ['last', 'optional'], 'nothing cost more than planned');
-    assert.deepEqual(rows(why.sections[0]), [['Александр А.', 'без категории', -40_000]]);
-    assert.deepEqual(rows(why.sections[1]), [['Пятёрочка', 'Продукты', -473]]);
-    assert.deepEqual(why.sections[1].without, { label: 'Без них', amount: -3_000 });
+    assert.deepEqual(rows(why.sections[0]), [['Александр А.', 'без категории', 40_000]], 'what each took, as lists of expenses say it');
+    assert.deepEqual(rows(why.sections[1]), [['Пятёрочка', 'Продукты', 473]]);
+    assert.deepEqual(why.sections[1].without, { label: 'без них', amount: -3_000 });
     assert.equal(why.sections[1].rows[0].spending, 'pyaterochka', 'an expense opens to be marked');
 
     // A week ahead with a haircut planned for more than it allows: from its amount, the plan first and past it.
     const small = saved();
     small.weekLimits = new Map([['2026-10-19', 1_000]]);
     const ahead = plain(weekWhyScreen(data(), small, { ...budget, week: '2026-10-19' }));
-    assert.deepEqual([ahead.was, ahead.now], [{ label: 'Бюджет недели', amount: 1_000 }, { label: 'Будет', amount: -500 }]);
+    assert.deepEqual([ahead.was, ahead.now], [{ label: 'бюджет недели', amount: 1_000 }, { label: 'будет', amount: -500 }]);
     assert.deepEqual(ahead.sections.map((s: { rows: Array<{ title: string; details: string; amount: number }> }) => rows(s)), [
-      [['План недели', '', -1_500]],
-      [['План больше недели', '1 500 ₽ из 1 000 ₽', -500]],
+      [['План недели', '', 1_500]],
+      [['План больше недели', '1 500 ₽ из 1 000 ₽', 500]],
     ]);
   });
 

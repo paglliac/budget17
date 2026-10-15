@@ -40,7 +40,7 @@ struct HomeView: View {
                 switch route {
                 case .spending(let day): WeekSpendingView(week: week, day: day, sheet: $sheet)
                 case .why(let shown):
-                    WeekWhyView(week: shown, sheet: $sheet, openSpending: { path.append(.spending(nil)) }, openPlan: { openPlan(week) })
+                    WeekWhyView(week: shown, sheet: $sheet, openPlan: { openPlan(week) })
                 }
             }
         }

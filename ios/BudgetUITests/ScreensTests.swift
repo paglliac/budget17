@@ -24,16 +24,25 @@ final class ScreensTests: XCTestCase {
         shot("home")
 
         // A week past its amount tells why from its red figure: the last expenses, what cost more than planned and
-        // the optional ones.
+        // the optional ones, in two looks.
         let why = app.buttons["week-why"]
         if why.exists {
             why.tap()
-            if app.buttons["why-plan"].waitForExistence(timeout: 10) {
+            let list = pill("A · Списком")
+            if list.exists {
+                list.tap()
+                sleep(1)
                 shot("week-why")
                 app.swipeUp()
                 shot("week-why-more")
-                app.swipeUp()
-                shot("week-why-end")
+                app.swipeDown()
+                pill("B · Свёрнуто").tap()
+                sleep(1)
+                shot("week-why-folded")
+                let fold = app.buttons["optional-fold"]
+                if fold.exists { fold.tap() }
+                shot("week-why-unfolded")
+                pill("A · Списком").tap()
             } else {
                 XCTFail("why the week went below zero opens")
             }
