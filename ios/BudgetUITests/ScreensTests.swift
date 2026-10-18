@@ -245,13 +245,9 @@ final class ScreensTests: XCTestCase {
     /// It changes data, so it runs only against a server with copied databases: TEST_RUNNER_WISHES=1.
     func testWishPlan() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["WISHES"] == "1", "changes data: only against a copy")
-        let reserved = app.buttons["reserved"]
-        XCTAssert(reserved.waitForExistence(timeout: 15))
-        reserved.tap()
-        sleep(2)
-        app.swipeUp()
-        app.swipeUp()
-        let wish = app.buttons["wish-1"]
+        XCTAssert(app.buttons["reserved"].waitForExistence(timeout: 15))
+        tab("Желания")
+        let wish = app.buttons["wish-card-1"]
         XCTAssert(wish.waitForExistence(timeout: 5))
         shot("wishes")
         wish.tap()
@@ -275,7 +271,7 @@ final class ScreensTests: XCTestCase {
         app.buttons["Готово"].firstMatch.tap()
         sleep(1)
         shot("wishes-chosen")
-        app.buttons["wish-1"].tap()
+        app.buttons["wish-card-1"].tap()
         XCTAssert(app.buttons["Отменить"].waitForExistence(timeout: 10))
         app.buttons["Отменить"].tap()
         sleep(2)

@@ -144,20 +144,6 @@ struct Wish: Decodable, Hashable {
     let amount: Double
 }
 
-struct WishItem: Decodable, Hashable, Identifiable {
-    let row: Row
-    let wish: Wish
-    let plannable: Bool
-    var id: String { row.id }
-
-    init(from decoder: Decoder) throws {
-        row = try Row(from: decoder)
-        let c = try decoder.extra()
-        wish = try c.value("wish")
-        plannable = try c.value("plannable")
-    }
-}
-
 struct WeekScreen: Decodable {
     let symbol: String
     let today: String
@@ -173,8 +159,6 @@ struct WeekScreen: Decodable {
     let limit: WeekLimit
     let days: [Day<Expense>]
     let plan: [PlanItem]
-    /// Only the current week has them.
-    let wishes: [WishItem]?
     let weekChoices: [OptionGroup]
     let source: String
 }

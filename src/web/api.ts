@@ -12,7 +12,6 @@ import { listOperations, type Operation } from '../ledger.ts';
 import { paymentDate, regularTotals, regularValues, type RegularExpense } from '../regular.ts';
 import { NO_SHOPS } from '../shops.ts';
 import {
-  adviceTarget,
   envelopeOf,
   EXTRAS_LEVELS,
   extrasOutlook,
@@ -38,7 +37,6 @@ import { capitalize, dayHeading, dayMonth, dayTitle, fromToday, money, monthName
 import { CATEGORY_ICONS, categoryIcon, ENTRY_ICONS, entryIcon, type IconName } from './icons.ts';
 import { recentMonths } from './pages/chrome.ts';
 import {
-  adviceText,
   budgetOf,
   dueLabel,
   extrasTotal,
@@ -53,7 +51,6 @@ import {
   regularPaymentLine,
   weekChoices,
   weekTotal,
-  wishLine,
   type SavedBudget,
   type Total,
 } from './pages/dashboard.ts';
@@ -199,7 +196,7 @@ function purchaseRow(status: PurchaseStatus, current: DateString, symbol: string
 
 /**
  * Money a wish's plan holds in a week or the extras: «Желание» with what expenses set aside of it (see heldLine) until
- * an expense buys the wish, then «Куплено».
+ * an expense buys the wish, then «Куплено». It keeps the wish's sparkles, set aside or bought, only paler.
  */
 function wishPurchaseRow(status: PurchaseStatus, symbol: string, saved: Pick<SavedBudget, 'wishPayments'>) {
   const p = status.purchase;
@@ -210,7 +207,7 @@ function wishPurchaseRow(status: PurchaseStatus, symbol: string, saved: Pick<Sav
       id: `purchase-${p.id}`,
       title: p.title,
       details: ['Желание', bought ? 'куплено' : line.details].filter(Boolean).join(' · '),
-      icon: line.state === 'set' ? 'check' : 'sparkles',
+      icon: 'sparkles',
       color: bought || line.done ? toneColor('gray') : toneColor('yellow'),
       amount: line.amount,
       mark: p.envelope,
@@ -224,6 +221,7 @@ function wishPurchaseRow(status: PurchaseStatus, symbol: string, saved: Pick<Sav
   };
 }
 
+/** A regular payment of a plan; paid in full, it is pale as a purchase bought is. */
 function regularPaymentRow(payment: WeekSummary['regular'][number], symbol: string) {
   const { expense, date } = payment;
   const { details, done } = regularPaymentLine(payment, symbol);
@@ -233,9 +231,10 @@ function regularPaymentRow(payment: WeekSummary['regular'][number], symbol: stri
       title: expense.title,
       details,
       icon: done ? 'check' : entryIcon(expense.icon, expense.title),
-      color: toneColor(done ? 'green' : 'gray'),
+      color: toneColor('gray'),
       amount: expense.amount,
       mark: 'outside',
+      muted: done,
     }),
     regular: expense.id,
   };
@@ -379,7 +378,7 @@ function weekHome(d: ReturnType<typeof loadDashboard>, w: WeekSummary, data: Ent
 }
 
 /**
- * The week tab: what is left, the spending by days, the plan and, in the current week, the wishes. With round figures
+ * The week tab: what is left, the spending by days and the plan; the wishes have a tab of their own. With round figures
  * the totals are to the hundred and still add up to what the week allows; expenses and purchases keep their amounts.
  */
 export function weekScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { week?: string | null }) {
@@ -406,14 +405,6 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
     limit: { amount: w.limit, usual: WEEK_LIMIT },
     days: expenseDays(d.marking, w.spending, today),
     plan: [...w.purchases.map((p) => purchaseRow(p, current, d.symbol, saved)), ...w.regular.map((r) => regularPaymentRow(r, d.symbol))],
-    wishes:
-      phase === 'current'
-        ? d.wishes.map(({ wish, advice, plan, gathered }) => ({
-            ...row({ id: `wish-${wish.id}`, title: wish.title, details: wishLine(wish, plan, adviceText(advice, current, d.symbol), d.symbol, gathered), icon: 'sparkles', color: toneColor('yellow'), amount: wish.amount }),
-            wish,
-            plannable: plan === undefined && adviceTarget(advice) !== null,
-          }))
-        : null,
     weekChoices: weekChoices(current),
     source: options.source,
     canSync: options.canSync,

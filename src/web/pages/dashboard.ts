@@ -944,14 +944,14 @@ export function planSummary(plan: Pick<ChosenPlan, 'steps'>, short: number, s: s
  * A wish's line in «Хочу купить»: its day, then what its chosen plan does and what is set aside for it. A wish with a
  * day but no plan yet waits for one; without a day either, `advice` tells when it fits (see adviceText).
  */
-export function wishLine(wish: Wish, plan: ChosenPlan | undefined, advice: string, s: string, gathered: Pick<Gathering, 'saved' | 'short'>): string {
+function wishLine(wish: Wish, plan: ChosenPlan | undefined, advice: string, s: string, gathered: Pick<Gathering, 'saved' | 'short'>): string {
   const saved = gathered.saved > 0.5 ? `отложено ${money(gathered.saved, s)}` : null;
   if (plan) return [wish.due ? dueLabel(wish.due) : null, planSummary(plan, gathered.short, s), saved].filter(Boolean).join(' · ');
   return [wish.due ? `${dueLabel(wish.due)} · выбрать, как купить` : advice, saved].filter(Boolean).join(' · ');
 }
 
 /** When to buy a wish; `current` is the first day of the current week. */
-export function adviceText(advice: Advice, current: DateString, s: string): string {
+function adviceText(advice: Advice, current: DateString, s: string): string {
   switch (advice.when) {
     case 'now':
       return `Можно на этой неделе, останется ${money(advice.freeAfter, s)}`;

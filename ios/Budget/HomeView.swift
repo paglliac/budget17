@@ -474,12 +474,11 @@ struct WeekSpendingView: View {
 }
 
 /// What a week's plan holds: what is reserved, required and flexible, with the purchases from the week's money, then the
-/// ones from the extras, the regular payments of the week and, in the current week, the wishes. «+» adds a purchase to
-/// the week or to the extras, or a wish.
+/// ones from the extras and the regular payments of the week. «+» adds a purchase to the week or to the extras; the
+/// wishes have a tab of their own.
 struct PlanContent: View {
     let screen: WeekScreen
     @Binding var sheet: BudgetSheet?
-    @Environment(Session.self) private var session
     @State private var error: String?
 
     var body: some View {
@@ -520,24 +519,6 @@ struct PlanContent: View {
                 LilacHeading("Регулярные платежи")
                 plan(regular)
             }
-            if let wishes = s.wishes {
-                LilacHeading(title: "Хочу купить") {
-                    LilacRoundButton(systemImage: "plus", label: "Добавить желание") { sheet = .wish(nil) }
-                }
-                ForEach(Array(wishes.enumerated()), id: \.element.id) { index, item in
-                    Button { sheet = .wish(item.wish.id) } label: {
-                        LilacRow(marker: .symbol("sparkles", Palette.week), title: item.row.title, details: item.row.details, amount: item.row.amount,
-                                 symbol: s.symbol, first: index == 0) {
-                            if item.plannable {
-                                LilacInlineAction(label: "Запланировать") { run { try await session.send("wishes/\(item.wish.id)/plan") } }
-                            }
-                        }
-                    }
-                    .buttonStyle(.card)
-                    .accessibilityIdentifier("wish-\(item.wish.id)")
-                }
-                if wishes.isEmpty { LilacAddRow(label: "Добавить желание") { sheet = .wish(nil) } }
-            }
         }
         .errorAlert($error)
     }
@@ -559,16 +540,12 @@ struct PlanContent: View {
             PlanRow(item: item, symbol: screen.symbol, choices: screen.weekChoices, first: index == 0, sheet: $sheet, error: $error)
         }
     }
-
-    private func run(_ change: @escaping () async throws -> Void) {
-        Task {
-            do { try await change() } catch { self.error = error.localizedDescription }
-        }
-    }
 }
 
-/// A row of a plan: a purchase opens its form and finishes from its menu, a regular payment opens the regular expense.
-/// A required purchase is a violet dot, a flexible one a ring; what is bought or paid has a tick.
+/// A row of a plan: a purchase opens its form and finishes from its menu, a regular payment opens the regular expense,
+/// the money a wish's plan holds opens the wish. A required purchase is a violet dot, a flexible one a ring, a wish's
+/// money has the wish's sparkles; a purchase bought and a payment paid are pale with a tick, a wish's money set aside
+/// or bought keeps its sparkles, pale.
 struct PlanRow: View {
     let item: PlanItem
     let symbol: String
@@ -604,12 +581,10 @@ struct PlanRow: View {
     }
 
     private var marker: LilacMarker {
-        if item.wish != nil { return .symbol(item.row.muted ? "checkmark" : "sparkles", item.row.muted ? Lilac.muted : Palette.week) }
-        if let purchase = item.purchase {
-            if item.row.muted { return .symbol("checkmark", Lilac.muted) }
-            return purchase.kind == "required" ? .dot(Lilac.accent) : .ring(Lilac.accent)
-        }
-        return item.row.icon == "check" ? .symbol("checkmark", Palette.color("green")) : .ring(Lilac.muted)
+        if item.wish != nil { return .symbol("sparkles", item.row.muted ? Lilac.muted : Palette.week) }
+        if item.row.muted { return .symbol("checkmark", Lilac.muted) }
+        if let purchase = item.purchase { return purchase.kind == "required" ? .dot(Lilac.accent) : .ring(Lilac.accent) }
+        return .ring(Lilac.muted)
     }
 }
 
