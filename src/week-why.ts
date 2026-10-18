@@ -7,7 +7,7 @@
 
 import { addDays } from './dates.ts';
 import type { Operation } from './ledger.ts';
-import { envelopeOf, summarizeWeek, type Budget, type PurchaseStatus } from './week.ts';
+import { envelopeOf, pays, summarizeWeek, type Budget, type PurchaseStatus } from './week.ts';
 import type { DateString } from './zenmoney/types.ts';
 
 /** How close small expenses come to be a run: within three hours from the first to the last. */
@@ -63,7 +63,7 @@ export function weekWhy(budget: Budget, week: DateString, confirmed: ReadonlySet
     return status.purchase.done || paid >= status.purchase.amount - 0.005 ? 0 : status.purchase.amount - paid;
   };
   const pay = (o: Operation) => {
-    const status = o.purchase ? fromWeek.get(o.purchase.id) : undefined;
+    const status = [...fromWeek.values()].find((s) => pays(s.purchase, o));
     if (!status) return 0;
     const before = leftOf(status);
     covered.set(status.purchase.id, (covered.get(status.purchase.id) ?? 0) + o.amount);
@@ -75,7 +75,7 @@ export function weekWhy(budget: Budget, week: DateString, confirmed: ReadonlySet
   const took = new Map(ofWeek.map((o) => [o.id, (envelopeOf(budget, o) === 'week' ? o.amount : 0) - pay(o)]));
 
   const byDefault = ofWeek.filter(
-    (o) => envelopeOf(budget, o) === 'week' && !o.purchase && !o.regular && !o.wish && !budget.marks.has(o.id) && !o.optional && !confirmed.has(o.id),
+    (o) => envelopeOf(budget, o) === 'week' && !o.purchase && !o.regular && !o.wish && !o.saving && !budget.marks.has(o.id) && !o.optional && !confirmed.has(o.id),
   );
   const check: Check[] = byDefault.filter((o) => o.amount >= notable).map((spending) => ({ kind: 'spending', spending }));
   check.push(...runsOf(byDefault.filter((o) => o.amount < notable), notable));

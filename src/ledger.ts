@@ -4,7 +4,7 @@ import type { Categorization } from './categorization.ts';
 import { operationAmount, operationKind, type Category, type OperationKind } from './operations.ts';
 import type { RegularExpense } from './regular.ts';
 import { NO_SHOPS, shopFinder, type Shop, type ShopSetup } from './shops.ts';
-import type { Envelope, Purchase, Wish } from './week.ts';
+import type { Envelope, Purchase, Wish, WishSaving } from './week.ts';
 import type { DateString, EntityCollections, Instrument, TagId } from './zenmoney/types.ts';
 
 /** A transaction as people read it: who, what for, from which account, how much. */
@@ -31,8 +31,8 @@ export interface Operation {
   description: string | null;
   /**
    * Top-level category with the title the user gave it: the one the user picked in the app, or else the one from
-   * ZenMoney; a payment of a regular expense without either goes under REGULAR_CATEGORY, of a purchase under
-   * PURCHASE_CATEGORY. Transfers and uncategorised operations have none.
+   * ZenMoney; a payment of a regular expense without either goes under REGULAR_CATEGORY, of a purchase, a wish or
+   * money set aside for one under PURCHASE_CATEGORY. Transfers and uncategorised operations have none.
    */
   category: Category | null;
   /** The category ZenMoney gave it, even when the user picked another one in the app. */
@@ -43,6 +43,8 @@ export interface Operation {
   purchase: { id: number; title: string } | null;
   /** The wish the user said this expense bought; none when not given. */
   wish?: { id: number; title: string } | null;
+  /** The wish the user said this expense set money aside for, and the envelope it took it from; none when not given. */
+  saving?: { id: number; title: string; envelope: WishSaving['envelope'] } | null;
   account: string;
   /** Where a transfer went. */
   toAccount: string | null;
@@ -66,6 +68,8 @@ export interface Sorting {
   purchases?: ReadonlyArray<Pick<Purchase, 'id' | 'title'>>;
   /** The wish each expense bought, by ZenMoney transaction id. */
   wishPayments?: ReadonlyMap<string, number>;
+  /** The wish each expense set money aside for, by ZenMoney transaction id. */
+  wishSavings?: ReadonlyMap<string, WishSaving>;
   wishes?: ReadonlyArray<Pick<Wish, 'id' | 'title'>>;
   /** ZenMoney's categories as they are without it. */
   categories?: CategorySetup;
@@ -137,6 +141,8 @@ export function listOperations(
     const bought = purchaseId === undefined ? undefined : purchases.get(purchaseId);
     const wishId = kind === 'expense' ? sorting?.wishPayments?.get(t.id) : undefined;
     const wish = wishId === undefined ? undefined : wishes.get(wishId);
+    const savingLink = kind === 'expense' ? sorting?.wishSavings?.get(t.id) : undefined;
+    const savedFor = savingLink === undefined ? undefined : wishes.get(savingLink.wish);
     const zenmoneyTag = t.tag?.[0];
     const zenmoneyCategory = kind === 'transfer' || zenmoneyTag === undefined ? undefined : findCategory(zenmoneyTag);
     const category = (sorted && 'tag' in sorted ? findCategory(sorted.tag) : undefined) ?? zenmoneyCategory;
@@ -151,6 +157,7 @@ export function listOperations(
       paid?.title ||
       bought?.title ||
       wish?.title ||
+      savedFor?.title ||
       UNTITLED[kind];
     const name = shop?.title ?? payee;
     // A shop named in the app is told by the name ZenMoney has too, when the bank's own is not known.
@@ -172,11 +179,12 @@ export function listOperations(
       originalPayee: bankName && bankName.toLocaleLowerCase('ru') !== name.toLocaleLowerCase('ru') ? bankName : null,
       comment: comment === payee ? null : comment,
       description: sorting?.descriptions?.get(t.id) ?? null,
-      category: category ?? (paid ? REGULAR_CATEGORY : bought || wish ? PURCHASE_CATEGORY : null),
+      category: category ?? (paid ? REGULAR_CATEGORY : bought || wish || savedFor ? PURCHASE_CATEGORY : null),
       zenmoneyCategory: zenmoneyCategory ?? null,
       regular: paid ? { id: paid.id, title: paid.title } : null,
       purchase: bought ? { id: bought.id, title: bought.title } : null,
       wish: wish ? { id: wish.id, title: wish.title } : null,
+      saving: savedFor && savingLink ? { id: savedFor.id, title: savedFor.title, envelope: savingLink.envelope } : null,
       account,
       toAccount,
       hold: Boolean(t.hold),

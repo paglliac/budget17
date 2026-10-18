@@ -187,6 +187,7 @@ function savedMarking(settings: Settings): SavedMarking {
     regular: settings.regularExpenses(),
     purchases: settings.purchases(),
     wishPayments: settings.wishPayments(),
+    wishSavings: settings.wishSavings(),
     wishes: settings.wishes(),
     wishPlans: settings.wishPlans(),
     marks: settings.spendingMarks(),

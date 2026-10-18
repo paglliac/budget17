@@ -22,6 +22,8 @@ struct HomeView: View {
     let openPlan: (String?) -> Void
     /// Opens a month on its extras; nil is the current one.
     let openExtras: (String?) -> Void
+    /// Opens the «Желания» tab.
+    let openWishes: () -> Void
     @Environment(Session.self) private var session
     @Environment(\.tabBarHeight) private var tabBarHeight
     @State private var picking = false
@@ -75,6 +77,7 @@ struct HomeView: View {
                         openSpending: s.phase == "ahead" ? nil : { path.append(.spending(nil)) },
                         sync: { Task { await session.sync() } },
                         openSort: openPending,
+                        openShort: { wish in if let wish { sheet = .wish(wish) } else { openWishes() } },
                         openExtras: openExtras
                     )
                     .padding(.top, 16)
@@ -245,9 +248,10 @@ struct HomeHero: View {
 }
 
 /// Under the circle, two cards after the user's picture of 2026-10-13: what was spent today (in a past week, in all of
-/// it) with when the data came from ZenMoney, which opens the week's spending, and beside it «Разобрать операции» with
-/// how many expenses wait for a category, which opens them. Once all are sorted the extras of the week's month take its
-/// place and open the month on them.
+/// it) with when the data came from ZenMoney, which opens the week's spending, and beside it the place of what has to be
+/// done, as the server says (`task`): «Разобрать операции» with how many expenses wait for a category, which opens them;
+/// once all are sorted, «Не хватает» on a wish short of money, which opens it with «Добрать»; and with nothing to do,
+/// the extras of the week's month, which open the month on them.
 struct HomeFooter: View {
     let home: WeekHome
     let symbol: String
@@ -255,6 +259,8 @@ struct HomeFooter: View {
     let openSpending: (() -> Void)?
     let sync: () -> Void
     let openSort: () -> Void
+    /// Opens the wish short of money, or «Желания» for several.
+    let openShort: (Int?) -> Void
     let openExtras: (String?) -> Void
 
     var body: some View {
@@ -264,11 +270,17 @@ struct HomeFooter: View {
                     .buttonStyle(.card)
                     .accessibilityIdentifier("spent")
             }
-            if let extras = home.extras, home.pending.count == 0 {
-                Button { openExtras(extras.month) } label: { extrasCard(extras) }
+            // A server from before the task leaves the extras to when all is sorted.
+            switch home.task ?? (home.pending.count == 0 && home.extras != nil ? "extras" : "sort") {
+            case "short" where home.short != nil:
+                Button { openShort(home.short?.wish) } label: { shortCard(home.short!) }
+                    .buttonStyle(.card)
+                    .accessibilityIdentifier("short")
+            case "extras" where home.extras != nil:
+                Button { openExtras(home.extras?.month) } label: { extrasCard(home.extras!) }
                     .buttonStyle(.card)
                     .accessibilityIdentifier("extras")
-            } else {
+            default:
                 Button(action: openSort) { pendingCard }
                     .buttonStyle(.card)
                     .accessibilityIdentifier("pending")
@@ -317,6 +329,15 @@ struct HomeFooter: View {
             if waiting, let note = pending.note {
                 Text(note).font(.footnote.weight(.medium)).foregroundStyle(Lilac.accent).monospacedDigit()
             }
+        }
+    }
+
+    /// «Не хватает» on lilac with a red dot, what is short in red, and the wish or how many.
+    private func shortCard(_ short: WeekHome.Short) -> some View {
+        HomeCard(icon: "sparkles", badge: true, highlighted: true, chevron: true) {
+            Text(short.label).font(.footnote).foregroundStyle(Lilac.muted).lineLimit(1)
+            LilacAmount(amount: short.amount, symbol: symbol, size: 20, color: Lilac.red)
+            Text(short.note).font(.footnote.weight(.medium)).foregroundStyle(Lilac.accent).lineLimit(1).minimumScaleFactor(0.8)
         }
     }
 

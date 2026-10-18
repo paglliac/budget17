@@ -56,9 +56,10 @@ struct WishCards: View {
     }
 }
 
-/// A wish's card: its name, day and amount, then what its plan gathers, the ways its money comes from and the week it is
-/// bought, with «Изменить» and «Отменить план»; a wish without a plan has «Разложить». A plan buying it after its day
-/// shows the week orange, one falling short says by how much in red.
+/// A wish's card: its name, day and amount, then what its plan gathers, what is set aside and the ways its money comes
+/// from and the week it is bought, with «Изменить» and «Отменить план»; a wish without a plan has «Разложить». A plan
+/// buying it after its day shows the week orange, one falling short says by how much in red, and choosing its ways again
+/// («Добрать», or «Освободить» when more was set aside than planned) is a button of its own.
 struct WishCard: View {
     let wish: WishSummary
     let symbol: String
@@ -93,8 +94,12 @@ struct WishCard: View {
                 VStack(spacing: 10) {
                     ForEach(wish.ways) { way in WayLine(way: way, symbol: symbol) }
                 }
-                if wish.situation == "problem" {
-                    Text("Не хватает \(Money.text(wish.short, symbol))").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.red)
+                if wish.situation == "problem" || wish.relay != nil {
+                    // What is short goes with what gathers it, beside it when they fit.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) { shortfall; Spacer(minLength: 0); relay }
+                        VStack(alignment: .leading, spacing: 4) { shortfall; relay }
+                    }
                 }
                 HStack(spacing: 8) {
                     LilacInlineAction(label: "Изменить", action: open)
@@ -102,6 +107,7 @@ struct WishCard: View {
                     Spacer()
                 }
             default:
+                ForEach(wish.ways) { way in WayLine(way: way, symbol: symbol) }
                 HStack {
                     Text("Не разложено").font(.subheadline).foregroundStyle(Lilac.muted)
                     Spacer()
@@ -113,13 +119,29 @@ struct WishCard: View {
         .background(Lilac.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
         .confirmationDialog("Отменить план «\(wish.wish.title)»?", isPresented: $confirmUnchoose, titleVisibility: .visible) {
-            Button("Отменить план", role: .destructive) {
-                Task {
-                    do { try await session.send("wishes/\(wish.id)/ways/delete") } catch { self.error = error.localizedDescription }
-                }
-            }
+            Button("Отменить план", role: .destructive) { send("wishes/\(wish.id)/ways/delete") }
         }
         .errorAlert($error)
+    }
+
+    @ViewBuilder private var shortfall: some View {
+        if wish.situation == "problem" {
+            Text("Не хватает \(Money.text(wish.short, symbol))").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.red).fixedSize()
+        }
+    }
+
+    @ViewBuilder private var relay: some View {
+        if let relay = wish.relay {
+            LilacInlineAction(label: relay.label) { send("wishes/\(wish.id)/ways", ["ways": relay.ways]) }
+                .fixedSize()
+                .accessibilityIdentifier("wish-relay-\(wish.id)")
+        }
+    }
+
+    private func send(_ path: String, _ form: [String: String] = [:]) {
+        Task {
+            do { try await session.send(path, form) } catch { self.error = error.localizedDescription }
+        }
     }
 }
 

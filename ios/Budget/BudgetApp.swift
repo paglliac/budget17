@@ -53,7 +53,7 @@ struct RootView: View {
             ZStack {
                 screen(.wishes) { WishesView() }
                 screen(.operations) { OperationsView(filter: $filter) }
-                screen(.home) { BudgetView(openPending: openPending, openPlan: openPlan, returns: homeReturns, extrasOpens: extrasOpens) }
+                screen(.home) { BudgetView(openPending: openPending, openPlan: openPlan, openWishes: { tab = .wishes }, returns: homeReturns, extrasOpens: extrasOpens) }
                 screen(.plan) { PlanView(week: $planWeek) }
                 screen(.more) { MoreView(opening: $shop) }
             }

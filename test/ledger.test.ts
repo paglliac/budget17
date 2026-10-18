@@ -55,6 +55,7 @@ describe('listOperations', () => {
       regular: null,
       purchase: null,
       wish: null,
+      saving: null,
       account: 'Т-Банк',
       toAccount: null,
       hold: true,

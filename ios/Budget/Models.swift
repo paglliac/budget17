@@ -193,10 +193,22 @@ struct WeekHome: Decodable, Hashable {
     let reserved: Reserved
     let spent: Figure?
     let pending: Pending
+    /// Wishes whose chosen plan falls short of them; nil when none is, or from a server before this.
+    let short: Short?
     /// In the place of the expenses to sort once all are sorted; a server from before them sends none.
     let extras: Extras?
+    /// What the card beside today's spending shows: «sort», «short» or «extras»; a server from before this sends none.
+    let task: String?
     /// An ISO moment.
     let syncedAt: String?
+
+    /// «Не хватает» with what the plans of wishes lack, and the wish it opens, or how many wishes, which open «Желания».
+    struct Short: Decodable, Hashable {
+        let label: String
+        let amount: Double
+        let note: String
+        let wish: Int?
+    }
 
     struct Reserved: Decodable, Hashable {
         let label: String
@@ -798,6 +810,9 @@ struct WishScreen: Decodable {
     let picks: String
     let covered: Double
     let short: Double
+    /// What expenses set aside for the wish; nil from a server older than money set aside.
+    let saved: Double?
+    let relay: WishRelay?
     let steps: [PlanStep]
     let buy: Buy
     let chosen: Bool
@@ -824,6 +839,15 @@ struct WishScreen: Decodable {
     }
 }
 
+/// Choosing the chosen plan's ways again, as a button: «Добрать 1 000 ₽» gathers what was not set aside, «Освободить»
+/// holds less where more was set aside than planned. It posts `ways` to /api/wishes/:id/ways.
+struct WishRelay: Decodable, Hashable {
+    let label: String
+    let amount: Double
+    let add: Bool
+    let ways: String
+}
+
 /// «Желания»: every wish with its chosen plan, and the money the plans hold by month.
 struct WishesScreen: Decodable {
     let symbol: String
@@ -843,6 +867,10 @@ struct WishSummary: Decodable, Hashable, Identifiable {
     let when: String
     let covered: Double
     let short: Double
+    /// What expenses set aside for the wish; 0 from a server older than money set aside.
+    let saved: Double
+    let relay: WishRelay?
+    /// Where the money comes from: what is set aside first, then the ways of the chosen plan.
     let ways: [Way]
     var id: Int { wish.id }
 
@@ -865,6 +893,8 @@ struct WishSummary: Decodable, Hashable, Identifiable {
         when = try c.value("when")
         covered = try c.value("covered")
         short = try c.value("short")
+        saved = try c.optional("saved") ?? 0
+        relay = try c.optional("relay")
         ways = try c.value("ways")
     }
 }

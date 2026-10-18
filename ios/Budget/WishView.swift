@@ -55,6 +55,7 @@ struct WishPlanContent: View {
                 LilacAmount(amount: s.wish.amount, symbol: s.symbol, size: 44).padding(.top, 2)
                 DueLine(screen: s) { due in post("wishes/\(s.wish.id)/due", ["due": due]) }
                     .padding(.top, 10)
+                if let saved = s.saved, saved > 0.5 { SavedLine(amount: saved, symbol: s.symbol).padding(.top, 10) }
                 if !s.bought {
                     LilacHeading("Как собрать")
                     VStack(spacing: 12) {
@@ -76,6 +77,7 @@ struct WishPlanContent: View {
         .scrollIndicators(.hidden)
         .safeAreaInset(edge: .bottom) {
             Gathered(screen: s, busy: busy, choose: { post("wishes/\(s.wish.id)/ways", ["ways": s.picks]) { ways = nil } },
+                     relay: { relay in post("wishes/\(s.wish.id)/ways", ["ways": relay.ways]) { ways = nil } },
                      unchoose: { post("wishes/\(s.wish.id)/ways/delete", [:]) { ways = nil } })
         }
         .errorAlert($error)
@@ -110,6 +112,25 @@ struct DueLine: View {
                 .labelsHidden()
                 .environment(\.locale, Locale(identifier: "ru_RU"))
                 .opacity(screen.wish.dueSet ? 1 : 0.55)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 52)
+        .background(Lilac.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
+    }
+}
+
+/// What expenses set aside for the wish, under its day.
+struct SavedLine: View {
+    let amount: Double
+    let symbol: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: Icons.symbol("piggy")).font(.subheadline.weight(.semibold)).foregroundStyle(Palette.color("green"))
+            Text("Отложено").font(.body)
+            Spacer()
+            Text(Money.text(amount, symbol)).font(.body.weight(.semibold)).monospacedDigit()
         }
         .padding(.horizontal, 16)
         .frame(height: 52)
@@ -232,6 +253,8 @@ struct Gathered: View {
     let screen: WishScreen
     let busy: Bool
     let choose: () -> Void
+    /// Chooses the chosen plan's ways again, starting from what is set aside.
+    let relay: (WishRelay) -> Void
     let unchoose: () -> Void
 
     var body: some View {
@@ -252,9 +275,13 @@ struct Gathered: View {
             if s.bought {
                 Label("Куплено", systemImage: "checkmark").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.accent)
             } else if s.chosen {
+                if let r = s.relay, r.add {
+                    LilacPrimaryButton(label: r.label, busy: busy) { relay(r) }.accessibilityIdentifier("wish-relay")
+                }
                 HStack {
                     Label("Выбрано", systemImage: "checkmark").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.accent)
                     Spacer()
+                    if let r = s.relay, !r.add { LilacInlineAction(label: r.label) { relay(r) } }
                     LilacInlineAction(label: "Отменить", action: unchoose)
                 }
             } else if picked {

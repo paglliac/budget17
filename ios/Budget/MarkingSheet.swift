@@ -466,7 +466,7 @@ struct MarkingSheet: View {
 
     @ViewBuilder
     private func payments(_ s: SpendingScreen) -> some View {
-        let picked = applying.flatMap { $0.hasPrefix("regular-") || $0.hasPrefix("purchase-") ? $0 : nil } ?? current(s.payments.choices, clearedBy: "unlink")
+        let picked = applying.flatMap { ["regular-", "purchase-", "wish-", "save-"].contains(where: $0.hasPrefix) ? $0 : nil } ?? current(s.payments.choices, clearedBy: "unlink")
         VStack(spacing: 10) {
             ForEach(Array(s.payments.choices.enumerated()), id: \.element.id) { index, choice in
                 PaymentCard(label: choice.label, detail: choice.detail, icon: choice.icon ?? "repeat", selected: choice.choice == picked, suggested: choice.isSuggested) {

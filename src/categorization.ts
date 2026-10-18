@@ -1,5 +1,5 @@
 // Expenses are sorted in the app: into a category when ZenMoney has none for them, or as the payment of a regular
-// expense, of a purchase planned in a week or of a wish; incomes only into a category. What the user picks is kept by
+// expense, of a purchase planned in a week or of a wish, or as money set aside for a wish; incomes only into a category. What the user picks is kept by
 // src/settings.ts and applied by listOperations; this module suggests a pick for each expense or income from the picks
 // before it and from the amounts and days of regular expenses, and lists what an expense may have paid.
 
@@ -9,6 +9,7 @@ import { shopKey } from './payees.ts';
 import type { Category } from './operations.ts';
 import { nearestPayment, paidBy, type RegularExpense } from './regular.ts';
 import { monthOfWeek, purchaseStatus, weekOf, type Purchase, type WeekStart, type Wish } from './week.ts';
+import { heldFor } from './wish-plans.ts';
 import type { DateString, TagId } from './zenmoney/types.ts';
 
 /** Where the user put an expense: a category, or the regular expense it paid. A purchase it paid is kept apart. */
@@ -46,7 +47,7 @@ export function suggester(history: Operation[], regular: RegularExpense[]): (exp
       const due = nearestPayment(expense, o.date);
       if (due !== null) paid.add(`${expense.id}:${due}`);
       if (payee !== null) payments.push({ payee, amount: o.amount, expense });
-    } else if (o.category && !o.purchase && payee !== null) {
+    } else if (o.category && !o.purchase && !o.wish && !o.saving && payee !== null) {
       const counts = categories.get(payee) ?? new Map<TagId, { category: Category; count: number }>();
       const seen = counts.get(o.category.id);
       counts.set(o.category.id, { category: o.category, count: (seen?.count ?? 0) + 1 });
@@ -84,17 +85,22 @@ export function suggester(history: Operation[], regular: RegularExpense[]): (exp
   };
 }
 
-/** Something an expense may have paid, with what other expenses have not paid of it yet; a wish is bought whole. */
+/**
+ * Something an expense may have paid, with what other expenses have not paid of it yet; a wish is bought whole, and
+ * money set aside for a wish pays what its plan holds where the expense came, if it holds anything there.
+ */
 export type PaymentChoice =
   | { regular: RegularExpense; date: DateString; left: number }
   | { purchase: Purchase; left: number }
-  | { wish: Wish; week: DateString; left: number };
+  | { wish: Wish; week: DateString; left: number }
+  | { saving: Wish; held: Purchase | null; left: number };
 
 /**
  * What an expense may have paid, likeliest first: payments of regular expenses due within PAYMENT_WINDOW days of it,
- * purchases planned within PURCHASE_WINDOW days of its week or among the extras of its month, and wishes whose plan
- * buys them so near. Payments and purchases that other expenses paid in full, purchases marked bought, the money plans
- * of wishes hold, and wishes bought are left out. A bill is paid with its
+ * purchases planned within PURCHASE_WINDOW days of its week or among the extras of its month, the money the plans of
+ * wishes hold in its week or among the extras of its month, to set aside, and wishes whose plan buys them so near.
+ * Payments, purchases and held money that other expenses paid in full, purchases marked bought, and wishes bought are
+ * left out. A bill is paid with its
  * amount, so payments whose amount left is the expense's within AMOUNT_SPREAD come first, then the purchases planned
  * in the expense's week, then the rest. Within each, the closer what is left of one to the expense's amount, the
  * likelier it is; then the closer its date. `expenses` are the expenses around it with what they paid, the expense
@@ -107,8 +113,8 @@ export function paymentChoices(
     purchases: readonly Purchase[];
     expenses: readonly Operation[];
     weekStart: WeekStart;
-    /** Wishes with a plan, not bought yet, and the week the plan buys them in. */
-    wishes?: ReadonlyArray<{ wish: Wish; week: DateString }>;
+    /** Wishes not bought yet, and the week their plan buys them in, if they have one. */
+    wishes?: ReadonlyArray<{ wish: Wish; week: DateString | null }>;
   },
 ): PaymentChoice[] {
   const others = context.expenses.filter((o) => o.id !== expense.id);
@@ -130,6 +136,13 @@ export function paymentChoices(
     if (near && !status.bought) choices.push({ choice: { purchase: p, left: status.left }, rank: p.week === week ? 1 : 2, days });
   }
   for (const { wish, week: buying } of context.wishes ?? []) {
+    const held = heldFor(context.purchases, wish.id, expense.date);
+    // Money held in a week gone by is offered too, while what is linked to it has not set it all aside.
+    const set = held ? purchaseStatus(held, others).covered : 0;
+    if (held && set < held.amount - 0.005) {
+      choices.push({ choice: { saving: wish, held, left: held.amount - set }, rank: held.week === week ? 1 : 2, days: Math.abs(daysBetween(week, held.week)) });
+    }
+    if (buying === null) continue;
     const days = Math.abs(daysBetween(week, buying));
     if (days <= PURCHASE_WINDOW || monthOfWeek(buying) === monthOfWeek(week)) choices.push({ choice: { wish, week: buying, left: wish.amount }, rank: buying === week ? 1 : 2, days });
   }
@@ -144,7 +157,7 @@ export function paymentChoices(
  * payee nor comment.
  */
 function payeeKey(o: Operation): string | null {
-  const named = !isUntitled(o) && ![o.category?.title, o.regular?.title, o.purchase?.title, o.wish?.title].includes(o.payee);
+  const named = !isUntitled(o) && ![o.category?.title, o.regular?.title, o.purchase?.title, o.wish?.title, o.saving?.title].includes(o.payee);
   const name = named ? o.payee : o.comment;
   return name ? shopKey(name) || null : null;
 }

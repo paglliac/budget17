@@ -3,10 +3,13 @@
 // the extras, a cut of the weeks before the day, the savings of the month it is bought in, or waiting for the extras
 // of a later month. A plan, once chosen, is kept as its steps (settings.ts) and laid over the budget: the money it
 // takes from a week or a month's extras is held there as a purchase of the wish, and what it takes from savings shows
-// in the month's flow. Pure functions.
+// in the month's flow. Expenses that set money aside for the wish, such as a transfer to savings, pay what the plan
+// holds where they come; what the plan held before the buying in a week or month gone by is set aside only as far as
+// they paid it (the user's rule, 2026-10-18), and a plan chosen anew starts from what is set aside. Pure functions.
 
 import { addDays, shiftMonth, type MonthString } from './dates.ts';
-import { monthOfWeek, summarizeExtras, weekOf, weeksOfMonth, type Budget, type Purchase, type Wish } from './week.ts';
+import type { Operation } from './ledger.ts';
+import { monthOfWeek, pays, purchaseStatus, summarizeExtras, weekOf, weeksOfMonth, type Budget, type Purchase, type PurchaseStatus, type WeekStart, type Wish } from './week.ts';
 import type { DateString } from './zenmoney/types.ts';
 
 /** A wish with the day it is needed by. */
@@ -219,16 +222,6 @@ export function combinedPlan(goal: WishGoal, context: PlanContext, picks: readon
   return { plan: { buyWeek: buying, steps, short: Math.max(0, Math.round(left)) }, parts };
 }
 
-/**
- * The steps of a plan that have begun by `today`, which a new plan keeps: what the weeks up to this one held, and what
- * the months before this one held or took from savings.
- */
-export function begunSteps(steps: readonly Step[], today: DateString, weekStart: number): Step[] {
-  const current = weekOf(today, weekStart);
-  const thisMonth = monthOfWeek(current);
-  return steps.filter((s) => (s.kind === 'week' ? s.week <= current : s.kind === 'move' ? false : stepMonth(s) < thisMonth));
-}
-
 /** Picks as the app sends them: `<way>:<amount>` in the order picked, the amount left out for what the others leave. */
 export function parsePicks(text: string | null): WayPick[] {
   if (!text) return [];
@@ -252,38 +245,141 @@ export interface ChosenPlan {
 }
 
 /**
- * The money chosen plans hold as purchases of their wishes: one a week and envelope each, titled by the wish, with
- * · отложить when it is set aside before the month the wish is bought in. Their ids are below zero, as no purchase of
+ * The money chosen plans hold as purchases of their wishes: one a week of the week's money and one a month of the
+ * extras each, titled by the wish, with · отложить when it is set aside before the month the wish is bought in; a
+ * month's extras sit in the earliest week the plan holds them in. Expenses that set money aside for the wish from the
+ * envelope pay them: those of the week, or of the weeks of the month (`savedIn`). What is held before the buying in a
+ * week or a month gone by `today` is finished, keeping only what such expenses paid, so the rest goes back; the buying
+ * week's and month's stays, as the expense that buys the wish pays it. Their ids are below zero, as no purchase of
  * settings.db has. A wish already bought keeps them, since the expense that bought it counts nowhere else.
  */
-export function wishPurchases(plans: ReadonlyArray<{ wish: Pick<Wish, 'id' | 'title'>; plan: ChosenPlan }>): Purchase[] {
+export function wishPurchases(
+  plans: ReadonlyArray<{ wish: Pick<Wish, 'id' | 'title'>; plan: Pick<ChosenPlan, 'buyWeek' | 'steps'> }>,
+  { today, weekStart }: { today: DateString; weekStart: WeekStart },
+): Purchase[] {
+  const current = weekOf(today, weekStart);
+  const thisMonth = monthOfWeek(current);
   const purchases: Purchase[] = [];
   for (const { wish, plan } of plans) {
+    const buyingMonth = monthOfWeek(plan.buyWeek);
     const held = new Map<string, Purchase>();
     for (const step of plan.steps) {
       if (step.kind !== 'week' && step.kind !== 'extra') continue;
       const envelope = step.kind;
-      const key = `${step.week}/${envelope}`;
+      const month = monthOfWeek(step.week);
+      const key = heldKey(step);
       const before = held.get(key);
       if (before) {
         before.amount += step.amount;
+        if (step.week < before.week) before.week = step.week;
         continue;
       }
-      const buying = monthOfWeek(step.week) === monthOfWeek(plan.buyWeek);
+      const weeks = weeksOfMonth(month, weekStart);
       held.set(key, {
         id: -(wish.id * 1000 + held.size + 1),
-        title: buying ? wish.title : `${wish.title} · отложить`,
+        title: month === buyingMonth ? wish.title : `${wish.title} · отложить`,
         amount: step.amount,
         week: step.week,
         envelope,
         kind: 'required',
-        done: false,
+        done: envelope === 'week' ? step.week < current && step.week < plan.buyWeek : month < thisMonth && month < buyingMonth,
         wish: wish.id,
+        savedIn: envelope === 'week' ? { from: step.week, to: addDays(step.week, 6) } : { from: weeks[0] ?? step.week, to: addDays(weeks.at(-1) ?? step.week, 6) },
       });
     }
     purchases.push(...held.values());
   }
   return purchases;
+}
+
+/** Which of a wish's held purchases a step's money is in: its week's of the week's money, or its month's extras. */
+function heldKey(step: Pick<Extract<Step, { kind: 'week' | 'extra' }>, 'kind' | 'week'>): string {
+  return step.kind === 'week' ? `week/${step.week}` : `extra/${monthOfWeek(step.week)}`;
+}
+
+/**
+ * What a wish's plan holds that an expense of `date` would set aside, among `purchases` with those of the plans of
+ * wishes: its week's of the week's money, or else its month's extras.
+ */
+export function heldFor(purchases: readonly Purchase[], wish: number, date: DateString): Purchase | undefined {
+  const held = purchases.filter((p) => p.wish === wish && p.savedIn !== undefined && date >= p.savedIn.from && date <= p.savedIn.to);
+  return held.find((p) => p.envelope === 'week') ?? held[0];
+}
+
+/** Where a wish's plan stands by today with the money set aside for it. */
+export interface Gathering {
+  /** What expenses set aside for the wish, whatever the plan held. */
+  saved: number;
+  /** What is set aside, with what the plan still holds and takes from savings. */
+  covered: number;
+  /** What that leaves of the wish. */
+  short: number;
+  /** The money the plan holds, with what set it aside, by date. */
+  held: PurchaseStatus[];
+  /** Expenses that set money aside for the wish where the plan held nothing, newest first. */
+  loose: Operation[];
+}
+
+/** What a wish's plan gathers by today, given `savings`, the expenses that set money aside for the wish. */
+export function gathering(
+  wish: Pick<Wish, 'id' | 'title' | 'amount'>,
+  plan: Pick<ChosenPlan, 'buyWeek' | 'steps'> | null,
+  savings: readonly Operation[],
+  context: { today: DateString; weekStart: WeekStart },
+): Gathering {
+  const held = (plan ? wishPurchases([{ wish, plan }], context) : []).map((p) => purchaseStatus(p, savings)).sort((a, b) => a.purchase.week.localeCompare(b.purchase.week));
+  const saved = savings.reduce((sum, o) => sum + o.amount, 0);
+  const taken = (plan?.steps ?? []).reduce((sum, s) => sum + (s.kind === 'savings' ? s.amount : 0), 0);
+  const covered = saved + held.reduce((sum, h) => sum + h.left, 0) + taken;
+  const loose = savings.filter((o) => !held.some((h) => pays(h.purchase, o)));
+  return { saved, covered, short: Math.max(0, Math.round(wish.amount - covered)), held, loose };
+}
+
+/**
+ * What a new plan keeps of the one chosen before, as it stands by today: of the money held before this week, or before
+ * this month for the extras, what was set aside, unless it is the buying's, which stays as planned; this week's as
+ * planned, or what was set aside if more; of this month's extras, what was set aside; what the months before this one
+ * took from savings; and the money set aside where no plan held it. The purchases moved are left out, as a new plan
+ * moves them anew.
+ */
+export function keptSteps(gathered: Pick<Gathering, 'held' | 'loose'>, steps: readonly Step[], today: DateString, weekStart: WeekStart): Step[] {
+  const current = weekOf(today, weekStart);
+  const thisMonth = monthOfWeek(current);
+  const kept: Step[] = [];
+  for (const { purchase: p, covered: set } of gathered.held) {
+    const key = heldKey({ kind: p.envelope, week: p.week });
+    const way = steps.find((s) => (s.kind === 'week' || s.kind === 'extra') && heldKey(s) === key)?.way ?? SAVED_WAY;
+    const begun = p.envelope === 'week' ? p.week <= current : monthOfWeek(p.week) < thisMonth;
+    const amount = p.done ? set : begun ? Math.max(p.amount, set) : set;
+    if (amount > 0.005) kept.push({ way, kind: p.envelope, week: p.week, amount });
+  }
+  kept.push(...steps.filter((s) => s.kind === 'savings' && s.month < thisMonth));
+  for (const o of gathered.loose) {
+    if (o.saving) kept.push({ way: SAVED_WAY, kind: o.saving.envelope, week: weekOf(o.date, weekStart), amount: o.amount });
+  }
+  return kept;
+}
+
+/** The way of the money set aside for a wish where no plan held it. */
+export const SAVED_WAY = 'saved';
+
+/**
+ * What each way of a chosen plan still gives after `current`, the first day of this week, by way id: its share of what
+ * the plan holds and nothing has set aside yet, and what it takes from savings. What is set aside already is the
+ * wish's, whatever way it came by, and so is what this week holds, as a plan chosen anew keeps it.
+ */
+export function heldByWay(gathered: Pick<Gathering, 'held'>, steps: readonly Step[], current: DateString): Map<string, number> {
+  const byWay = new Map<string, number>();
+  const add = (way: string, amount: number) => byWay.set(way, (byWay.get(way) ?? 0) + amount);
+  for (const { purchase: p, left } of gathered.held) {
+    if (p.envelope === 'week' && p.week <= current) continue;
+    const key = heldKey({ kind: p.envelope, week: p.week });
+    const of = steps.flatMap((s) => ((s.kind === 'week' || s.kind === 'extra') && heldKey(s) === key ? [s] : []));
+    const total = of.reduce((sum, s) => sum + s.amount, 0);
+    for (const s of of) if (total > 0) add(s.way, (left * s.amount) / total);
+  }
+  for (const s of steps) if (s.kind === 'savings') add(s.way, s.amount);
+  return byWay;
 }
 
 /** What chosen plans take from a month's savings. */

@@ -10,6 +10,8 @@ struct BudgetView: View {
     let openPending: () -> Void
     /// Opens the plan tab on a week.
     let openPlan: (String?) -> Void
+    /// Opens the «Желания» tab.
+    let openWishes: () -> Void
     /// Counts the returns to the main page.
     let returns: Int
     /// Counts the opens of this month's extras from their widget.
@@ -27,7 +29,7 @@ struct BudgetView: View {
     var body: some View {
         Group {
             switch mode {
-            case .week: HomeView(mode: $mode, week: $week, path: $path, sheet: $sheet, openPending: openPending, openPlan: openPlan, openExtras: openExtras)
+            case .week: HomeView(mode: $mode, week: $week, path: $path, sheet: $sheet, openPending: openPending, openPlan: openPlan, openExtras: openExtras, openWishes: openWishes)
             case .month: MonthView(mode: $mode, month: $month, focusExtras: $focusExtras, sheet: $sheet) { opened in
                 week = opened
                 mode = .week

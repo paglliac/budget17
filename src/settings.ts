@@ -18,7 +18,7 @@ import type { MonthString } from './dates.ts';
 import { isIncomeModel, type Income, type IncomeInput } from './income.ts';
 import type { RegularExpense, RegularExpenseInput } from './regular.ts';
 import { APP_LOGOS, type ShopLook, type ShopSetup } from './shops.ts';
-import { alignWeek, EXTRAS_LEVELS, type Envelope, type ExtrasLevels, type Purchase, type PurchaseInput, type WeekStart, type Wish, type WishInput } from './week.ts';
+import { alignWeek, EXTRAS_LEVELS, type Envelope, type ExtrasLevels, type Purchase, type PurchaseInput, type WeekStart, type Wish, type WishInput, type WishSaving } from './week.ts';
 import type { ChosenPlan, Step } from './wish-plans.ts';
 import type { DateString, TagId } from './zenmoney/types.ts';
 
@@ -78,6 +78,14 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS wish_payment (
     transaction_id TEXT PRIMARY KEY,
     wish_id INTEGER NOT NULL
+  ) STRICT;
+
+  -- ZenMoney expenses that set money aside for a wish, such as a transfer to savings in another bank. Each counts from
+  -- the envelope its plan held the money in where the expense came (wish-plans.ts), the week's money or the extras.
+  CREATE TABLE IF NOT EXISTS wish_saving (
+    transaction_id TEXT PRIMARY KEY,
+    wish_id INTEGER NOT NULL,
+    envelope TEXT NOT NULL CHECK (envelope IN ('week', 'extra'))
   ) STRICT;
 
   -- ZenMoney spending moved out of its week; spending without a mark counts towards the week.
@@ -531,11 +539,15 @@ export class Settings {
     return Number(this.#db.prepare('UPDATE wish SET due = ? WHERE id = ?').run(due, id).changes) > 0;
   }
 
-  /** False when there is no such wish. Its plan goes, the purchases it moved back, and its expenses are left unsorted. */
+  /**
+   * False when there is no such wish. Its plan goes, the purchases it moved back, and its expenses, those that bought it
+   * and those that set money aside for it, are left unsorted.
+   */
   deleteWish(id: number): boolean {
     return this.#transaction(() => {
       this.dropWishPlan(id);
       this.#db.prepare('DELETE FROM wish_payment WHERE wish_id = ?').run(id);
+      this.#db.prepare('DELETE FROM wish_saving WHERE wish_id = ?').run(id);
       return Number(this.#db.prepare('DELETE FROM wish WHERE id = ?').run(id).changes) > 0;
     });
   }
@@ -622,6 +634,32 @@ export class Settings {
       if (wishId === null) return;
       this.#db.prepare('INSERT INTO wish_payment (transaction_id, wish_id) VALUES (?, ?)').run(transactionId, wishId);
       this.#db.prepare('DELETE FROM purchase_payment WHERE transaction_id = ?').run(transactionId);
+      this.#db.prepare('DELETE FROM wish_saving WHERE transaction_id = ?').run(transactionId);
+      this.#db.prepare('DELETE FROM categorization WHERE transaction_id = ? AND regular_expense_id IS NOT NULL').run(transactionId);
+    });
+  }
+
+  /** The wishes expenses set money aside for, with the envelope each counts from, by ZenMoney transaction id. */
+  wishSavings(): Map<string, WishSaving> {
+    return new Map(
+      this.#db
+        .prepare('SELECT transaction_id, wish_id, envelope FROM wish_saving')
+        .all()
+        .map((row): [string, WishSaving] => [String(row.transaction_id), { wish: Number(row.wish_id), envelope: row.envelope === 'extra' ? 'extra' : 'week' }]),
+    );
+  }
+
+  /**
+   * Says an expense set money aside for a wish from the week's money or the extras, instead of paying or buying
+   * anything; null unlinks it.
+   */
+  saveForWish(transactionId: string, saving: WishSaving | null): void {
+    this.#transaction(() => {
+      this.#db.prepare('DELETE FROM wish_saving WHERE transaction_id = ?').run(transactionId);
+      if (saving === null) return;
+      this.#db.prepare('INSERT INTO wish_saving (transaction_id, wish_id, envelope) VALUES (?, ?, ?)').run(transactionId, saving.wish, saving.envelope);
+      this.#db.prepare('DELETE FROM wish_payment WHERE transaction_id = ?').run(transactionId);
+      this.#db.prepare('DELETE FROM purchase_payment WHERE transaction_id = ?').run(transactionId);
       this.#db.prepare('DELETE FROM categorization WHERE transaction_id = ? AND regular_expense_id IS NOT NULL').run(transactionId);
     });
   }
@@ -707,6 +745,7 @@ export class Settings {
       if (regular !== null) {
         this.#db.prepare('DELETE FROM purchase_payment WHERE transaction_id = ?').run(transactionId);
         this.#db.prepare('DELETE FROM wish_payment WHERE transaction_id = ?').run(transactionId);
+        this.#db.prepare('DELETE FROM wish_saving WHERE transaction_id = ?').run(transactionId);
       }
     });
   }
@@ -731,6 +770,7 @@ export class Settings {
       if (purchaseId === null) return;
       this.#db.prepare('INSERT INTO purchase_payment (transaction_id, purchase_id) VALUES (?, ?)').run(transactionId, purchaseId);
       this.#db.prepare('DELETE FROM wish_payment WHERE transaction_id = ?').run(transactionId);
+      this.#db.prepare('DELETE FROM wish_saving WHERE transaction_id = ?').run(transactionId);
       this.#db.prepare('DELETE FROM categorization WHERE transaction_id = ? AND regular_expense_id IS NOT NULL').run(transactionId);
     });
   }

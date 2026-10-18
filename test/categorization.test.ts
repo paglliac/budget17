@@ -4,6 +4,7 @@ import { paymentChoices, suggester, type PaymentChoice, type Suggestion } from '
 import { PURCHASE_CATEGORY, REGULAR_CATEGORY, type Operation } from '../src/ledger.ts';
 import type { Category } from '../src/operations.ts';
 import type { Purchase } from '../src/week.ts';
+import { wishPurchases, type Step } from '../src/wish-plans.ts';
 import { regular } from './fixtures.ts';
 
 const groceries: Category = { id: 'groceries', title: 'Продукты', color: null };
@@ -121,7 +122,9 @@ describe('paymentChoices', () => {
     ...overrides,
   });
   const named = (choices: PaymentChoice[]) =>
-    choices.map((c) => ('regular' in c ? `${c.regular.title} ${c.date} ${c.left}` : 'purchase' in c ? `${c.purchase.title} ${c.left}` : `${c.wish.title} ${c.week} ${c.left}`));
+    choices.map((c) =>
+      'regular' in c ? `${c.regular.title} ${c.date} ${c.left}` : 'purchase' in c ? `${c.purchase.title} ${c.left}` : 'saving' in c ? `отложить ${c.saving.title} ${c.left}` : `${c.wish.title} ${c.week} ${c.left}`,
+    );
   const groceries = purchase(1, 'Продукты', 3_000, '2026-10-05');
   const shoes = purchase(2, 'Ботинки', 8_000, '2026-10-12');
 
@@ -174,5 +177,17 @@ describe('paymentChoices', () => {
     const self = expense('Т-Мобайл', 1_500, '2026-10-01', { category: REGULAR_CATEGORY, regular: { id: phone.id, title: phone.title } });
 
     assert.deepEqual(named(paymentChoices(self, { regular: [phone], purchases: [], expenses: [self], weekStart: 0 })), ['Телефон 2026-10-02 1500']);
+  });
+
+  it('offers to set aside what a wish’s plan holds in the week, with what is set aside already taken off', () => {
+    const tyres = { id: 1, title: 'Шины Kia K5', amount: 60_000, due: '2026-11-28' };
+    const plan = { buyWeek: '2026-11-28', steps: [{ way: 'weeks', kind: 'week', week: '2026-10-17', amount: 5_000 }] satisfies Step[] };
+    const held = wishPurchases([{ wish: tyres, plan }], { today: '2026-10-18', weekStart: 5 });
+    const aside = expense('Перевод', 5_000, '2026-10-17');
+    const before = { ...expense('Перевод', 1_000, '2026-10-18'), id: 'before', saving: { id: tyres.id, title: tyres.title, envelope: 'week' as const } };
+    const context = { regular: [], purchases: held, expenses: [aside, before], weekStart: 5, wishes: [{ wish: tyres, week: plan.buyWeek }] };
+
+    assert.deepEqual(named(paymentChoices(aside, context)), ['отложить Шины Kia K5 4000'], 'buying it is too far off to offer');
+    assert.deepEqual(named(paymentChoices(expense('Перевод', 5_000, '2026-10-31'), context)), [], 'a week the plan holds nothing in has nothing to set aside');
   });
 });

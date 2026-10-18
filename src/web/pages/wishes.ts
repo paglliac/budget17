@@ -1,21 +1,25 @@
-// A wish's plan: the ways to afford the wish by its day (wish-plans.ts) as the app's cards say them, and the forms that
-// set the day and choose the plan; what a chosen plan does in a line is wishLine in dashboard.ts. Forms post to
+// A wish's plan: the ways to afford the wish by its day (wish-plans.ts) as the app's cards say them, what it gathers
+// with the money expenses set aside for the wish, and the forms that set the day and choose the plan; what a chosen
+// plan does in a line is wishLine in dashboard.ts. Forms post to
 // /wishes/:id/due, /wishes/:id/ways and /wishes/:id/ways/delete (see submitWishPlan).
 
 import { addDays, monthName, type MonthString } from '../../dates.ts';
 import { monthlyIncome, type Income } from '../../income.ts';
+import type { Operation } from '../../ledger.ts';
 import { paymentDate } from '../../regular.ts';
 import type { Settings } from '../../settings.ts';
 import { MONTH_LIMIT, monthOfWeek, weekLimit, weekOf, weeksOfMonth, type Purchase, type Wish } from '../../week.ts';
 import {
-  begunSteps,
   combinedPlan,
-  covered,
+  gathering,
+  heldByWay,
+  keptSteps,
   parsePicks,
   picksText,
   savingsTaken,
   waysOf,
   wishFrame,
+  type Gathering,
   type Part,
   type PlanContext,
   type Step,
@@ -26,6 +30,7 @@ import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { dayMonth, money, num, plural } from '../format.ts';
 import type { Tone } from '../tones.ts';
 import { budgetOf, type SavedBudget } from './dashboard.ts';
+import { allExpenses } from './marking.ts';
 
 /** How far ahead a wish without a day is planned, until the user picks one. */
 const DEFAULT_DAYS = 30;
@@ -76,6 +81,15 @@ export interface WishPlanView {
   picks: string;
   /** The chosen plan, or the one the picks make. */
   plan: { buyWeek: DateString; steps: Step[]; short: number };
+  /** The plan the picks make, starting from what is set aside, which choosing them keeps, even when they are the chosen ones. */
+  fresh: { buyWeek: DateString; steps: Step[] };
+  /** What the plan shown gathers by today, with what is set aside for the wish. */
+  gathered: Gathering;
+  /**
+   * What choosing the chosen plan's ways again would do, as it starts from what is set aside: gather what it lacks now
+   * (`add`), or hold less where it holds more than the wish needs; null when it would change nothing.
+   */
+  relay: { add: boolean; amount: number } | null;
   /** The plan shown is the chosen one. */
   chosen: boolean;
   /** A plan is chosen for the wish. */
@@ -83,23 +97,70 @@ export interface WishPlanView {
   bought: boolean;
 }
 
+/** Expenses that set money aside for a wish, newest first; `expenses` are all of them, as allExpenses lists them. */
+function savingsOf(expenses: readonly Operation[], wishId: number): Operation[] {
+  return expenses.filter((o) => o.saving?.id === wishId);
+}
+
 /**
- * The plan of a wish: the chosen one, unless `ways` picks others, or the one `ways` makes. A new plan keeps what the
- * chosen one set aside already (begunSteps). Null when there is no such wish.
+ * The plan of a wish: the chosen one, unless `ways` picks others, or the one `ways` makes. A new plan starts from what
+ * the chosen one set aside already and what was set aside for the wish without a plan (keptSteps). `expenses` are all
+ * of them, as allExpenses lists them, when the caller has them. Null when there is no such wish.
  */
-export function wishPlan(data: EntityCollections, saved: SavedBudget, options: { today: DateString; id: number; ways: string | null; incomes: readonly Income[] }): WishPlanView | null {
+export function wishPlan(
+  data: EntityCollections,
+  saved: SavedBudget,
+  options: { today: DateString; id: number; ways: string | null; incomes: readonly Income[]; expenses?: readonly Operation[] },
+): WishPlanView | null {
   const { today } = options;
   const wish = saved.wishes.find((w) => w.id === options.id);
   if (!wish) return null;
   const goal = wishGoal(wish, today);
   const context = planContext(data, saved, options.incomes, today, wish.id);
   const stored = saved.wishPlans?.get(wish.id);
-  const kept = stored ? begunSteps(stored.steps, today, saved.weekStart) : [];
-  const live = combinedPlan(goal, context, parsePicks(options.ways ?? stored?.ways ?? null), kept);
+  const savings = savingsOf(options.expenses ?? allExpenses(data, saved), wish.id);
+  const on = { today, weekStart: saved.weekStart };
+  const was = gathering(wish, stored ?? null, savings, on);
+  const live = combinedPlan(goal, context, parsePicks(options.ways ?? stored?.ways ?? null), keptSteps(was, stored?.steps ?? [], today, saved.weekStart));
   const picks = picksText(live.parts);
   const chosen = stored !== undefined && (options.ways === null || picks === stored.ways);
-  const plan = chosen ? { buyWeek: stored.buyWeek, steps: stored.steps, short: Math.max(0, Math.round(goal.amount - covered(stored.steps))) } : live.plan;
-  return { goal, context, parts: live.parts, picks, plan, chosen, planned: stored !== undefined, bought: isBought(saved, wish.id) };
+  const relaid = gathering(wish, live.plan, savings, on);
+  const gathered = chosen ? was : relaid;
+  const plan = chosen ? { buyWeek: stored.buyWeek, steps: stored.steps, short: was.short } : { ...live.plan, short: relaid.short };
+  const parts = chosen ? chosenParts(live.parts, was, stored.steps, wishFrame(goal, context).current) : live.parts;
+  return {
+    goal,
+    context,
+    parts,
+    picks,
+    plan,
+    fresh: live.plan,
+    gathered,
+    relay: chosen ? relayOf(was, relaid, goal.amount) : null,
+    chosen,
+    planned: stored !== undefined,
+    bought: isBought(saved, wish.id),
+  };
+}
+
+/**
+ * The ways of the chosen plan as it was chosen, not as choosing them again would make them: what each still gives
+ * (heldByWay), and for the weeks what a week after this one gives. How far each can go is as the ways picked again.
+ */
+function chosenParts(parts: readonly Part[], gathered: Gathering, steps: readonly Step[], current: DateString): Part[] {
+  const byWay = heldByWay(gathered, steps, current);
+  const ahead = steps.find((s) => s.kind === 'week' && s.way === 'weeks' && s.week > current);
+  return parts.map((part) => {
+    const given = Math.round(byWay.get(part.way.id) ?? 0);
+    return { ...part, given, each: part.way.kind === 'weeks' ? (ahead?.amount ?? 0) : given };
+  });
+}
+
+/** What choosing the ways again gathers instead of `was`: what it adds of what is short, or frees beyond the wish. */
+function relayOf(was: Gathering, relaid: Gathering, amount: number): WishPlanView['relay'] {
+  if (relaid.short < was.short - 0.5) return { add: true, amount: was.short - relaid.short };
+  const over = was.covered - Math.max(relaid.covered, amount);
+  return over > 0.5 ? { add: false, amount: Math.round(over) } : null;
 }
 
 const monthIn = (m: MonthString) => monthName(m, 'prepositional');
@@ -171,8 +232,9 @@ export function wayCards(view: WishPlanView, purchases: readonly Purchase[], s: 
 
 /**
  * Posts of a wish's plan: /wishes/:id/due sets the day it is needed by (`due`, a day after today); /wishes/:id/ways
- * chooses the plan the ways picked make (`ways`, as parsePicks reads them), keeping what the chosen one set aside
- * already; /wishes/:id/ways/delete forgets the plan. Null when the path is none of them.
+ * chooses the plan the ways picked make (`ways`, as parsePicks reads them), starting from what is set aside already,
+ * so the chosen ways sent again gather what the plan lacks; /wishes/:id/ways/delete forgets the plan. Null when the
+ * path is none of them.
  */
 export function submitWishPlan(
   settings: Settings,
@@ -200,6 +262,6 @@ export function submitWishPlan(
   }
   const view = wishPlan(data, saved, { today, id, ways: body.get('ways') ?? '', incomes: options.incomes });
   if (!view || view.parts.length === 0) return 'missing';
-  settings.chooseWishPlan(id, { ways: view.picks, buyWeek: view.plan.buyWeek, steps: view.plan.steps });
+  settings.chooseWishPlan(id, { ways: view.picks, buyWeek: view.fresh.buyWeek, steps: view.fresh.steps });
   return 'saved';
 }

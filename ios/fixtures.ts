@@ -38,7 +38,8 @@ settings.addRegularExpense({ title: 'Кредит', amount: 9_000, day: 20, star
 const groceries = settings.addPurchase({ title: 'Продукты', amount: 3_000, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: false });
 settings.addPurchase({ title: 'Стрижка', amount: 1_500, week: '2026-10-19', envelope: 'week', kind: 'flexible', done: false });
 settings.addPurchase({ title: 'Куртка', amount: 20_000, week: '2026-10-05', envelope: 'extra', kind: 'flexible', done: false });
-settings.addWish({ title: 'Укладка для волос', amount: 4_500 });
+const styler = settings.addWish({ title: 'Укладка для волос', amount: 4_500 });
+settings.setWishDue(styler.id, '2026-10-20');
 const tyres = settings.addWish({ title: 'Зимняя резина', amount: 60_000 });
 settings.setWishDue(tyres.id, '2026-11-01');
 settings.addIncome({ title: 'Зарплата', model: 'salary', params: { salary: 200_000, advanceDay: 20, payDay: 5 } });
@@ -60,6 +61,7 @@ const saved = (): SavedBudget => ({
   regular: settings.regularExpenses(),
   purchases: settings.purchases(),
   wishPayments: settings.wishPayments(),
+  wishSavings: settings.wishSavings(),
   wishPlans: settings.wishPlans(),
   marks: settings.spendingMarks(),
   descriptions: settings.spendingDescriptions(),
@@ -74,13 +76,17 @@ const budget = { today, source: 'demo' as const, canSync: false };
 
 // One expense of the week pays the groceries, another moves to the extras and could have been done without, so their
 // rows and choices show up.
-const [paying, moved] = weekScreen(data, saved(), budget).days.flatMap((d) => d.items);
-if (!paying || !moved) throw new Error('В демо-данных у недели нет трат');
+const [paying, moved, aside] = weekScreen(data, saved(), budget).days.flatMap((d) => d.items);
+if (!paying || !moved || !aside) throw new Error('В демо-данных у недели нет трат');
 settings.linkPurchase(paying.spending, groceries.id);
 settings.markSpending(moved.spending, 'extra');
 settings.markOptional(moved.spending, true);
 // The tyres get a plan: the weeks give 5 000 each and October's extras the rest, so the money it holds shows in the plan.
 submitWishPlan(settings, data, saved(), `/wishes/${tyres.id}/ways`, new URLSearchParams({ ways: 'weeks:5000,extra-2026-10:' }), { today, incomes: settings.incomes() });
+// A third sets money aside for them where the plan holds nothing, so they gather more than needed and can free it.
+settings.saveForWish(aside.spending, { wish: tyres.id, envelope: 'week' });
+// The styler's plan gives 500 a week and falls short, so the main page has a wish short of money.
+submitWishPlan(settings, data, saved(), `/wishes/${styler.id}/ways`, new URLSearchParams({ ways: 'weeks:500' }), { today, incomes: settings.incomes() });
 // An income opens to be marked too, with its categories and whether it counts.
 const income = operationsScreen(data, saved(), { today, kind: 'income' }).days.flatMap((d) => d.items)[0];
 if (!income?.spending) throw new Error('В демо-данных нет доходов');

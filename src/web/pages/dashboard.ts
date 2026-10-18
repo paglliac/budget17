@@ -34,7 +34,7 @@ import {
   type WeekSummary,
   type Wish,
 } from '../../week.ts';
-import { covered, stepMonth, wishPurchases, type ChosenPlan } from '../../wish-plans.ts';
+import { covered, gathering, stepMonth, type ChosenPlan, type Gathering } from '../../wish-plans.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { capitalize, dayMonth, money, monthName, num, plural, weekLabel } from '../format.ts';
@@ -58,6 +58,7 @@ import {
   markingDetails,
   markingPanel,
   markingTitle,
+  plannedPurchases,
   type Marking,
   type SavedMarking,
 } from './marking.ts';
@@ -103,8 +104,8 @@ export interface DashboardData {
   weeks: WeekSummary[];
   /** Extras of the month tab's month. */
   extras: ExtrasSummary;
-  /** Wishes not bought yet, with when they fit and the plan chosen for them. */
-  wishes: Array<{ wish: Wish; advice: Advice; plan: ChosenPlan | undefined }>;
+  /** Wishes not bought yet, with when they fit, the plan chosen for them and what it gathers with what is set aside. */
+  wishes: Array<{ wish: Wish; advice: Advice; plan: ChosenPlan | undefined; gathered: Gathering }>;
   /** Wishes an expense bought, by id. */
   boughtWishes: ReadonlySet<number>;
   /** For an expense opened to mark it. */
@@ -129,17 +130,7 @@ export function budgetOf(data: EntityCollections, saved: SavedBudget, options: {
   const monthStart = weeksOfMonth(monthOfWeek(current), weekStart)[0] ?? current;
   const from = options.from && options.from < monthStart ? options.from : monthStart;
   const expenses = listOperations(data, { from: addDays(from, -31), to: addDays(current, 6) }, saved).filter((o) => o.kind === 'expense');
-  return { expenses, purchases: plannedPurchases(saved), marks: saved.marks, regular: saved.regular, weekStart, weekLimits };
-}
-
-/** The purchases of the plan with the money the plans of wishes hold (see wish-plans.ts). */
-export function plannedPurchases(saved: Pick<SavedMarking, 'purchases' | 'wishes' | 'wishPlans'>): Purchase[] {
-  const wishes = new Map((saved.wishes ?? []).map((w) => [w.id, w]));
-  const plans = [...(saved.wishPlans ?? [])].flatMap(([id, plan]) => {
-    const wish = wishes.get(id);
-    return wish ? [{ wish, plan }] : [];
-  });
-  return [...saved.purchases, ...wishPurchases(plans)];
+  return { expenses, purchases: plannedPurchases(saved, options.today), marks: saved.marks, regular: saved.regular, weekStart, weekLimits };
 }
 
 export function loadDashboard(
@@ -164,6 +155,12 @@ export function loadDashboard(
   const monthStart = weeks[0] ?? current;
   const budget = budgetOf(data, saved, { today, from: week < monthStart ? week : monthStart });
   const bought = new Set(saved.wishPayments?.values() ?? []);
+  const expenses = allExpenses(data, saved);
+  const wishOf = (wish: Wish) => {
+    const plan = saved.wishPlans?.get(wish.id);
+    const savings = expenses.filter((o) => o.saving?.id === wish.id);
+    return { wish, advice: adviseWish(budget, wish, today), plan, gathered: gathering(wish, plan ?? null, savings, { today, weekStart: saved.weekStart }) };
+  };
   return {
     today,
     current,
@@ -173,9 +170,9 @@ export function loadDashboard(
     weeks: weeks.map((w) => summarizeWeek(budget, w)),
     extras: summarizeExtras(budget, month),
     // A wish an expense bought is no longer wished for.
-    wishes: saved.wishes.filter((wish) => !bought.has(wish.id)).map((wish) => ({ wish, advice: adviseWish(budget, wish, today), plan: saved.wishPlans?.get(wish.id) })),
+    wishes: saved.wishes.filter((wish) => !bought.has(wish.id)).map(wishOf),
     boughtWishes: bought,
-    marking: loadMarking(data, saved, allExpenses(data, saved), today),
+    marking: loadMarking(data, saved, expenses, today),
     edit: options.edit ?? null,
     form: options.form ?? null,
     symbol: summarizeBalances(data).mainInstrument.symbol,
@@ -374,7 +371,7 @@ function weekView(page: Page): { main: Html[]; side: Html[] } {
       ...(w.week === current
         ? [
             topBar({ crumbs: [{ label: 'Хочу купить' }] }),
-            entryList({ label: 'Хочу купить', items: [...d.wishes.map((x) => wishItem(page, x.wish, x.advice, x.plan)), foldedWishForm(page)] }),
+            entryList({ label: 'Хочу купить', items: [...d.wishes.map((x) => wishItem(page, x)), foldedWishForm(page)] }),
           ]
         : []),
     ],
@@ -613,7 +610,7 @@ function syncButton(d: DashboardData): Html | null {
 function purchaseItem(page: Page, status: PurchaseStatus): Html {
   const { d, href, here, current } = page;
   const { purchase: p, bought } = status;
-  if (p.wish !== undefined) return wishPurchaseItem(page, p);
+  if (p.wish !== undefined) return wishPurchaseItem(page, status);
   const key = `purchase-${p.id}`;
   const form = d.form?.kind === 'purchase' && d.form.id === p.id ? d.form : null;
   const color = bought ? toneColor('gray') : p.envelope === 'extra' ? toneColor('violet') : categoryColor(key, null);
@@ -654,18 +651,20 @@ function purchaseItem(page: Page, status: PurchaseStatus): Html {
  * Money a wish's plan holds in a week or the extras: a row of the wish, chosen and changed in the app, so it opens
  * nothing here.
  */
-function wishPurchaseItem({ d }: Page, p: Purchase): Html {
+function wishPurchaseItem({ d }: Page, status: PurchaseStatus): Html {
+  const p = status.purchase;
   const bought = d.boughtWishes.has(p.wish!);
+  const line = heldLine(status, d.symbol);
   return entryRow({
     id: `purchase-${p.id}`,
     title: p.title,
-    details: bought ? 'Желание · куплено' : 'Желание',
-    icon: 'sparkles',
-    color: toneColor(bought ? 'gray' : 'yellow'),
+    details: ['Желание', bought ? 'куплено' : line.details].filter(Boolean).join(' · '),
+    icon: line.state === 'set' ? 'check' : 'sparkles',
+    color: toneColor(bought || line.done ? 'gray' : 'yellow'),
     mark: ENVELOPE_MARK[p.envelope],
-    amount: p.amount,
+    amount: line.amount,
     symbol: d.symbol,
-    muted: bought,
+    muted: bought || line.done,
   });
 }
 
@@ -697,7 +696,7 @@ export function purchaseActions({ purchase: p, bought }: PurchaseStatus): Array<
   ];
 }
 
-function wishItem({ d, href, here }: Page, wish: Wish, advice: Advice, plan: ChosenPlan | undefined): Html {
+function wishItem({ d, href, here }: Page, { wish, advice, plan, gathered }: DashboardData['wishes'][number]): Html {
   const key = `wish-${wish.id}`;
   const form = d.form?.kind === 'wish' && d.form.id === wish.id ? d.form : null;
   if (form || d.edit === key) {
@@ -715,7 +714,7 @@ function wishItem({ d, href, here }: Page, wish: Wish, advice: Advice, plan: Cho
   return entryRow({
     id: key,
     title: wish.title,
-    details: wishLine(wish, plan, adviceText(advice, d.current, d.symbol), d.symbol),
+    details: wishLine(wish, plan, adviceText(advice, d.current, d.symbol), d.symbol, gathered),
     icon: 'sparkles',
     color: toneColor('yellow'),
     amount: wish.amount,
@@ -901,13 +900,27 @@ function sum(values: number[]): number {
   return values.reduce((total, v) => total + v, 0);
 }
 
+/**
+ * What the money a wish's plan holds in a week or a month's extras says of what is set aside: all of it, so much of
+ * it, or, once the week or month is gone, nothing; with the amount its row shows, what is set aside once it is gone,
+ * and whether it is done with, as it is when gone or set aside in full.
+ */
+export function heldLine({ purchase: p, covered: set }: PurchaseStatus, s: string): { details: string | null; amount: number; done: boolean; state: 'set' | 'part' | 'none' | 'open' } {
+  if (set >= p.amount - 0.5) return { details: 'отложено', amount: set, done: true, state: 'set' };
+  if (set > 0.005) return { details: `отложено ${money(set, s)} из ${money(p.amount, s)}`, amount: p.done ? set : p.amount, done: p.done, state: 'part' };
+  return p.done ? { details: 'не отложено', amount: p.amount, done: true, state: 'none' } : { details: null, amount: p.amount, done: false, state: 'open' };
+}
+
 /** к 1 ноября */
 export function dueLabel(due: DateString): string {
   return `к ${dayMonth(due)}`;
 }
 
-/** Where a plan's money comes from, in a line: по 5 000 с 3 недель, 45 000 из дополнительных октября. */
-export function planSummary(plan: Pick<ChosenPlan, 'steps'>, amount: number, s: string): string {
+/**
+ * Where a plan's money comes from, in a line: по 5 000 с 3 недель, 45 000 из дополнительных октября; then what is
+ * short of the wish, if anything.
+ */
+export function planSummary(plan: Pick<ChosenPlan, 'steps'>, short: number, s: string): string {
   const parts: string[] = [];
   const moves = plan.steps.filter((x) => x.kind === 'move').length;
   if (moves > 0) parts.push(`перенести ${moves} ${plural(moves, ['покупку', 'покупки', 'покупок'])}`);
@@ -923,18 +936,18 @@ export function planSummary(plan: Pick<ChosenPlan, 'steps'>, amount: number, s: 
   };
   for (const [month, sum] of byMonth('extra')) parts.push(`${num(sum)} из дополнительных ${monthName(month, 'genitive')}`);
   for (const [month, sum] of byMonth('savings')) parts.push(`${num(sum)} из накоплений ${monthName(month, 'genitive')}`);
-  const short = Math.round(amount - covered(plan.steps));
   const text = parts.join(', ');
   return short > 0.5 ? `${text}; не хватает ${money(short, s)}` : text;
 }
 
 /**
- * A wish's line in «Хочу купить»: its day, then what its chosen plan does. A wish with a day but no plan yet waits for
- * one; without a day either, `advice` tells when it fits (see adviceText).
+ * A wish's line in «Хочу купить»: its day, then what its chosen plan does and what is set aside for it. A wish with a
+ * day but no plan yet waits for one; without a day either, `advice` tells when it fits (see adviceText).
  */
-export function wishLine(wish: Wish, plan: ChosenPlan | undefined, advice: string, s: string): string {
-  if (plan) return [wish.due ? dueLabel(wish.due) : null, planSummary(plan, wish.amount, s)].filter(Boolean).join(' · ');
-  return wish.due ? `${dueLabel(wish.due)} · выбрать, как купить` : advice;
+export function wishLine(wish: Wish, plan: ChosenPlan | undefined, advice: string, s: string, gathered: Pick<Gathering, 'saved' | 'short'>): string {
+  const saved = gathered.saved > 0.5 ? `отложено ${money(gathered.saved, s)}` : null;
+  if (plan) return [wish.due ? dueLabel(wish.due) : null, planSummary(plan, gathered.short, s), saved].filter(Boolean).join(' · ');
+  return [wish.due ? `${dueLabel(wish.due)} · выбрать, как купить` : advice, saved].filter(Boolean).join(' · ');
 }
 
 /** When to buy a wish; `current` is the first day of the current week. */

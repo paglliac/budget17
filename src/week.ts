@@ -2,7 +2,8 @@
 // extras each month, purchases planned into weeks, and when a wish fits. A week begins on the day the user picked,
 // Monday unless they picked another. Spending from ZenMoney counts towards its week unless it is marked as extras
 // or as outside the budget, or it paid a regular expense, an extra purchase or a wish. Spending linked to a purchase
-// takes its amount out of the plan. The money the plans of wishes hold comes as purchases too (see wish-plans.ts).
+// takes its amount out of the plan. The money the plans of wishes hold comes as purchases too (see wish-plans.ts), and
+// spending that set money aside for a wish takes its amount out of what the plan holds in its week or month.
 // Pure functions; what the user plans and marks is kept by src/settings.ts.
 
 import { addDays, daysBetween, monthOf, weekday, type MonthString } from './dates.ts';
@@ -41,6 +42,11 @@ export interface Purchase {
   done: boolean;
   /** The wish whose plan holds this money (see wish-plans.ts); such a purchase is not in settings.db. */
   wish?: number;
+  /**
+   * For the money a wish's plan holds: the days whose expenses that set money aside for the wish from its envelope pay
+   * it, those of its week or of its month's weeks.
+   */
+  savedIn?: { from: DateString; to: DateString };
 }
 
 export type PurchaseInput = Omit<Purchase, 'id' | 'wish'>;
@@ -54,6 +60,12 @@ export interface Wish {
 }
 
 export type WishInput = Omit<Wish, 'id' | 'due'>;
+
+/** An expense that set money aside for a wish, from the week's money or from the extras. */
+export interface WishSaving {
+  wish: number;
+  envelope: 'week' | 'extra';
+}
 
 /** The day of the week a week begins on, 0 for Monday to 6 for Sunday, as weekday() counts. */
 export type WeekStart = number;
@@ -104,20 +116,32 @@ export function weeksOfMonth(month: MonthString, start: WeekStart): DateString[]
 /**
  * Spending counts towards its week until moved; a payment of a regular expense is outside the budget, as the expense
  * is, a payment of a purchase counts where the purchase does, and a payment of a wish is outside it too, since the
- * wish's plan held its money in the weeks and extras before.
+ * wish's plan held its money in the weeks and extras before. Money set aside for a wish counts where the plan held it.
  */
-export function envelopeOf(budget: Pick<Budget, 'marks' | 'purchases'>, operation: Pick<Operation, 'id' | 'regular' | 'purchase' | 'wish'>): Envelope {
+export function envelopeOf(budget: Pick<Budget, 'marks' | 'purchases'>, operation: Pick<Operation, 'id' | 'regular' | 'purchase' | 'wish' | 'saving'>): Envelope {
   const marked = budget.marks.get(operation.id);
   if (marked) return marked;
   if (operation.regular || operation.wish) return 'outside';
+  if (operation.saving) return operation.saving.envelope;
   const purchase = operation.purchase ? budget.purchases.find((p) => p.id === operation.purchase?.id) : undefined;
   return purchase?.envelope ?? 'week';
+}
+
+/**
+ * Whether an expense pays a purchase: it is linked to it, or, for the money a wish's plan holds, it set money aside
+ * for the wish from the purchase's envelope on one of its days.
+ */
+export function pays(purchase: Purchase, o: Pick<Operation, 'date' | 'purchase' | 'saving'>): boolean {
+  if (o.purchase?.id === purchase.id) return true;
+  const days = purchase.savedIn;
+  const saving = o.saving;
+  return days !== undefined && saving != null && saving.id === purchase.wish && saving.envelope === purchase.envelope && o.date >= days.from && o.date <= days.to;
 }
 
 /** A purchase with the expenses that paid it. */
 export interface PurchaseStatus {
   purchase: Purchase;
-  /** Expenses linked to the purchase, newest first. */
+  /** Expenses linked to the purchase, or that set its money aside for a wish, newest first. */
   paid: Operation[];
   /** What they paid in all. */
   covered: number;
@@ -128,7 +152,7 @@ export interface PurchaseStatus {
 }
 
 export function purchaseStatus(purchase: Purchase, expenses: readonly Operation[]): PurchaseStatus {
-  const paid = expenses.filter((o) => o.purchase?.id === purchase.id);
+  const paid = expenses.filter((o) => pays(purchase, o));
   const covered = sum(paid.map((o) => o.amount));
   const bought = purchase.done || covered >= purchase.amount - 0.005;
   return { purchase, paid, covered, bought, left: bought ? 0 : purchase.amount - covered };

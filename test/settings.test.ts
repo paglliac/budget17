@@ -636,6 +636,33 @@ describe('Settings', () => {
     assert.equal(settings.wishPayments().size, 0);
   });
 
+  it('links an expense to the wish it set money aside for, instead of anything it paid or bought, and forgets it with the wish', () => {
+    using settings = new Settings(':memory:');
+    const tyres = settings.addWish({ title: 'Шины Kia K5', amount: 60_000 });
+    const shoes = settings.addPurchase({ title: 'Ботинки', amount: 8_000, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: false });
+    const school = settings.addRegularExpense(regularInput({ title: 'Школа', amount: 45_000, day: 7 }));
+
+    settings.linkPurchase('t1', shoes.id);
+    settings.linkWish('t2', tyres.id);
+    settings.saveForWish('t1', { wish: tyres.id, envelope: 'week' });
+    settings.saveForWish('t2', { wish: tyres.id, envelope: 'extra' });
+    assert.deepEqual([...settings.wishSavings()], [['t1', { wish: tyres.id, envelope: 'week' }], ['t2', { wish: tyres.id, envelope: 'extra' }]]);
+    assert.deepEqual([settings.purchasePayments().size, settings.wishPayments().size], [0, 0], 'money set aside paid no purchase and bought no wish');
+    settings.linkPurchase('t1', shoes.id);
+    settings.linkWish('t2', tyres.id);
+    assert.equal(settings.wishSavings().size, 0, 'nor the other way round');
+    settings.saveForWish('t3', { wish: tyres.id, envelope: 'week' });
+    settings.categorize('t3', { regular: school.id });
+    assert.equal(settings.wishSavings().size, 0, 'a payment of a regular expense set nothing aside');
+
+    settings.saveForWish('t4', { wish: tyres.id, envelope: 'week' });
+    settings.saveForWish('t5', { wish: tyres.id, envelope: 'week' });
+    settings.saveForWish('t5', null);
+    assert.deepEqual([...settings.wishSavings().keys()], ['t4']);
+    settings.deleteWish(tyres.id);
+    assert.equal(settings.wishSavings().size, 0);
+  });
+
   it('adds the day and the plan of wishes to a file made before them, keeping its wishes', () => {
     const dir = mkdtempSync(join(tmpdir(), 'budget-settings-'));
     try {
@@ -651,6 +678,8 @@ describe('Settings', () => {
       settings.chooseWishPlan(1, { ways: 'extra-2026-10:', buyWeek: '2026-10-31', steps: [{ way: 'extra-2026-10', kind: 'extra', week: '2026-10-10', amount: 60_000 }] });
       assert.equal(settings.wishes()[0]?.due, '2026-11-01');
       assert.equal(settings.wishPlans().get(1)?.steps.length, 1);
+      settings.saveForWish('t1', { wish: 1, envelope: 'extra' });
+      assert.deepEqual([...settings.wishSavings()], [['t1', { wish: 1, envelope: 'extra' }]], 'money set aside for wishes is kept in a file made before it');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
