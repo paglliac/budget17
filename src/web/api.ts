@@ -39,6 +39,8 @@ import { recentMonths } from './pages/chrome.ts';
 import {
   budgetOf,
   dueLabel,
+  extrasLine,
+  extrasPlan,
   extrasTotal,
   heldLine,
   loadDashboard,
@@ -65,6 +67,7 @@ import {
   optionalSwitch,
   PAYMENT_WORDS,
   paymentOptions,
+  plannedPurchases,
   undoChoices,
   writtenAbout,
   type Marking,
@@ -273,8 +276,8 @@ function roundWeek(w: WeekSummary): WeekSummary {
 
 /** The extras of a month to the hundred, spent, planned and free adding up to the month's extras. */
 function roundExtras(m: ExtrasSummary): ExtrasSummary {
-  const [spent, planned, free] = roundParts([m.spent, m.planned, m.free]) as [number, number, number];
-  return { ...m, spent, planned, free };
+  const [byPlan, unplanned, planned, free] = roundParts([m.spentByPlan, m.spent - m.spentByPlan, m.planned, m.free]) as [number, number, number, number];
+  return { ...m, spent: byPlan + unplanned, spentByPlan: byPlan, planned, free };
 }
 
 /** A month's extras as a card tells them: what is free of the month's amount, or, past it, how far past it, in red. */
@@ -557,8 +560,8 @@ function monthFlow(d: ReturnType<typeof loadDashboard>, saved: SavedBudget, inco
 }
 
 /**
- * The month tab: where its income goes, its weeks, and its extras with what is left of them. With round figures the
- * totals of each are to the hundred and add up as the exact ones do; purchases and expenses keep their amounts.
+ * The month tab: where its income goes, its weeks, and what is left of its extras, which open their own screen (see
+ * extrasScreen). With round figures the totals of each are to the hundred and add up as the exact ones do.
  */
 export function monthScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { month?: string | null; incomes?: Income[] }) {
   const { today } = options;
@@ -584,12 +587,74 @@ export function monthScreen(data: EntityCollections, saved: SavedBudget, options
     }),
     total,
     flow: monthFlow(d, saved, options.incomes ?? [], thisMonth),
-    purchases: m.purchases.map((p) => purchaseRow(p, current, d.symbol, saved)),
-    spending: expenseDays(d.marking, m.spending, today),
-    newPurchaseWeek: m.month === thisMonth ? current : (d.weeks[0]?.week ?? current),
+    newPurchaseWeek: newExtraWeek(m.month, thisMonth, d.weeks, current),
     weekChoices: weekChoices(current),
     source: options.source,
     canSync: options.canSync,
+  };
+}
+
+/** Where a new purchase of a month's extras goes: the current week in this month, else the month's first week. */
+function newExtraWeek(month: MonthString, thisMonth: MonthString, weeks: readonly WeekSummary[], current: DateString): DateString {
+  return month === thisMonth ? current : (weeks[0]?.week ?? current);
+}
+
+/** How a month's extras stand, by what will be left once the plan is bought (see extrasOutlook), as their screen says it. */
+const EXTRAS_FREE: Record<ExtrasState, string> = { plenty: 'свободно', calm: 'свободно', tight: 'свободно', short: 'не хватает' };
+
+/**
+ * The extras of a month as their two screens in the app show them, after the user's pictures of 2026-10-18. The first
+ * has the month to step from (`prev`, `next`), what is free «из 100 000 ₽» with how the month stands (plenty, calm,
+ * tight or short, see extrasOutlook), the bar of what was spent, what is planned and what is free, and what the plan
+ * still holds (see extrasPlan); «Подробнее» opens the second, with the month to pick, what was spent and how much of it
+ * by the plan and without one, and the expenses by day. An expense the plan had says what its purchase was planned at
+ * instead of its details, and the one that bought or finished the purchase how far over the plan it went (`over`,
+ * below zero under it); one without a plan is `planned: false`. With round figures the totals are to the hundred and
+ * add up to the month's extras; the rows keep their amounts. The months go from three back to the last one with an
+ * extras purchase, the next one at least.
+ */
+export function extrasScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { month?: string | null }) {
+  const { today } = options;
+  const d = loadDashboard(data, saved, { ...options, view: 'month', month: options.month });
+  const { current } = d;
+  const exact = d.extras;
+  const m = saved.roundFigures ? roundExtras(exact) : exact;
+  const thisMonth = monthOfWeek(current);
+  const state = extrasOutlook(exact, saved.extrasLevels ?? EXTRAS_LEVELS).state;
+  const planned = plannedPurchases(saved, today).filter((p) => p.envelope === 'extra').map((p) => monthOfWeek(p.week));
+  const last = [shiftMonth(thisMonth, 1), m.month, ...planned].reduce((a, b) => (b > a ? b : a));
+  const months: MonthString[] = [];
+  for (let month = shiftMonth(thisMonth, -3); month <= last && month <= monthOfWeek(addDays(current, 7 * PLAN_AHEAD)); month = shiftMonth(month, 1)) months.push(month);
+  const title = (month: MonthString) => `${capitalize(monthName(month))} ${month.slice(0, 4)}`;
+  const option = (month: MonthString) => (months.includes(month) ? { value: month, label: title(month) } : null);
+  return {
+    symbol: d.symbol,
+    month: m.month,
+    thisMonth,
+    title: title(m.month),
+    months: months.map((month) => ({ value: month, label: title(month) })),
+    prev: option(shiftMonth(m.month, -1)),
+    next: option(shiftMonth(m.month, 1)),
+    free: { label: EXTRAS_FREE[state], amount: Math.abs(m.free), state, note: state === 'short' ? null : `из ${money(MONTH_LIMIT, d.symbol)}` },
+    bar: extrasTotal(m, d.symbol).parts,
+    spent: {
+      label: 'Потрачено',
+      amount: m.spent,
+      byPlan: { label: 'по плану', amount: m.spentByPlan },
+      unplanned: { label: 'без плана', amount: m.spent - m.spentByPlan },
+    },
+    days: byDay(m.spending, (o) => o.date, today).map((day) => ({
+      ...day,
+      items: day.items.map((o) => {
+        const line = extrasLine(exact, o);
+        const expense = expenseRow(d.marking, o);
+        return { ...expense, details: line.plan === null ? expense.details : `план ${num(line.plan)}`, planned: line.planned, over: line.over };
+      }),
+    })),
+    plan: { label: 'В плане', amount: m.planned, items: extrasPlan(exact).map((p) => purchaseRow(p, current, d.symbol, saved)) },
+    newPurchaseWeek: newExtraWeek(m.month, thisMonth, d.weeks, current),
+    weekChoices: weekChoices(current),
+    source: options.source,
   };
 }
 

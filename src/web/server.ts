@@ -27,6 +27,7 @@ import type { EntityCollections } from '../zenmoney/types.ts';
 import {
   budgetSettingsScreen,
   categoriesScreen,
+  extrasScreen,
   shopsScreen,
   incomeScreen,
   monthScreen,
@@ -445,6 +446,8 @@ function apiScreen(path: string, params: URLSearchParams, { today, demo }: Conte
       return weekWhyScreen(collections(), loadSettings(savedBudget), { ...budget, week: params.get('week') });
     case '/api/month':
       return monthScreen(collections(), loadSettings(savedBudget), { ...budget, month: params.get('month'), incomes: loadSettings((s) => s.incomes()) });
+    case '/api/extras':
+      return extrasScreen(collections(), loadSettings(savedBudget), { ...budget, month: params.get('month') });
     case '/api/operations':
       return operationsScreen(collections(), loadSettings(savedMarking), {
         today,

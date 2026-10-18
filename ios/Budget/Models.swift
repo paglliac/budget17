@@ -87,6 +87,10 @@ struct Expense: Decodable, Hashable, Identifiable {
     let spending: String
     /// The user said it could have been done without; a server before this says nothing.
     let optional: Bool
+    /// In the extras: whether the plan had it, as it paid a purchase or set money aside for a wish; nil elsewhere.
+    let planned: Bool?
+    /// In the extras, on the expense that bought or finished a purchase: how far it went over the plan, below zero under it.
+    let over: Double?
     var id: String { row.id }
 
     init(from decoder: Decoder) throws {
@@ -94,6 +98,8 @@ struct Expense: Decodable, Hashable, Identifiable {
         let c = try decoder.extra()
         spending = try c.value("spending")
         optional = try c.optional("optional") ?? false
+        planned = try c.optional("planned")
+        over = try c.optional("over")
     }
 }
 
@@ -336,11 +342,53 @@ struct MonthScreen: Decodable {
     let total: Total
     /// Where the month's income goes; nil without incomes.
     let flow: Flow?
-    let purchases: [PlanItem]
-    let spending: [Day<Expense>]
     let newPurchaseWeek: String
     let weekChoices: [OptionGroup]
     let source: String
+}
+
+/// A month's extras: what is free and how the month stands, the bar of what was spent, what is planned and what is free,
+/// what was spent by the plan and without one, the expenses by day, and what the plan still holds.
+struct ExtrasScreen: Decodable {
+    let symbol: String
+    let month: String
+    let thisMonth: String
+    /// Октябрь 2026.
+    let title: String
+    let months: [Option]
+    /// The months before and after to step to; nil past the ends of `months`.
+    let prev: Option?
+    let next: Option?
+    let free: Free
+    let bar: [Total.Part]
+    let spent: Spent
+    let days: [Day<Expense>]
+    let plan: Plan
+    let newPurchaseWeek: String
+    let weekChoices: [OptionGroup]
+    let source: String
+
+    /// «свободно» with «из 100 000 ₽», or «не хватает» when the plan holds more than is left.
+    struct Free: Decodable, Hashable {
+        let label: String
+        let amount: Double
+        /// plenty, calm, tight or short.
+        let state: String
+        let note: String?
+    }
+
+    struct Spent: Decodable, Hashable {
+        let label: String
+        let amount: Double
+        let byPlan: Figure
+        let unplanned: Figure
+    }
+
+    struct Plan: Decodable, Hashable {
+        let label: String
+        let amount: Double
+        let items: [PlanItem]
+    }
 }
 
 /// A month's income and where it goes: regular payments, the weeks' budgets, the extras, and savings or what is short.

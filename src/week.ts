@@ -208,20 +208,28 @@ export function weekLimit(budget: Pick<Budget, 'weekLimits'>, week: DateString):
 export interface ExtrasSummary {
   month: MonthString;
   spent: number;
+  /** The part of `spent` the plan had: expenses that paid a purchase or set money aside for a wish. */
+  spentByPlan: number;
   /** What the plan still holds for extras. */
   planned: number;
   free: number;
   /** Spending marked as extras, or paying an extra purchase, in the month's weeks. */
   spending: Operation[];
+  /** The purchase each expense of `spending` paid, or the wish's money it set aside, by the expense's id. */
+  paid: ReadonlyMap<string, PurchaseStatus>;
   purchases: PurchaseStatus[];
 }
 
 export function summarizeExtras(budget: Budget, month: MonthString): ExtrasSummary {
   const spending = budget.expenses.filter((o) => envelopeOf(budget, o) === 'extra' && monthOfWeek(weekOf(o.date, budget.weekStart)) === month);
   const purchases = budget.purchases.filter((p) => p.envelope === 'extra' && monthOfWeek(p.week) === month).map((p) => purchaseStatus(p, budget.expenses));
+  // A purchase of another month can be paid in this one.
+  const paying = budget.purchases.filter((p) => spending.some((o) => pays(p, o))).map((p) => purchaseStatus(p, budget.expenses));
+  const paid = new Map(spending.flatMap((o) => paying.filter((s) => pays(s.purchase, o)).map((s) => [o.id, s] as const)));
   const spent = sum(spending.map((o) => o.amount));
+  const spentByPlan = sum(spending.filter((o) => paid.has(o.id) || o.saving != null).map((o) => o.amount));
   const planned = sum(purchases.map((p) => p.left));
-  return { month, spent, planned, free: MONTH_LIMIT - spent - planned, spending, purchases };
+  return { month, spent, spentByPlan, planned, free: MONTH_LIMIT - spent - planned, spending, paid, purchases };
 }
 
 /** Where a month's extras are headed by its end: plenty is left, a calm amount, little, or the plan holds more than is left. */

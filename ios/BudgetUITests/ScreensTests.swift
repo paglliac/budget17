@@ -41,15 +41,35 @@ final class ScreensTests: XCTestCase {
             XCTAssert(reserved.wait(for: \.isHittable, toEqual: true, timeout: 5), "«Главная» returns to the main page")
         }
 
-        // With every expense sorted, the extras' card opens the month on them.
+        // With every expense sorted, the extras' card opens their page: what is free, the bar and the plan; «Подробнее»
+        // the expenses, spent by the plan and without one.
         let extras = app.buttons["extras"]
         if extras.exists {
             extras.tap()
-            XCTAssert(app.buttons["Добавить в дополнительные"].waitForExistence(timeout: 10), "the month opens")
+            XCTAssert(app.descendants(matching: .any)["extras-free"].waitForExistence(timeout: 10), "the extras open")
             sleep(1)
-            shot("month-extras")
-            pill("Неделя").tap()
-            XCTAssert(reserved.waitForExistence(timeout: 5), "«Неделя» brings the week back")
+            shot("extras")
+            app.buttons["extras-details"].tap()
+            XCTAssert(app.descendants(matching: .any)["extras-details-free"].waitForExistence(timeout: 10), "the details open")
+            sleep(1)
+            shot("extras-details")
+            app.swipeUp()
+            shot("extras-details-more")
+            app.buttons["extras-month"].tap()
+            if app.buttons["Ноябрь 2026"].waitForExistence(timeout: 5) {
+                shot("extras-months")
+                app.buttons["Ноябрь 2026"].tap()
+                sleep(2)
+                shot("extras-details-ahead")
+            }
+            app.navigationBars.buttons.firstMatch.tap()
+            if app.buttons["extras-next"].waitForExistence(timeout: 5) {
+                app.buttons["extras-next"].tap()
+                sleep(2)
+                shot("extras-ahead")
+            }
+            tab("Главная")
+            XCTAssert(reserved.wait(for: \.isHittable, toEqual: true, timeout: 5), "«Главная» returns to the main page")
         }
 
         app.buttons["week-limit"].tap()
@@ -158,6 +178,14 @@ final class ScreensTests: XCTestCase {
         shot("month")
         app.swipeUp()
         shot("month-more")
+        // The month's extras open their page too.
+        let monthExtras = app.buttons["month-extras"]
+        if monthExtras.waitForExistence(timeout: 5) {
+            monthExtras.tap()
+            if app.descendants(matching: .any)["extras-free"].waitForExistence(timeout: 10) { shot("month-extras") }
+            app.navigationBars.buttons.firstMatch.tap()
+            sleep(1)
+        }
         app.swipeDown()
         app.buttons["Неделя"].firstMatch.tap()
         sleep(1)

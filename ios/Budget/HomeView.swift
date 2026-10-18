@@ -1,18 +1,22 @@
 import SwiftUI
 
-/// Where the main page goes from its days and its footer.
+/// Where the main page and the month go from their days, footer and extras.
 enum HomeRoute: Hashable {
     /// The spending of the week, or of one day of it.
     case spending(String?)
     /// Why the week of that first day went below zero.
     case why(String)
+    /// The extras of a month; nil is the current one.
+    case extras(String?)
+    /// The extras of a month in detail, with the expenses by day.
+    case extrasDetails(String?)
 }
 
 /// The main page, the week: the days of the week, a large circle with what is free on its lilac lens and what is
 /// reserved beside it, then cards of what was spent today and of the expenses that wait for a category, or, once all
 /// are sorted, of the extras. It fits the screen: the reserved part opens the plan tab on the shown week, a day or
-/// today's spending opens the spending, the extras open the month on them, and the red figure of a week past its amount
-/// tells why it went there.
+/// today's spending opens the spending, the extras open their page, and the red figure of a week past its amount tells
+/// why it went there. The pages open over it in the main tab's stack (see BudgetView).
 struct HomeView: View {
     @Binding var mode: BudgetView.Mode
     @Binding var week: String?
@@ -20,8 +24,6 @@ struct HomeView: View {
     @Binding var sheet: BudgetSheet?
     let openPending: () -> Void
     let openPlan: (String?) -> Void
-    /// Opens a month on its extras; nil is the current one.
-    let openExtras: (String?) -> Void
     /// Opens the «Желания» tab.
     let openWishes: () -> Void
     @Environment(Session.self) private var session
@@ -29,23 +31,14 @@ struct HomeView: View {
     @State private var picking = false
 
     var body: some View {
-        NavigationStack(path: $path) {
-            Screen(path: "week", query: ["week": week]) { (s: WeekScreen) in
-                page(s)
-                    .sheet(isPresented: $picking) { WeekPicker(screen: s) { go($0) } }
-            }
-            // Keeps the page and the offline pill above the tab bar.
-            .safeAreaPadding(.bottom, tabBarHeight)
-            .background(LilacBackground())
-            .hiddenNavigationBar()
-            .navigationDestination(for: HomeRoute.self) { route in
-                switch route {
-                case .spending(let day): WeekSpendingView(week: week, day: day, sheet: $sheet)
-                case .why(let shown):
-                    WeekWhyView(week: shown, sheet: $sheet, openPlan: { openPlan(week) })
-                }
-            }
+        Screen(path: "week", query: ["week": week]) { (s: WeekScreen) in
+            page(s)
+                .sheet(isPresented: $picking) { WeekPicker(screen: s) { go($0) } }
         }
+        // Keeps the page and the offline pill above the tab bar.
+        .safeAreaPadding(.bottom, tabBarHeight)
+        .background(LilacBackground())
+        .hiddenNavigationBar()
     }
 
     private func page(_ s: WeekScreen) -> some View {
@@ -78,7 +71,7 @@ struct HomeView: View {
                         sync: { Task { await session.sync() } },
                         openSort: openPending,
                         openShort: { wish in if let wish { sheet = .wish(wish) } else { openWishes() } },
-                        openExtras: openExtras
+                        openExtras: { path.append(.extras($0)) }
                     )
                     .padding(.top, 16)
                     // Clear of the raised circle of «Главная».
@@ -251,7 +244,7 @@ struct HomeHero: View {
 /// it) with when the data came from ZenMoney, which opens the week's spending, and beside it the place of what has to be
 /// done, as the server says (`task`): «Разобрать операции» with how many expenses wait for a category, which opens them;
 /// once all are sorted, «Не хватает» on a wish short of money, which opens it with «Добрать»; and with nothing to do,
-/// the extras of the week's month, which open the month on them.
+/// the extras of the week's month, which open their page.
 struct HomeFooter: View {
     let home: WeekHome
     let symbol: String

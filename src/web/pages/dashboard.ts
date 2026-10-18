@@ -487,6 +487,28 @@ export function weekTotal(w: WeekSummary, current: DateString, symbol: string): 
   };
 }
 
+/**
+ * The purchases a month's extras list: those the plan still holds money for, as its «План» counts them. One bought or
+ * finished is told by the expenses that paid it, titled by it, so it is not listed twice; a wish bought keeps its
+ * row, as the expense that bought it counts outside the budget.
+ */
+export function extrasPlan(m: ExtrasSummary): PurchaseStatus[] {
+  return m.purchases.filter((p) => p.left > 0.005);
+}
+
+/**
+ * What an expense of a month's extras says of the plan: whether the plan had it — it paid a purchase or set money
+ * aside for a wish —, what the purchase was planned at, and, on the newest expense of a purchase bought or finished,
+ * how far it went over the plan, below zero under it; null for none, and for a wish's money.
+ */
+export function extrasLine(m: ExtrasSummary, o: Operation): { planned: boolean; plan: number | null; over: number | null } {
+  const status = m.paid.get(o.id);
+  if (!status) return { planned: o.saving != null, plan: null, over: null };
+  const { purchase: p, covered, bought, paid } = status;
+  const over = bought && p.wish === undefined && paid[0]?.id === o.id && Math.abs(covered - p.amount) >= 0.5 ? covered - p.amount : null;
+  return { planned: true, plan: p.amount, over };
+}
+
 /** What is left of a month's extras. */
 export function extrasTotal(m: ExtrasSummary, symbol: string): Total {
   return {
@@ -540,7 +562,7 @@ function monthView(page: Page): { main: Html[]; side: Html[] } {
         body: entryList({
           label: 'Дополнительные',
           items: [
-            ...m.purchases.map((p) => purchaseItem(page, p)),
+            ...extrasPlan(m).map((p) => purchaseItem(page, p)),
             ...m.spending.map((o) => spendingItem(page, o)),
             newPurchaseForm(page, m.month === monthOfWeek(current) ? current : (d.weeks[0]?.week ?? current), 'extra'),
           ],
@@ -753,14 +775,25 @@ export function regularPaymentLine({ expense, date, paid }: WeekSummary['regular
   return { details, done };
 }
 
-/** An extra expense of the month opens to be marked: what it paid, its category and where it counts. */
+/**
+ * An extra expense of the month opens to be marked: what it paid, its category and where it counts. One the plan had
+ * says what its purchase was planned at and, on the one that bought or finished it, how far over or under the plan it
+ * went; one without a plan says so (see extrasLine).
+ */
 function spendingItem({ d, href, here }: Page, o: Operation): Html {
   const key = `spending-${o.id}`;
   const open = d.edit === key;
+  const line = extrasLine(d.extras, o);
+  const plan =
+    line.plan === null
+      ? line.planned
+        ? null
+        : 'без плана'
+      : [`план ${money(line.plan, d.symbol)}`, line.over === null ? null : `${line.over > 0 ? 'дороже' : 'дешевле'} на ${money(Math.abs(line.over), d.symbol)}`].filter(Boolean).join(', ');
   return entryRow({
     id: key,
     title: markingTitle(o),
-    details: `${dayMonth(o.date)}, ${o.account} · ${markingDetails(o)}`,
+    details: [`${dayMonth(o.date)}, ${o.account}`, plan, markingDetails(o)].filter(Boolean).join(' · '),
     ...withLogo(o, categoryLook(o.category)),
     mark: envelopeMark(d.marking, o),
     tint: markingTint(o),
@@ -889,7 +922,10 @@ function weekFigures(w: WeekSummary, current: DateString, s: string): string {
 
 export function monthSentence(m: ExtrasSummary, weeks: WeekSummary[], current: DateString, s: string): string {
   const limit = money(sum(weeks.map((w) => w.limit)), s);
-  const extras = sentence(`В ${monthName(m.month, 'prepositional')} на дополнительные осталось ${money(m.free, s)} из ${money(MONTH_LIMIT, s)}`);
+  const left = sentence(`В ${monthName(m.month, 'prepositional')} на дополнительные осталось ${money(m.free, s)} из ${money(MONTH_LIMIT, s)}`);
+  // What was spent of them, by the plan and without one.
+  const extras =
+    m.spent > 0.5 ? `${left} ${sentence(`Потрачено по плану ${money(m.spentByPlan, s)}, без плана — ${money(m.spent - m.spentByPlan, s)}`)}` : left;
   if ((weeks[0]?.week ?? current) > current) {
     return `${extras} ${sentence(`По неделям запланировано ${money(sum(weeks.map((w) => w.planned)), s)} из ${limit}`)}`;
   }

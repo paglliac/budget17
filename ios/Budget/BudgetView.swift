@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The main tab: the week or the month, as «Неделя» and «Месяц» switch them, each stepping back and forth. A return
-/// brings back the main page: the current week with nothing opened over it. The extras' card of the main page and their
-/// widget open the month on its extras.
+/// The main tab: the week or the month, as «Неделя» and «Месяц» switch them, each stepping back and forth, with the
+/// pages they open over them. A return brings back the main page: the current week with nothing opened over it. The
+/// extras' card of the main page, their widget and the month open the extras' page.
 struct BudgetView: View {
     enum Mode: Hashable { case week, month }
 
@@ -20,20 +20,28 @@ struct BudgetView: View {
     /// nil is the current week or month.
     @State private var week: String?
     @State private var month: String?
-    /// The month is to show its extras once it opens.
-    @State private var focusExtras = false
-    /// The pages opened from the week.
+    /// The pages opened from the week or the month.
     @State private var path: [HomeRoute] = []
     @State private var sheet: BudgetSheet?
 
     var body: some View {
-        Group {
-            switch mode {
-            case .week: HomeView(mode: $mode, week: $week, path: $path, sheet: $sheet, openPending: openPending, openPlan: openPlan, openExtras: openExtras, openWishes: openWishes)
-            case .month: MonthView(mode: $mode, month: $month, focusExtras: $focusExtras, sheet: $sheet) { opened in
-                week = opened
-                mode = .week
+        NavigationStack(path: $path) {
+            Group {
+                switch mode {
+                case .week: HomeView(mode: $mode, week: $week, path: $path, sheet: $sheet, openPending: openPending, openPlan: openPlan, openWishes: openWishes)
+                case .month: MonthView(mode: $mode, month: $month, sheet: $sheet, openExtras: { path.append(.extras($0)) }) { opened in
+                    week = opened
+                    mode = .week
+                }
+                }
             }
+            .navigationDestination(for: HomeRoute.self) { route in
+                switch route {
+                case .spending(let day): WeekSpendingView(week: week, day: day, sheet: $sheet)
+                case .why(let shown): WeekWhyView(week: shown, sheet: $sheet, openPlan: { openPlan(week) })
+                case .extras(let shown): ExtrasView(month: shown, sheet: $sheet)
+                case .extrasDetails(let shown): ExtrasDetailsView(month: shown, sheet: $sheet)
+                }
             }
         }
         .budgetSheets($sheet)
@@ -44,73 +52,57 @@ struct BudgetView: View {
                 week = nil
             }
         }
-        .onChange(of: extrasOpens) {
-            path = []
-            openExtras(nil)
-        }
-    }
-
-    /// A month on its extras; nil is the current one.
-    private func openExtras(_ target: String?) {
-        focusExtras = true
-        withAnimation(.snappy) {
-            month = target
-            mode = .month
-        }
+        .onChange(of: extrasOpens) { path = [.extras(nil)] }
     }
 }
 
-/// The month: where its income goes, its weeks, each opening its week, and its extras with their purchases and the
-/// spending moved there.
+/// The month: where its income goes, its weeks, each opening its week, and what is left of its extras, which opens
+/// their page.
 struct MonthView: View {
     @Binding var mode: BudgetView.Mode
     @Binding var month: String?
-    /// Set, the month scrolls to its extras and clears it.
-    @Binding var focusExtras: Bool
     @Binding var sheet: BudgetSheet?
+    /// Opens the extras' page of a month; nil is the current one.
+    let openExtras: (String?) -> Void
     let openWeek: (String) -> Void
+    @Environment(\.tabBarHeight) private var tabBarHeight
 
     var body: some View {
         Screen(path: "month", query: ["month": month]) { (s: MonthScreen) in
             GeometryReader { geometry in
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            HStack(spacing: 8) {
-                                ModeSwitch(mode: $mode)
-                                Spacer(minLength: 8)
-                                LilacRoundButton(systemImage: "chevron.left", label: "Раньше") { go(s.prev.value, s) }
-                                LilacRoundButton(systemImage: "chevron.right", label: "Позже") { if let next = s.next { go(next.value, s) } }
-                                    .disabled(s.next == nil)
-                            }
-                            .padding(.top, 6)
-                            HStack {
-                                Text(s.title).font(.title3.weight(.semibold))
-                                Spacer()
-                                if s.month != s.thisMonth { LilacChip(text: "Сейчас") { month = nil } }
-                            }
-                            .padding(.top, 14)
-                            if let flow = s.flow {
-                                IncomeFlow(flow: flow, symbol: s.symbol).padding(.top, 12)
-                            }
-                            weeks(s)
-                            extras(s)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 8) {
+                            ModeSwitch(mode: $mode)
+                            Spacer(minLength: 8)
+                            LilacRoundButton(systemImage: "chevron.left", label: "Раньше") { go(s.prev.value, s) }
+                            LilacRoundButton(systemImage: "chevron.right", label: "Позже") { if let next = s.next { go(next.value, s) } }
+                                .disabled(s.next == nil)
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 24)
+                        .padding(.top, 6)
+                        HStack {
+                            Text(s.title).font(.title3.weight(.semibold))
+                            Spacer()
+                            if s.month != s.thisMonth { LilacChip(text: "Сейчас") { month = nil } }
+                        }
+                        .padding(.top, 14)
+                        if let flow = s.flow {
+                            IncomeFlow(flow: flow, symbol: s.symbol).padding(.top, 12)
+                        }
+                        weeks(s)
+                        extras(s)
                     }
-                    .scrollIndicators(.hidden)
-                    .overlay(alignment: .top) { TopFade(height: geometry.safeAreaInsets.top) }
-                    .onChange(of: focusExtras, initial: true) { _, focus in
-                        guard focus else { return }
-                        focusExtras = false
-                        // After the page is laid out.
-                        Task { @MainActor in withAnimation(.snappy) { proxy.scrollTo("extras", anchor: .top) } }
-                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 24)
                 }
+                .scrollIndicators(.hidden)
+                .overlay(alignment: .top) { TopFade(height: geometry.safeAreaInsets.top) }
             }
         }
+        // Keeps the page and the offline pill above the tab bar.
+        .safeAreaPadding(.bottom, tabBarHeight)
         .background(LilacBackground())
+        .hiddenNavigationBar()
     }
 
     private func go(_ target: String, _ s: MonthScreen) {
@@ -130,6 +122,7 @@ struct MonthView: View {
         }
     }
 
+    /// What is left of the extras and their bar, which open their page.
     @ViewBuilder
     private func extras(_ s: MonthScreen) -> some View {
         LilacHeading(title: "Дополнительные") {
@@ -137,23 +130,18 @@ struct MonthView: View {
                 sheet = .purchase(PurchaseDraft(purchase: nil, week: s.newPurchaseWeek, envelope: "extra", choices: s.weekChoices, actions: [], symbol: s.symbol))
             }
         }
-        .id("extras")
-        LilacSummary(label: nil, amount: s.total.amount, symbol: s.symbol, note: s.total.note, size: 26)
-        LilacShareBar(parts: s.total.parts ?? []).padding(.top, 12).padding(.bottom, 4)
-        ForEach(Array(s.purchases.enumerated()), id: \.element.id) { index, item in
-            PlanRow(item: item, symbol: s.symbol, choices: s.weekChoices, first: index == 0, sheet: $sheet, error: .constant(nil))
-        }
-        ForEach(s.spending, id: \.date) { group in
-            LilacDayHeading(title: group.title, subtitle: group.subtitle)
-            ForEach(Array(group.items.enumerated()), id: \.element.id) { index, expense in
-                Button { sheet = .spending(expense.spending) } label: {
-                    LilacRow(marker: .expense(expense.row), title: expense.row.title, details: expense.row.details,
-                             amount: expense.row.amount, symbol: s.symbol, first: index == 0, chevron: false,
-                             amountColor: expense.optional ? Palette.optional : .primary)
+        Button { openExtras(s.month == s.thisMonth ? nil : s.month) } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center) {
+                    LilacSummary(label: nil, amount: s.total.amount, symbol: s.symbol, note: s.total.note, size: 26)
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Lilac.muted.opacity(0.7))
                 }
-                .buttonStyle(.card)
+                LilacShareBar(parts: s.total.parts ?? [])
             }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.card)
+        .accessibilityIdentifier("month-extras")
     }
 }
 

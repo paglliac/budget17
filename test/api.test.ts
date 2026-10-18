@@ -7,6 +7,7 @@ import {
   budgetSettingsScreen,
   categoriesScreen,
   colorOf,
+  extrasScreen,
   incomeScreen,
   monthScreen,
   operationsScreen,
@@ -263,7 +264,7 @@ describe('api', () => {
     assert.deepEqual(weekLevel(60_000, 45_000).share, 1);
   });
 
-  it('gives the month’s weeks and its extras with where they count', () => {
+  it('gives the month’s weeks and what is left of its extras', () => {
     const month = plain(monthScreen(data(), saved([['last-week', 'extra']]), budget));
 
     assert.equal(month.title, 'Октябрь');
@@ -271,11 +272,57 @@ describe('api', () => {
     assert.equal(month.weeks[0].title, '28 сентября – 4 октября');
     assert.equal(month.weeks[0].week, '2026-09-28');
     assert.equal(month.total.label, 'Дополнительные');
-    assert.deepEqual(month.purchases.map((p: { title: string; mark: string }) => [p.title, p.mark]), [['Куртка', 'extra']]);
-    assert.deepEqual(month.spending.map((d: { date: string }) => d.date), ['2026-10-01']);
-    assert.deepEqual(month.spending[0].items.map((o: { title: string; details: string; mark: string }) => [o.title, o.details, o.mark]), [['Дарья Ч.', 'без категории', 'extra']]);
+    assert.deepEqual(month.total.parts.map((p: { value: number }) => p.value), [30_000, 20_000, 50_000]);
+    assert.equal('purchases' in month || 'spending' in month, false, 'they are on the extras’ screen');
     assert.equal(month.newPurchaseWeek, '2026-10-05');
     assert.equal(month.flow, null, 'without incomes there is no income to split');
+  });
+
+  it('gives the extras’ screen: what is free, spent by the plan and without one, the expenses by day and the plan', () => {
+    const extras = plain(extrasScreen(data(), saved([['last-week', 'extra']]), budget));
+    assert.equal(extras.title, 'Октябрь 2026');
+    assert.deepEqual(
+      extras.months.map((m: { value: string }) => m.value),
+      ['2026-07', '2026-08', '2026-09', '2026-10', '2026-11'],
+      'three months back, and ahead to the next one at least',
+    );
+    assert.deepEqual([extras.prev, extras.next], [{ value: '2026-09', label: 'Сентябрь 2026' }, { value: '2026-11', label: 'Ноябрь 2026' }]);
+    assert.deepEqual(extras.free, { label: 'свободно', amount: 50_000, state: 'plenty', note: 'из 100 000 ₽' });
+    assert.deepEqual(extras.bar.map((p: { label: string; value: number }) => [p.label, p.value]), [['Потрачено', 30_000], ['План', 20_000], ['Свободно', 50_000]]);
+    assert.equal(plain(extrasScreen(data(), saved(), { ...budget, month: '2026-11' })).next, null, 'nothing is planned past November');
+    assert.deepEqual(extras.spent, { label: 'Потрачено', amount: 30_000, byPlan: { label: 'по плану', amount: 0 }, unplanned: { label: 'без плана', amount: 30_000 } });
+    assert.deepEqual(extras.days.map((d: { date: string }) => d.date), ['2026-10-01']);
+    const [darya] = extras.days[0].items;
+    assert.deepEqual([darya.title, darya.details, darya.mark, darya.planned, darya.over], ['Дарья Ч.', 'без категории', 'extra', false, null]);
+    assert.deepEqual([extras.plan.label, extras.plan.amount], ['В плане', 20_000]);
+    assert.deepEqual(extras.plan.items.map((p: { title: string; mark: string }) => [p.title, p.mark]), [['Куртка', 'extra']]);
+    assert.equal(extras.newPurchaseWeek, '2026-10-05');
+  });
+
+  it('tells in the extras what the plan had, by how much a purchase went over it, and lists a purchase bought only as its expenses', () => {
+    const paid = (payments: Array<[string, number]>, done = false) =>
+      plain(extrasScreen(data(), { ...saved(), purchases: saved().purchases.map((p) => (p.id === 3 ? { ...p, done } : p)), purchasePayments: new Map(payments) }, budget));
+    const partly = paid([['pyaterochka', 3]]);
+    assert.deepEqual(partly.plan.items.map((p: { title: string; details: string }) => [p.title, p.details]), [['Куртка', 'Гибкая · оплачено 473 ₽ из 20 000 ₽']]);
+    assert.deepEqual(
+      partly.days[0].items.map((o: { title: string; details: string; planned: boolean; over: number | null }) => [o.title, o.details, o.planned, o.over]),
+      [['Куртка', 'план 20 000', true, null]],
+      'not bought yet, it is neither over nor under',
+    );
+
+    const over = paid([['transfer', 3]]);
+    assert.deepEqual(over.plan.items, [], 'the jacket is told by the transfer that bought it');
+    assert.deepEqual(over.days[0].items.map((o: { title: string; amount: number; over: number | null }) => [o.title, o.amount, o.over]), [['Куртка', 40_000, 20_000]]);
+    assert.deepEqual([over.spent.amount, over.spent.byPlan.amount, over.spent.unplanned.amount, over.free.amount], [40_000, 40_000, 0, 60_000]);
+
+    const under = paid([['pyaterochka', 3]], true);
+    assert.deepEqual(under.days[0].items.map((o: { over: number | null }) => o.over), [-19_527], 'finished, the rest went back');
+  });
+
+  it('says what the extras lack when the plan holds more than is left', () => {
+    const coat = { id: 9, title: 'Пальто', amount: 90_000, week: '2026-10-12', envelope: 'extra' as const, kind: 'flexible' as const, done: false };
+    const extras = plain(extrasScreen(data(), { ...saved([['last-week', 'extra']]), purchases: [...saved().purchases, coat] }, budget));
+    assert.deepEqual(extras.free, { label: 'не хватает', amount: 40_000, state: 'short', note: null });
   });
 
   it('splits the month’s income into the regular payments, the weeks, the extras and what is left for savings', () => {
@@ -318,8 +365,10 @@ describe('api', () => {
     );
     assert.equal(month.flow.parts[0].share, 45_700 / 456_800);
     assert.deepEqual([month.total.amount, month.total.parts.map((p: { value: number }) => p.value)], [79_500, [500, 20_000, 79_500]]);
-    assert.deepEqual(month.spending[0].items.map((o: { amount: number }) => o.amount), [473]);
     assert.equal(month.total.note, 'осталось из 100 000 ₽ в октябре');
+    const extras = plain(extrasScreen(data(), round, budget));
+    assert.deepEqual([extras.spent.amount, extras.spent.byPlan.amount, extras.spent.unplanned.amount, extras.free.amount, extras.plan.amount], [500, 0, 500, 79_500, 20_000]);
+    assert.deepEqual(extras.days[0].items.map((o: { amount: number }) => o.amount), [473], 'an expense keeps its amount');
 
     const weeks = plain(monthScreen(data(), { ...saved(), roundFigures: true }, budget)).weeks;
     assert.deepEqual([weeks[1].details, weeks[1].amount], ['идёт · потрачено 40 500 ₽ · перерасход', 3_500]);
@@ -981,8 +1030,7 @@ describe('api: a wish’s plan', () => {
     const week = plain(weekScreen(data(), savedOf(settings), budget));
     assert.equal(plain(wishesScreen(data(), savedOf(settings), { today, incomes })).wishes[0].state, 'bought');
     assert.equal(week.total.amount, 45_000 - 473, 'the expense that bought it does not count in the week');
-    const month = plain(monthScreen(data(), savedOf(settings), budget));
-    const held = month.purchases.find((p: { wish: number | null }) => p.wish === tyres.id);
+    const held = plain(extrasScreen(data(), savedOf(settings), budget)).plan.items.find((p: { wish: number | null }) => p.wish === tyres.id);
     assert.deepEqual([held.details, held.muted, held.amount, held.icon], ['Желание · куплено', true, 60_000, 'sparkles'], 'a wish bought keeps its sparkles');
 
     submitMarking(settings, data(), '/spending/transfer/unlink', new URLSearchParams());

@@ -312,8 +312,8 @@ enum LilacMarker: Hashable {
     }
 }
 
-/// A row on the page: its marker, the title over its details, the amount over a chip such as where it counts, and a
-/// chevron when it opens. A hairline parts it from the row above.
+/// A row on the page: its marker, the title over its details, the amount over a chip such as where it counts or a line
+/// such as how far over the plan, and a chevron when it opens. A hairline parts it from the row above.
 struct LilacRow<Accessory: View>: View {
     let marker: LilacMarker
     let title: String
@@ -327,13 +327,20 @@ struct LilacRow<Accessory: View>: View {
     /// A plus or a minus before the amount, as operations show it.
     var signed = false
     var amountColor: Color = .primary
+    /// The crossed calendar after the title, of an expense no plan had.
+    var unplanned = false
+    /// A line under the amount in its colour, such as how far over the plan.
+    var amountNote: (text: String, color: Color)?
     @ViewBuilder var accessory: () -> Accessory
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
             marker.view.frame(width: 30, height: 30)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.body).foregroundStyle(Color.primary).lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(title).font(.body).foregroundStyle(Color.primary).lineLimit(2)
+                    if unplanned { LilacNoPlan() }
+                }
                 if !details.isEmpty {
                     Text(details).font(.subheadline).foregroundStyle(Lilac.muted).lineLimit(2)
                 }
@@ -346,6 +353,13 @@ struct LilacRow<Accessory: View>: View {
                         .font(.body.weight(.semibold))
                         .monospacedDigit()
                         .foregroundStyle(amountColor)
+                        .fixedSize()
+                }
+                if let amountNote {
+                    Text(amountNote.text)
+                        .font(.subheadline.weight(.medium))
+                        .monospacedDigit()
+                        .foregroundStyle(amountNote.color)
                         .fixedSize()
                 }
                 if let chip {
@@ -375,9 +389,31 @@ struct LilacRow<Accessory: View>: View {
 
 extension LilacRow where Accessory == EmptyView {
     init(marker: LilacMarker, title: String, details: String, amount: Double?, symbol: String, chip: (text: String, color: Color)? = nil,
-         muted: Bool = false, first: Bool = false, chevron: Bool = true, signed: Bool = false, amountColor: Color = .primary) {
+         muted: Bool = false, first: Bool = false, chevron: Bool = true, signed: Bool = false, amountColor: Color = .primary,
+         unplanned: Bool = false, amountNote: (text: String, color: Color)? = nil) {
         self.init(marker: marker, title: title, details: details, amount: amount, symbol: symbol, chip: chip, muted: muted, first: first,
-                  chevron: chevron, signed: signed, amountColor: amountColor, accessory: { EmptyView() })
+                  chevron: chevron, signed: signed, amountColor: amountColor, unplanned: unplanned, amountNote: amountNote,
+                  accessory: { EmptyView() })
+    }
+}
+
+/// The mark of what no plan had, after the user's picture of 2026-10-18: a calendar struck through.
+struct LilacNoPlan: View {
+    var size: CGFloat = 15
+
+    var body: some View {
+        Image(systemName: "calendar")
+            .font(.system(size: size, weight: .regular))
+            .foregroundStyle(Lilac.muted)
+            .overlay {
+                // The stroke parts from the calendar by a band of the page's colour.
+                ZStack {
+                    Capsule().fill(Lilac.canvas).frame(width: size * 0.3, height: size * 1.35)
+                    Capsule().fill(Lilac.muted).frame(width: size * 0.1, height: size * 1.3)
+                }
+                .rotationEffect(.degrees(-45))
+            }
+            .accessibilityLabel("без плана")
     }
 }
 
@@ -587,6 +623,8 @@ struct LilacFigures: View {
 /// of nothing.
 struct LilacShareBar: View {
     let parts: [Total.Part]
+    /// Parts the legend leaves out by their labels, such as what is free when a figure above says it.
+    var unlabeled: Set<String> = []
 
     var body: some View {
         let shown = parts.filter { $0.value > 0.5 }
@@ -605,7 +643,7 @@ struct LilacShareBar: View {
             }
             .frame(height: 12)
             HStack(spacing: 14) {
-                ForEach(shown, id: \.label) { part in
+                ForEach(shown.filter { !unlabeled.contains($0.label) }, id: \.label) { part in
                     HStack(spacing: 5) {
                         Circle().fill(part.tone == "gray" ? Lilac.soft : Palette.color(part.tone)).frame(width: 7, height: 7)
                         Text("\(part.label.lowercased()) \(Money.number(part.value))").monospacedDigit()

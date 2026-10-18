@@ -220,6 +220,9 @@ describe('dashboard', () => {
 
     const extra = render({ view: 'month' }, linked([['transfer', 3]]));
     assert.ok(extra.includes('В октябре на дополнительные осталось 60 000 ₽ из 100 000 ₽.'), 'the payment counts in extras, the jacket is bought');
+    assert.ok(extra.includes('Потрачено по плану 40 000 ₽, без плана — 0 ₽.'));
+    assert.ok(!extra.includes('id="purchase-3"') && extra.includes('id="spending-transfer"'), 'the jacket bought is listed once, as the transfer that paid it');
+    assert.ok(extra.includes('5 октября, Основной · план 20 000 ₽, дороже на 20 000 ₽'), 'it says how far over the plan the jacket went');
   });
 
   it('marks a regular payment of the week paid once linked expenses cover it, and says how much when they do not', () => {
@@ -238,6 +241,7 @@ describe('dashboard', () => {
     assert.ok(page.includes('Неделя 28 сентября – 4 октября') && page.includes('href="/?week=2026-09-28"'));
     assert.ok(page.includes('Неделя 26 октября – 1 ноября'));
     assert.ok(page.includes('Куртка') && page.includes('Дарья Ч.'));
+    assert.ok(page.includes('1 октября, Основной · без плана · без категории'), 'an expense no plan had says so');
     assert.ok(page.includes('name="envelope" value="extra"'));
   });
 

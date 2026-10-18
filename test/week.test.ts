@@ -27,6 +27,11 @@ function spending(id: string, date: string, amount: number): Operation {
   return { id, date, created: 0, kind: 'expense', amount, original: null, payee: id, shop: null, name: id, originalPayee: null, comment: null, description: null, category: null, zenmoneyCategory: null, regular: null, purchase: null, account: 'Основной', toAccount: null, hold: false, ignored: false, optional: false };
 }
 
+/** An expense the user said paid the purchase. */
+function linked(id: string, date: string, amount: number, purchaseId: number): Operation {
+  return { ...spending(id, date, amount), purchase: { id: purchaseId, title: '' } };
+}
+
 function purchase(id: number, title: string, amount: number, overrides: Partial<Purchase> = {}): Purchase {
   return { id, title, amount, week, envelope: 'week', kind: 'flexible', done: false, ...overrides };
 }
@@ -139,7 +144,6 @@ describe('summarizeWeek', () => {
 });
 
 describe('purchases paid by linked spending', () => {
-  const linked = (id: string, date: string, amount: number, purchaseId: number) => ({ ...spending(id, date, amount), purchase: { id: purchaseId, title: '' } });
 
   it('take what they paid out of the plan, and buy a purchase once they cover it', () => {
     const expenses = [linked('groceries', '2026-10-05', 473, 3), linked('pass', '2026-10-06', 1_000, 5), spending('transfer', '2026-10-05', 40_000)];
@@ -179,12 +183,32 @@ describe('summarizeExtras', () => {
     assert.equal(m.spent, 160_000, 'the week of 28 September belongs to October');
     assert.equal(m.planned, 20_000);
     assert.equal(m.free, 100_000 - 160_000 - 20_000);
+    assert.deepEqual([m.spentByPlan, m.paid.size], [0, 0], 'nothing paid a purchase');
+  });
+
+  it('tells the expenses the plan had: what paid a purchase, of this month or another, or set money aside for a wish', () => {
+    const jacket = purchase(1, 'Куртка', 20_000, { envelope: 'extra' });
+    const coat = purchase(2, 'Пальто', 15_000, { envelope: 'extra', week: '2026-09-21' });
+    const aside = { ...spending('aside', '2026-10-06', 5_000), saving: { id: 7, title: 'Резина', envelope: 'extra' as const } };
+    const expenses = [linked('transfer', '2026-10-05', 25_000, 1), linked('coat', '2026-10-05', 12_000, 2), aside, spending('kiosk', '2026-10-06', 300)];
+    const m = summarizeExtras(budget({ expenses, purchases: [jacket, coat] }, [['kiosk', 'extra'], ['aside', 'extra']]), '2026-10');
+
+    assert.equal(m.spent, 42_300);
+    assert.equal(m.spentByPlan, 42_000, 'the kiosk is the only one without a plan');
+    assert.deepEqual(
+      [...m.paid].map(([id, s]) => [id, s.purchase.title, s.covered, s.bought]),
+      [
+        ['transfer', 'Куртка', 25_000, true],
+        ['coat', 'Пальто', 12_000, false],
+      ],
+    );
   });
 });
 
 describe('extrasOutlook', () => {
   it('tells plenty, calm, tight or short by what the plan leaves at the month’s end', () => {
-    const left = (free: number) => extrasOutlook({ month: '2026-10', spent: 20_000, planned: 80_000 - free, free, spending: [], purchases: [] }, EXTRAS_LEVELS);
+    const left = (free: number) =>
+      extrasOutlook({ month: '2026-10', spent: 20_000, spentByPlan: 0, planned: 80_000 - free, free, spending: [], paid: new Map(), purchases: [] }, EXTRAS_LEVELS);
 
     assert.deepEqual(left(30_000), { left: 80_000, end: 30_000, state: 'plenty' });
     assert.equal(left(29_999).state, 'calm');

@@ -8,6 +8,7 @@ import { Settings } from '../src/settings.ts';
 import {
   budgetSettingsScreen,
   categoriesScreen,
+  extrasScreen,
   shopsScreen,
   incomeScreen,
   monthScreen,
@@ -100,6 +101,8 @@ const screens: Record<string, unknown> = {
   'week-why-ahead': weekWhyScreen(data, saved(), { ...budget, week: '2026-10-19' }),
   month: monthScreen(data, saved(), { ...budget, incomes: settings.incomes() }),
   'month-without-incomes': monthScreen(data, saved(), budget),
+  extras: extrasScreen(data, saved(), budget),
+  'extras-ahead': extrasScreen(data, saved(), { ...budget, month: '2026-11' }),
   spending: spendingScreen(data, saved(), { today, id: paying.spending }),
   'spending-income': spendingScreen(data, saved(), { today, id: income.spending }),
   operations: operationsScreen(data, saved(), { today }),
