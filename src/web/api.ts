@@ -31,13 +31,15 @@ import {
   type WeekSummary,
   type Wish,
 } from '../week.ts';
+import { weekWhy, type Check, type Overspend } from '../week-why.ts';
 import { covered, savingsTaken, stepMonth, type Step } from '../wish-plans.ts';
 import type { DateString, EntityCollections } from '../zenmoney/types.ts';
-import { capitalize, dayHeading, dayMonth, fromToday, money, monthName, num, plural, ROUND_STEP, roundParts, timeOn, weekLabel, WEEKDAYS, WEEKDAYS_FULL } from './format.ts';
+import { capitalize, dayHeading, dayMonth, dayTitle, fromToday, money, monthName, num, plural, ROUND_STEP, roundParts, timeOn, weekLabel, WEEKDAYS, WEEKDAYS_FULL } from './format.ts';
 import { CATEGORY_ICONS, categoryIcon, ENTRY_ICONS, entryIcon, type IconName } from './icons.ts';
 import { recentMonths } from './pages/chrome.ts';
 import {
   adviceText,
+  budgetOf,
   dueLabel,
   extrasTotal,
   loadDashboard,
@@ -393,6 +395,119 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
     source: options.source,
     canSync: options.canSync,
   };
+}
+
+/**
+ * Why a week went below zero, opened from the red figure on the app's circle, as what the user can do about it (see
+ * week-why.ts): where the week is, the expenses to check where they count, a lot alone or a run of small ones close
+ * together, each with the expenses «Верно» confirms (posted to /api/spending/confirmed); and reminders, each only when
+ * it is a lot: to keep to the plan, with the purchases that cost more, and to spend less on the optional, with where
+ * the week would be without them. An expense opens to be marked, a purchase or the plan opens the plan. With nothing to
+ * check or remind of, `empty` says so. With round figures what is free is as on the circle and the week without the optional to the hundred; the rows
+ * keep their amounts.
+ */
+export function weekWhyScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { week?: string | null }) {
+  const { today } = options;
+  const shown = parseWeek(options.week, weekOf(today, saved.weekStart), saved.weekStart);
+  const d = loadDashboard(data, saved, { ...options, week: shown, month: monthOfWeek(shown) });
+  const { current, symbol } = d;
+  const phase = shown > current ? 'ahead' : shown < current ? 'past' : 'current';
+  const why = weekWhy(budgetOf(data, saved, { today, from: shown }), shown, saved.confirmedSpending);
+  const round = (amount: number) => (saved.roundFigures ? Math.round(amount / ROUND_STEP) * ROUND_STEP : amount);
+  const total = (rows: Array<{ amount: number | null }>) => rows.reduce((sum, r) => sum + (r.amount ?? 0), 0);
+  const check = why.check.map((c) => checkRow(c, d.marking, symbol, today));
+  const reminders = [];
+  if (why.remindPlan) {
+    const rows = why.over.map((o) => overspendRow(o, symbol));
+    const [first] = rows;
+    reminders.push({
+      ...row({
+        id: 'remind-plan',
+        title: 'Придерживайся плана',
+        details: rows.length === 1 ? (first?.title ?? '') : `${first?.title ?? ''} и ещё ${rows.length - 1}`,
+        icon: 'target',
+        color: 'red',
+        amount: total(rows),
+      }),
+      rows,
+    });
+  }
+  if (why.remindOptional) {
+    const without = round(why.withoutOptional);
+    const rows = why.optional.map((o) => ({ ...expenseRow(d.marking, o), id: `remind-optional-${o.id}`, plan: false }));
+    reminders.push({
+      ...row({
+        id: 'remind-optional',
+        title: 'Трать меньше на необязательное',
+        details: `без них ${money(without, symbol, { sign: true })}`,
+        icon: 'piggy',
+        color: 'orange',
+        amount: total(rows),
+      }),
+      rows,
+    });
+  }
+  return {
+    symbol,
+    week: shown,
+    phase,
+    title: 'Почему неделя ушла в минус',
+    subtitle: `Неделя ${weekLabel(shown)}`,
+    now: { label: phase === 'current' ? 'сейчас' : phase === 'past' ? 'итог недели' : 'будет', amount: saved.roundFigures ? roundWeek(d.week).free : why.now },
+    check: check.length > 0 ? { title: 'Проверь траты', rows: check } : null,
+    reminders,
+    empty: check.length + reminders.length === 0 ? 'Ни крупных трат, ни перерасходов' : null,
+  };
+}
+
+/**
+ * An expense to check as a row: by its title with the day it came and what it is, or a run of small ones by how many
+ * came one after another, opened to them. `confirms` are the expenses «Верно» confirms.
+ */
+function checkRow(c: Check, m: Pick<Marking, 'marks' | 'purchases'>, symbol: string, today: DateString) {
+  if (c.kind === 'spending') {
+    const o = c.spending;
+    const details = [dayTitle(o.date, today), markingDetails(o)].filter(Boolean).join(' · ');
+    return { ...expenseRow(m, o), id: `check-${o.id}`, details, confirms: [o.id], parts: [] as ExpenseRow[] };
+  }
+  const [first] = c.spending;
+  const count = c.spending.length;
+  return {
+    ...row({
+      id: `check-run-${first?.id ?? ''}`,
+      title: `${count} ${plural(count, ['трата', 'траты', 'трат'])} подряд`,
+      details: first ? dayTitle(first.date, today) : '',
+      icon: 'layers',
+      color: toneColor('violet'),
+      amount: c.amount,
+    }),
+    spending: null,
+    optional: false,
+    confirms: c.spending.map((o) => o.id),
+    parts: c.spending.map((o) => expenseRow(m, o)),
+  };
+}
+
+/**
+ * What cost more than planned as a row: a purchase with what it was planned for and what it cost, or the plan past the
+ * week. The amount is how far past the plan, above zero; it opens the plan.
+ */
+function overspendRow(o: Overspend, symbol: string) {
+  const fields = { amount: o.amount, spending: null as string | null, optional: false, plan: true };
+  switch (o.kind) {
+    case 'purchase': {
+      const p = o.status.purchase;
+      return {
+        ...row({ id: `over-purchase-${p.id}`, title: p.title, details: `план ${money(p.amount, symbol)} → ${money(o.status.covered, symbol)}`, icon: categoryIcon(p.title), color: categoryColor(`purchase-${p.id}`, null, p.title), mark: p.envelope }),
+        ...fields,
+      };
+    }
+    case 'plan':
+      return {
+        ...row({ id: 'over-plan', title: 'План больше недели', details: `${money(o.planned, symbol)} из ${money(o.limit, symbol)}`, icon: 'calendar', color: toneColor('violet') }),
+        ...fields,
+      };
+  }
 }
 
 /**

@@ -242,6 +242,73 @@ struct WeekHome: Decodable, Hashable {
     }
 }
 
+/// Why a week went below zero, as what to do about it: where the week is, the expenses to check where they count, and
+/// reminders, each only when it is a lot; `empty` when there is nothing of either.
+struct WeekWhyScreen: Decodable {
+    let symbol: String
+    let week: String
+    /// past, current or ahead.
+    let phase: String
+    let title: String
+    let subtitle: String
+    let now: Figure
+    let check: Checks?
+    let reminders: [WhyReminder]
+    let empty: String?
+
+    struct Checks: Decodable, Hashable {
+        let title: String
+        let rows: [WhyCheck]
+    }
+}
+
+/// An expense to check where it counts, or a run of small ones close together opened to them; `confirms` are the
+/// expenses «Верно» confirms.
+struct WhyCheck: Decodable, Hashable, Identifiable {
+    let row: Row
+    let spending: String?
+    let confirms: [String]
+    let parts: [Expense]
+    var id: String { row.id }
+
+    init(from decoder: Decoder) throws {
+        row = try Row(from: decoder)
+        let c = try decoder.extra()
+        spending = try c.optional("spending")
+        confirms = try c.optional("confirms") ?? []
+        parts = try c.optional("parts") ?? []
+    }
+}
+
+/// A reminder, such as to keep to the plan: what to do, why under it, the sum, and the rows it opens to.
+struct WhyReminder: Decodable, Hashable, Identifiable {
+    let row: Row
+    let rows: [WhyRow]
+    var id: String { row.id }
+
+    init(from decoder: Decoder) throws {
+        row = try Row(from: decoder)
+        rows = try decoder.extra().optional("rows") ?? []
+    }
+}
+
+/// A row a reminder opens to: an expense opens to be marked, a purchase or the plan opens the plan.
+struct WhyRow: Decodable, Hashable, Identifiable {
+    let row: Row
+    let spending: String?
+    let plan: Bool
+    let optional: Bool
+    var id: String { row.id }
+
+    init(from decoder: Decoder) throws {
+        row = try Row(from: decoder)
+        let c = try decoder.extra()
+        spending = try c.optional("spending")
+        plan = try c.optional("plan") ?? false
+        optional = try c.optional("optional") ?? false
+    }
+}
+
 /// What a week allows and the usual amount. Another amount posts to /api/week-limits/:week, the usual one back to
 /// /api/week-limits/:week/delete.
 struct WeekLimit: Decodable, Hashable {

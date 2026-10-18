@@ -23,6 +23,24 @@ final class ScreensTests: XCTestCase {
         XCTAssert(reserved.waitForExistence(timeout: 15), "the main page loads")
         shot("home")
 
+        // A week past its amount tells why from its red figure: expenses to check and reminders, opened to their rows.
+        let why = app.buttons["week-why"]
+        if why.exists {
+            why.tap()
+            if app.descendants(matching: .any)["why-now"].waitForExistence(timeout: 10) {
+                sleep(2)
+                shot("week-why")
+                for id in ["remind-optional", "remind-plan"] where app.buttons[id].exists { app.buttons[id].tap() }
+                shot("week-why-reminders")
+                app.swipeUp()
+                shot("week-why-more")
+            } else {
+                XCTFail("why the week went below zero opens")
+            }
+            tab("Главная")
+            XCTAssert(reserved.wait(for: \.isHittable, toEqual: true, timeout: 5), "«Главная» returns to the main page")
+        }
+
         // With every expense sorted, the extras' card opens the month on them.
         let extras = app.buttons["extras"]
         if extras.exists {

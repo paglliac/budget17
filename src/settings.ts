@@ -113,6 +113,12 @@ const SCHEMA = `
     transaction_id TEXT PRIMARY KEY
   ) STRICT;
 
+  -- ZenMoney expenses the user said count right in the week, where spending counts by default, so that why a week went
+  -- below zero does not ask to check them again.
+  CREATE TABLE IF NOT EXISTS confirmed_spending (
+    transaction_id TEXT PRIMARY KEY
+  ) STRICT;
+
   -- What the user wrote about ZenMoney expenses and incomes in the app, such as whom a present was for.
   CREATE TABLE IF NOT EXISTS spending_description (
     transaction_id TEXT PRIMARY KEY,
@@ -655,6 +661,18 @@ export class Settings {
   markOptional(transactionId: string, optional: boolean): void {
     if (optional) this.#db.prepare('INSERT OR IGNORE INTO optional_spending (transaction_id) VALUES (?)').run(transactionId);
     else this.#db.prepare('DELETE FROM optional_spending WHERE transaction_id = ?').run(transactionId);
+  }
+
+  /** Expenses the user said count right in the week, where they count by default, by ZenMoney transaction id. */
+  confirmedSpending(): Set<string> {
+    return new Set(this.#db.prepare('SELECT transaction_id FROM confirmed_spending').all().map((row) => String(row.transaction_id)));
+  }
+
+  /** Says expenses count right in the week, so they are not asked about again. */
+  confirmSpending(transactionIds: string[]): void {
+    this.#transaction(() => {
+      for (const id of transactionIds) this.#db.prepare('INSERT OR IGNORE INTO confirmed_spending (transaction_id) VALUES (?)').run(id);
+    });
   }
 
   /** Where the user put expenses and incomes: a category or the regular expense they paid, by ZenMoney transaction id. */

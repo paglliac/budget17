@@ -210,6 +210,14 @@ describe('Settings', () => {
     assert.deepEqual([...settings.optionalSpending()], ['tx-1']);
   });
 
+  it('keeps the expenses said to count right in the week', () => {
+    using settings = new Settings(':memory:');
+
+    settings.confirmSpending(['tx-1', 'tx-2']);
+    settings.confirmSpending(['tx-2']);
+    assert.deepEqual([...settings.confirmedSpending()].sort(), ['tx-1', 'tx-2']);
+  });
+
   it('renames and hides ZenMoney categories, and keeps the user’s own', () => {
     using settings = new Settings(':memory:');
 
@@ -411,6 +419,8 @@ describe('Settings', () => {
       settings.markOptional('tx-1', true);
       assert.deepEqual([...settings.optionalSpending()], ['tx-1']);
       assert.deepEqual([...settings.spendingDescriptions()], [['tx-1', 'Кофе с Машей']]);
+      settings.confirmSpending(['tx-1']);
+      assert.deepEqual([...settings.confirmedSpending()], ['tx-1'], 'and the ones said to count right in the week');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

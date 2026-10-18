@@ -4,12 +4,15 @@ import SwiftUI
 enum HomeRoute: Hashable {
     /// The spending of the week, or of one day of it.
     case spending(String?)
+    /// Why the week of that first day went below zero.
+    case why(String)
 }
 
 /// The main page, the week: the days of the week, a large circle with what is free on its lilac lens and what is
 /// reserved beside it, then cards of what was spent today and of the expenses that wait for a category, or, once all
 /// are sorted, of the extras. It fits the screen: the reserved part opens the plan tab on the shown week, a day or
-/// today's spending opens the spending, and the extras open the month on them.
+/// today's spending opens the spending, the extras open the month on them, and the red figure of a week past its amount
+/// tells why it went there.
 struct HomeView: View {
     @Binding var mode: BudgetView.Mode
     @Binding var week: String?
@@ -36,6 +39,8 @@ struct HomeView: View {
             .navigationDestination(for: HomeRoute.self) { route in
                 switch route {
                 case .spending(let day): WeekSpendingView(week: week, day: day, sheet: $sheet)
+                case .why(let shown):
+                    WeekWhyView(week: shown, sheet: $sheet, openPlan: { openPlan(week) })
                 }
             }
         }
@@ -59,7 +64,7 @@ struct HomeView: View {
                     Spacer(minLength: 8)
                     HomeHero(home: s.home, limit: s.limit, symbol: s.symbol, editLimit: {
                         sheet = .weekLimit(WeekLimitDraft(week: s.week, title: s.title, limit: s.limit, symbol: s.symbol))
-                    }, openReserved: { openPlan(week) })
+                    }, openReserved: { openPlan(week) }, openWhy: { path.append(.why(s.week)) })
                     .padding(.top, 16)
                     .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { drag in step(drag, s) })
                     Spacer(minLength: 8)
@@ -132,6 +137,8 @@ struct HomeHero: View {
     let symbol: String
     let editLimit: () -> Void
     let openReserved: () -> Void
+    /// Tells why the week went past its amount, from its red figure.
+    let openWhy: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The wave rises from the bottom once the circle shows.
     @State private var risen = false
@@ -181,13 +188,24 @@ struct HomeHero: View {
         return min(max(d / 2 + freeHeight / 2 - crest, 0), d * 0.11)
     }
 
-    /// What is free. Past the week's amount the wave says it: the label goes, and the amount is how far past it, in red.
+    /// What is free. Past the week's amount the wave says it: the label goes, and the amount is how far past it, in red;
+    /// it opens why.
     private func free(over: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if !over {
+            if over {
+                Button(action: openWhy) {
+                    HStack(spacing: 4) {
+                        LilacAmount(amount: -home.free.amount, symbol: symbol, size: 30, color: Lilac.red)
+                        Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(Lilac.red.opacity(0.7))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.card)
+                .accessibilityIdentifier("week-why")
+            } else {
                 Text(home.free.label).font(.callout).foregroundStyle(Color.primary.opacity(0.85))
+                LilacAmount(amount: home.free.amount, symbol: symbol, size: 30)
             }
-            LilacAmount(amount: over ? -home.free.amount : home.free.amount, symbol: symbol, size: 30, color: over ? Lilac.red : nil)
             LilacChip(text: "\(over ? "сверх" : "из") \(Money.number(limit.amount))", systemImage: "pencil", highlighted: limit.changed, action: editLimit)
                 .accessibilityIdentifier("week-limit")
                 .accessibilityLabel("Бюджет недели \(Money.text(limit.amount, symbol))")

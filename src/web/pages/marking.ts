@@ -49,6 +49,8 @@ export interface SavedMarking {
   descriptions: ReadonlyMap<string, string>;
   /** Expenses the user said could have been done without, by ZenMoney transaction id; none when not given. */
   optionalSpending?: ReadonlySet<string>;
+  /** Expenses the user said count right in the week, where they count by default; none when not given. */
+  confirmedSpending?: ReadonlySet<string>;
   categories: CategorySetup;
   weekStart: WeekStart;
   /** The user's own name as banks write it in transfers to their accounts in other banks, when they gave it. */
@@ -140,6 +142,7 @@ const ENVELOPES: Envelope[] = ['week', 'extra', 'outside', 'ignored'];
  * income category, uncategorize, counted or ignored, and a description.
  */
 export function submitMarking(settings: Settings, data: EntityCollections, path: string, body: URLSearchParams): MarkingSubmission {
+  if (path === '/spending/confirmed') return confirmSpending(settings, data, body);
   const [, id, action] = /^\/spending\/([\w-]+)(?:\/([\w-]+))?$/.exec(path) ?? [];
   const transaction = id ? (data.transaction ?? []).find((t) => t.id === id && !t.deleted) : undefined;
   const operation = transaction ? operationKind(transaction) : null;
@@ -161,6 +164,8 @@ export function submitMarking(settings: Settings, data: EntityCollections, path:
   const envelope = ENVELOPES.find((e) => e === choice);
   if (envelope) {
     settings.markSpending(id, envelope);
+    // Put into the week by hand, an expense counts there because the user said so, not by default.
+    if (envelope === 'week') settings.confirmSpending([id]);
     return { status: 'saved' };
   }
   if (choice === 'unlink') {
@@ -195,6 +200,18 @@ export function submitMarking(settings: Settings, data: EntityCollections, path:
     return { status: 'saved' };
   }
   return { status: 'missing' };
+}
+
+/**
+ * Says expenses count right in the week, where they count by default, such as all of a run of small ones at once:
+ * `ids` are their ZenMoney transaction ids, comma-separated.
+ */
+function confirmSpending(settings: Settings, data: EntityCollections, body: URLSearchParams): MarkingSubmission {
+  const ids = (body.get('ids') ?? '').split(',').filter(Boolean);
+  const expenses = new Set((data.transaction ?? []).filter((t) => !t.deleted && operationKind(t) === 'expense').map((t) => t.id));
+  if (ids.length === 0 || !ids.every((id) => expenses.has(id))) return { status: 'missing' };
+  settings.confirmSpending(ids);
+  return { status: 'saved' };
 }
 
 /** An income goes into one of the income categories, or none, and counts among the incomes or not at all. */

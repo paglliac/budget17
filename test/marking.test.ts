@@ -81,6 +81,21 @@ describe('submitMarking', () => {
     assert.deepEqual([...settings.optionalSpending()], ['kiosk']);
   });
 
+  it('says expenses count right in the week, several at once, and so does putting one there by hand', () => {
+    using settings = new Settings(':memory:');
+
+    assert.deepEqual(submitMarking(settings, data, '/spending/confirmed', form({ ids: 'kiosk,rent' })), { status: 'saved' });
+    assert.deepEqual([...settings.confirmedSpending()].sort(), ['kiosk', 'rent']);
+    for (const ids of ['', 'kiosk,gone', 'refund', 'move']) {
+      assert.deepEqual(submitMarking(settings, data, '/spending/confirmed', form({ ids })), { status: 'missing' }, ids);
+    }
+
+    using marked = new Settings(':memory:');
+    submitMarking(marked, data, '/spending/kiosk/extra', form());
+    submitMarking(marked, data, '/spending/rent/week', form());
+    assert.deepEqual([...marked.confirmedSpending()], ['rent']);
+  });
+
   it('gives an expense a description in one line, and takes it away with an empty one', () => {
     using settings = new Settings(':memory:');
 
