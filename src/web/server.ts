@@ -296,16 +296,19 @@ function cameFrom(request: IncomingMessage): string | null {
   return url.host === request.headers.host && !url.pathname.startsWith('/settings') ? `${url.pathname}${url.search}` : null;
 }
 
-function dashboardPage(params: URLSearchParams, { today, demo, href }: Context, form?: DashboardForm): string {
-  const dashboard = loadDashboard(loadCollections(demo, today), loadSettings(savedBudget), {
+/** The main page, or with `plan` the plan of a week; in ₽, as the app and the user's picture of the main page write it. */
+function dashboardPage(params: URLSearchParams, { today, demo, href }: Context, form?: DashboardForm, plan = false): string {
+  const dashboard = loadDashboard(withRubleSign(loadCollections(demo, today)), loadSettings(savedBudget), {
     today,
-    view: params.get('view'),
+    view: plan ? 'plan' : params.get('view'),
     week: params.get('week'),
     month: params.get('month'),
+    filter: params.get('filter'),
     edit: params.get('edit'),
     form,
     source: demo ? 'demo' : 'zenmoney',
     canSync: Boolean(token) && !demo,
+    home: { syncedAt: syncedAt?.toISOString() ?? null },
   });
   return renderDashboard(dashboard, href).toString();
 }
@@ -335,7 +338,7 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     if (result.status === 'saved') return { status: 'saved', next: backTo(request) };
     if (result.status === 'missing') return { status: 'missing', message: 'Такой записи нет' };
     const back = new URL(backTo(request), 'http://localhost');
-    return { status: 'invalid', errors: result.form.errors, page: () => dashboardPage(back.searchParams, context, result.form) };
+    return { status: 'invalid', errors: result.form.errors, page: () => dashboardPage(back.searchParams, context, result.form, back.pathname === '/plan') };
   }
   if (path.startsWith('/review/claude/')) {
     const form = new URLSearchParams([...new URL(request.url ?? '/', 'http://localhost').searchParams, ...body]);
@@ -604,6 +607,9 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   switch (url.pathname) {
     case '/':
       send(response, 200, 'text/html', dashboardPage(params, context));
+      return;
+    case '/plan':
+      send(response, 200, 'text/html', dashboardPage(params, context, undefined, true));
       return;
     case '/review':
     case '/review/check': {

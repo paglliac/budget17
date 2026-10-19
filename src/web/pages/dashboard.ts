@@ -1,22 +1,25 @@
-// The overview: the budget by weeks. The week tab is a week's spending by days, with what is left to spend, the plan
-// and, in the current week, the wishes on the side; a week ahead has its plan in the main column and what it leaves
-// free on the side. Under what is left a week shows what it allows, which opens by ?edit=limit to give the week
-// another amount than the usual one. The month tab is a month's weeks and its extras. Both step back and forth,
-// ?week=2026-10-19 and ?month=2026-11, up to a year ahead. Built from widgets only. Entries open by ?edit=purchase-1,
-// wish-1, spending-<ZenMoney id>, or new-purchase and new-wish for the forms folded on the side; an open expense is
-// marked as on every page (see marking.ts). Forms post to /purchases, /wishes and /week-limits (see submitDashboard)
-// and to /spending (see submitMarking), and the server sends the browser back to the page they came from. A wish's
-// plan is chosen in the app (see wishes.ts); here a wish says what its plan does, and the money the plan holds shows
-// among the purchases without a form.
+// The main page, the budget by weeks, after the user's picture of 2026-10-19, and the plan of a week. The week tab is
+// one sheet: the week's spending by days under filters (?filter=pending and so on, see WEEK_FILTERS), and beside it
+// the app's circle — what is free with the wave, what is reserved — and under it what was spent today with the sync,
+// and the one thing to do next, as the app's main page has them (see home.ts). The month tab is a month's weeks and
+// its extras. Both step back and forth, ?week=2026-10-19 and ?month=2026-11, up to a year ahead. /plan is the plan of a
+// week, which «Зарезервировано» on the circle opens: what the week allows, which opens by ?edit=limit to give the week
+// another amount than the usual one, its purchases and regular payments, and in the current week the wishes. Built
+// from widgets only. Entries open by ?edit=purchase-1, wish-1, spending-<ZenMoney id>, or new-purchase and new-wish
+// for the folded forms; an open expense is marked as on every page (see marking.ts). Forms post to /purchases, /wishes
+// and /week-limits (see submitDashboard) and to /spending (see submitMarking), and the server sends the browser back
+// to the page they came from. A wish's plan is chosen in the app (see wishes.ts); here a wish says what its plan does,
+// and the money the plan holds shows among the purchases without a form.
 
 import { summarizeBalances } from '../../balances.ts';
-import { addDays, shiftMonth, type MonthString } from '../../dates.ts';
+import { addDays, localDate, shiftMonth, type MonthString } from '../../dates.ts';
 import { amountText, parseAmount, parseTitle } from '../../input.ts';
 import { listOperations, type Operation } from '../../ledger.ts';
 import type { Settings } from '../../settings.ts';
 import {
   adviceTarget,
   adviseWish,
+  envelopeOf,
   MONTH_LIMIT,
   monthOfWeek,
   summarizeExtras,
@@ -38,15 +41,17 @@ import { covered, gathering, stepMonth, type ChosenPlan, type Gathering } from '
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { capitalize, dayMonth, money, monthName, num, plural, weekLabel } from '../format.ts';
+import { weekHome, type WeekHome } from '../home.ts';
 import type { Html } from '../html.ts';
 import { categoryIcon, entryIcon } from '../icons.ts';
 import { categoryLook, withLogo } from '../looks.ts';
 import { categoryColor, toneColor, type Tone } from '../tones.ts';
 import { balanceTotal } from '../widgets/accounts.ts';
-import { button, emptyState, field, footnote, pageIntro, section, segmentedLinks, selectField, shareBar } from '../widgets/basics.ts';
+import { emptyState, field, filterChips, footnote, section, segmentedLinks, selectField, shareBar } from '../widgets/basics.ts';
+import { circleFacts, weekCircle } from '../widgets/circle.ts';
 import { entryForm, entryList, entryRow } from '../widgets/entries.ts';
 import { dayGroup, operationRow } from '../widgets/operations.ts';
-import { appShell, stack, tabs, topBar } from '../widgets/shell.ts';
+import { appShell, headActions, pageHead, stack } from '../widgets/shell.ts';
 import { appRail, userName, type Href } from './chrome.ts';
 import {
   allExpenses,
@@ -67,6 +72,21 @@ import {
 export const PLAN_AHEAD = 52;
 /** Weeks a purchase can be put into from its form: this one and the next ones. */
 const WEEK_CHOICES = 13;
+
+/**
+ * Which of a week's expenses the main page lists (?filter=): all of them, those not counted at all among them; those
+ * waiting for a category, as «Без категории» has them; those counted in the week or the extras; those the user said
+ * not to count; and the payments of regular expenses.
+ */
+export const WEEK_FILTERS = [
+  { id: 'all', label: 'Все операции' },
+  { id: 'pending', label: 'Ждут разбора' },
+  { id: 'counted', label: 'Учтённые' },
+  { id: 'ignored', label: 'Не расходы' },
+  { id: 'regular', label: 'Регулярные' },
+] as const;
+
+export type WeekFilter = (typeof WEEK_FILTERS)[number]['id'];
 
 /** What the user keeps in the app for the budget. */
 export interface SavedBudget extends SavedMarking {
@@ -97,9 +117,15 @@ export interface DashboardData {
   /** The first day of the current week. */
   current: DateString;
   weekStart: WeekStart;
-  view: 'week' | 'month';
+  view: 'week' | 'month' | 'plan';
   /** The week tab's week: the current one, an earlier one opened from the month, or a later one being planned. */
   week: WeekSummary;
+  /** Expenses of the week the user said not to count at all, newest first. */
+  ignored: Operation[];
+  /** Which of the week's expenses the week tab lists. */
+  filter: WeekFilter;
+  /** The top of the week as the app's main page has it, exact; only when asked for (see loadDashboard). */
+  home: WeekHome | null;
   /** The weeks of the month tab's month, the current one unless another is opened. */
   weeks: WeekSummary[];
   /** Extras of the month tab's month. */
@@ -141,10 +167,13 @@ export function loadDashboard(
     view?: string | null;
     week?: string | null;
     month?: string | null;
+    filter?: string | null;
     edit?: string | null;
     form?: DashboardForm;
     source: DashboardData['source'];
     canSync: boolean;
+    /** Build the top of the week too, as the pages show it, with when the server last synced, as an ISO moment. */
+    home?: { syncedAt: string | null };
   },
 ): DashboardData {
   const { today } = options;
@@ -161,12 +190,15 @@ export function loadDashboard(
     const savings = expenses.filter((o) => o.saving?.id === wish.id);
     return { wish, advice: adviseWish(budget, wish, today), plan, gathered: gathering(wish, plan ?? null, savings, { today, weekStart: saved.weekStart }) };
   };
-  return {
+  const d: DashboardData = {
     today,
     current,
     weekStart: saved.weekStart,
-    view: options.view === 'month' ? 'month' : 'week',
+    view: options.view === 'month' || options.view === 'plan' ? options.view : 'week',
     week: summarizeWeek(budget, week),
+    ignored: listOperations(data, { from: week, to: addDays(week, 6) }, saved, { withIgnored: true }).filter((o) => o.kind === 'expense' && o.ignored),
+    filter: WEEK_FILTERS.find((f) => f.id === options.filter)?.id ?? 'all',
+    home: null,
     weeks: weeks.map((w) => summarizeWeek(budget, w)),
     extras: summarizeExtras(budget, month),
     // A wish an expense bought is no longer wished for.
@@ -180,6 +212,25 @@ export function loadDashboard(
     source: options.source,
     canSync: options.canSync,
   };
+  // The pages are always exact; only the app rounds.
+  return options.home ? { ...d, home: weekHome(d, d.week, data, { ...saved, roundFigures: false }, { today, syncedAt: options.home.syncedAt }) } : d;
+}
+
+/** A week's expenses that the filter lets through, newest first. */
+export function weekList(d: Pick<DashboardData, 'week' | 'ignored' | 'marking'>, filter: WeekFilter): Operation[] {
+  const { spending } = d.week;
+  switch (filter) {
+    case 'pending':
+      return spending.filter((o) => o.category === null);
+    case 'counted':
+      return spending.filter((o) => ['week', 'extra'].includes(envelopeOf(d.marking, o)));
+    case 'ignored':
+      return d.ignored;
+    case 'regular':
+      return spending.filter((o) => o.regular !== null);
+    case 'all':
+      return [...spending, ...d.ignored].sort((a, b) => b.date.localeCompare(a.date) || b.created - a.created);
+  }
 }
 
 /** A week's first day from a query param, at most PLAN_AHEAD weeks after the current one; the current week otherwise. */
@@ -311,29 +362,29 @@ export function renderDashboard(d: DashboardData, href: Href): Html {
   const thisMonth = monthOfWeek(current);
   /** This page with the given params; an entry opens with `edit`. */
   const here = (params: Record<string, string | null> = {}) =>
-    href('/', {
-      view: d.view === 'week' ? null : d.view,
-      week: d.view === 'week' && d.week.week !== current ? d.week.week : null,
-      month: d.view === 'month' && d.extras.month !== thisMonth ? d.extras.month : null,
-      ...params,
-    });
+    d.view === 'plan'
+      ? href('/plan', { week: d.week.week !== current ? d.week.week : null, ...params })
+      : href('/', {
+          view: d.view === 'week' ? null : d.view,
+          week: d.view === 'week' && d.week.week !== current ? d.week.week : null,
+          month: d.view === 'month' && d.extras.month !== thisMonth ? d.extras.month : null,
+          filter: d.view === 'week' && d.filter !== 'all' ? d.filter : null,
+          ...params,
+        });
   const page = { d, href, here, current };
-  const { main, side } = d.view === 'month' ? monthView(page) : weekView(page);
+  const { head, main, side } = d.view === 'month' ? monthView(page) : d.view === 'plan' ? planView(page) : weekView(page);
 
   const body = appShell({
-    rail: appRail('overview', d.userName, href),
-    tabs: tabs({
-      label: 'Период',
-      items: [
-        { label: 'Неделя', icon: 'calendar', href: href('/'), active: d.view === 'week' },
-        { label: 'Месяц', icon: 'calendar', href: href('/', { view: 'month' }), active: d.view === 'month' },
-      ],
-    }),
+    rail: appRail(d.view === 'plan' ? 'plan' : 'overview', d.userName, href),
+    head,
     main,
-    side: [...side, ...(d.source === 'demo' ? [footnote({ text: 'Демо-данные. Чтобы увидеть свои, добавьте токен в .env и запустите make sync.' })] : [])],
-    wideSide: true,
+    side: [
+      headActions({ items: [{ icon: 'search', label: 'Найти операцию', href: href('/operations') }], user: d.userName }),
+      ...side,
+      ...(d.source === 'demo' ? [footnote({ text: 'Демо-данные. Чтобы увидеть свои, добавьте токен в .env и запустите make sync.' })] : []),
+    ],
   });
-  return pageDocument({ title: 'Бюджет', body });
+  return pageDocument({ title: d.view === 'plan' ? 'План' : 'Главная', body });
 }
 
 interface Page {
@@ -343,39 +394,146 @@ interface Page {
   current: DateString;
 }
 
+interface View {
+  head: Html;
+  main: Array<Html | null>;
+  side: Html[];
+}
+
 /**
- * A week that has begun or is over: its spending by days, and on the side what is left, the plan and, in the current
- * week, the wishes. A week ahead has no spending yet, so its plan takes the main column.
+ * A week on the main page: its spending by days under the filters, and beside it the circle with what was spent and
+ * what to do next. A week ahead has no spending yet; its plan is on the plan's page, which the circle opens.
  */
-function weekView(page: Page): { main: Html[]; side: Html[] } {
-  const { d, current } = page;
+function weekView(page: Page): View {
+  const { d, href, here, current } = page;
   const w = d.week;
-  const head = [
-    topBar({ crumbs: [{ label: 'Бюджет' }, { label: `Неделя ${weekLabel(w.week)}`, icon: 'calendar' }], actions: syncButton(d) }),
-    weekSteps(page),
-    pageIntro({ title: `Неделя ${weekLabel(w.week)}`, text: weekSentence(w, current, d.symbol) }),
-  ];
-  if (w.week > current) {
-    return {
-      main: [...head, section({ title: 'План', body: entryList({ label: 'План на неделю', items: [...planItems(page, w), newPurchaseForm(page, w.week, 'week')] }) })],
-      side: [...totalSide(weekTotal(w, current, d.symbol), d.symbol, 'Неделя'), limitList(page, w)],
-    };
-  }
+  const head = pageHead({
+    title: `Неделя ${weekLabel(w.week)}`,
+    ...weekArrows(page, (week) => href('/', { week: week === current ? null : week })),
+    switcher: periodSwitch(page),
+    text: [weekSentence(w, current, d.symbol), pendingSentence(w, d.symbol)].filter((line) => line !== null),
+  });
+  const side = d.home ? [weekCircle(circleOf(page, d.home)), circleFacts({ items: factsOf(page, d.home) })] : [];
+  if (w.week > current) return { head, main: [emptyState({ text: 'Неделя ещё не началась, трат пока нет.' })], side };
+  const list = weekList(d, d.filter);
+  const pending = weekList(d, 'pending').length;
   return {
-    main: [...head, section({ title: 'Траты недели', body: w.spending.length === 0 ? emptyState({ text: 'Трат пока нет.' }) : spendingByDay(page, w.spending) })],
-    side: [
-      ...totalSide(weekTotal(w, current, d.symbol), d.symbol, 'Неделя'),
-      limitList(page, w),
-      topBar({ crumbs: [{ label: 'План' }] }),
-      entryList({ label: 'План на неделю', items: [...planItems(page, w), foldedPurchaseForm(page, w.week)] }),
-      ...(w.week === current
-        ? [
-            topBar({ crumbs: [{ label: 'Хочу купить' }] }),
-            entryList({ label: 'Хочу купить', items: [...d.wishes.map((x) => wishItem(page, x)), foldedWishForm(page)] }),
-          ]
-        : []),
+    head,
+    main: [
+      filterChips({
+        label: 'Какие траты',
+        items: WEEK_FILTERS.map((f) => ({
+          label: f.label,
+          href: here({ filter: f.id === 'all' ? null : f.id, edit: null }),
+          active: f.id === d.filter,
+          count: f.id === 'pending' ? pending : undefined,
+        })),
+      }),
+      list.length === 0 ? emptyState({ text: w.spending.length === 0 && d.ignored.length === 0 ? 'Трат пока нет.' : 'Таких трат на этой неделе нет.' }) : spendingByDay(page, list),
     ],
+    side,
   };
+}
+
+/** The plan of a week: what it allows, its purchases and regular payments, and in the current week the wishes. */
+function planView(page: Page): View {
+  const { d, href, current } = page;
+  const w = d.week;
+  return {
+    head: pageHead({
+      title: `План на ${weekLabel(w.week)}`,
+      ...weekArrows(page, (week) => href('/plan', { week: week === current ? null : week })),
+      text: [weekSentence(w, current, d.symbol)],
+    }),
+    main: [
+      section({ title: 'Бюджет недели', body: limitList(page, w) }),
+      section({ title: 'План', body: entryList({ label: 'План на неделю', items: [...planItems(page, w), foldedPurchaseForm(page, w.week)] }) }),
+      w.week === current ? section({ title: 'Хочу купить', body: entryList({ label: 'Хочу купить', items: [...d.wishes.map((x) => wishItem(page, x)), foldedWishForm(page)] }) }) : null,
+    ],
+    side: d.home ? [weekCircle(circleOf(page, d.home))] : [],
+  };
+}
+
+/** The arrows of a week's title: the week before, and the week after while it can be planned. */
+function weekArrows({ d, current }: Page, link: (week: DateString) => string): Pick<Parameters<typeof pageHead>[0], 'prev' | 'next'> {
+  const next = addDays(d.week.week, 7);
+  return {
+    prev: { label: 'Неделя раньше', href: link(addDays(d.week.week, -7)) },
+    next: next <= addDays(current, 7 * PLAN_AHEAD) ? { label: 'Неделя позже', href: link(next) } : null,
+  };
+}
+
+/** Неделя and Месяц: the current week, and the month of the week shown. */
+function periodSwitch({ d, href, current }: Page): Html {
+  const month = d.view === 'month' ? d.extras.month : monthOfWeek(d.week.week);
+  return segmentedLinks({
+    label: 'Период',
+    items: [
+      { label: 'Неделя', href: href('/'), active: d.view === 'week' },
+      { label: 'Месяц', href: href('/', { view: 'month', month: month === monthOfWeek(current) ? null : month }), active: d.view === 'month' },
+    ],
+  });
+}
+
+/** The circle of a week, as the app draws it: what is free with the wave, and what is reserved, which opens the plan. */
+function circleOf({ d, href, current }: Page, { free, reserved }: WeekHome): Parameters<typeof weekCircle>[0] {
+  const w = d.week;
+  const note = free.state === 'over' ? `сверх ${money(w.limit, d.symbol)}` : w.week === current ? 'до конца недели' : `из ${money(w.limit, d.symbol)}`;
+  return {
+    free: { ...free, note },
+    reserved: {
+      label: reserved.label,
+      amount: reserved.amount,
+      parts: [reserved.required, reserved.flexible],
+      href: d.view === 'plan' ? undefined : href('/plan', { week: w.week === current ? null : w.week }),
+    },
+    symbol: d.symbol,
+  };
+}
+
+/**
+ * Under the circle: what was spent today (in a past week, in all of it), with the sync and when it last ran, and the
+ * one thing to do next as the app's card has it: the expenses to sort, a wish short of money, or the extras.
+ */
+function factsOf({ d, href }: Page, home: WeekHome): Parameters<typeof circleFacts>[0]['items'] {
+  const spent = home.spent
+    ? [
+        {
+          above: home.spent.label,
+          figure: money(home.spent.amount, d.symbol),
+          action: d.canSync ? { label: home.syncedAt ? `Обновлено ${syncedText(home.syncedAt, d.today)}` : 'Обновить', icon: 'refresh' as const, action: '/sync' } : undefined,
+        },
+      ]
+    : [];
+  const task =
+    home.task === 'sort'
+      ? { figure: String(home.pending.count), below: home.pending.label, href: href('/uncategorized') }
+      : home.task === 'short' && home.short
+        ? { above: home.short.label, figure: money(home.short.amount, d.symbol), tone: 'red' as const, below: home.short.note, href: home.short.wish === null ? href('/plan') : `${href('/plan')}#wish-${home.short.wish}` }
+        : {
+            above: home.extras.label,
+            figure: money(home.extras.amount, d.symbol),
+            tone: home.extras.over ? ('red' as const) : undefined,
+            below: home.extras.note,
+            href: href('/', { view: 'month', month: home.extras.month }),
+          };
+  return [...spent, task];
+}
+
+/** 18:42 for a moment of today, 19 октября, 18:42 for an earlier one, in the server's time. */
+function syncedText(iso: string, today: DateString): string {
+  const moment = new Date(iso);
+  const time = moment.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const day = localDate(moment);
+  return day === today ? time : `${dayMonth(day)}, ${time}`;
+}
+
+/** How many of the week's expenses wait for a category and for how much; null when none does. */
+function pendingSentence(w: WeekSummary, s: string): string | null {
+  const pending = w.spending.filter((o) => o.category === null);
+  if (pending.length === 0) return null;
+  const amount = pending.reduce((sum, o) => sum + o.amount, 0);
+  return sentence(`Ждут разбора ${pending.length} ${plural(pending.length, ['операция', 'операции', 'операций'])} на ${money(amount, s)}`);
 }
 
 /**
@@ -426,17 +584,18 @@ function planItems(page: Page, w: WeekSummary): Html[] {
 
 /**
  * The week's spending under a heading for each day, newest first, without minuses, as the plan has none. An expense
- * opens in place to be marked.
+ * opens in place to be marked; one not counted at all is pale.
  */
 function spendingByDay(page: Page, spending: Operation[]): Html {
   const { d, href, here } = page;
   const days = spending.map((o) => o.date).filter((date, i, all) => all.indexOf(date) === i);
   return stack({
-    gap: 18,
+    gap: 26,
     items: days.map((date) =>
       dayGroup({
         date,
         today: d.today,
+        ruled: true,
         rows: spending
           .filter((o) => o.date === date)
           .map((o) => {
@@ -453,9 +612,11 @@ function spendingByDay(page: Page, spending: Operation[]): Html {
               unsigned: true,
               mark: envelopeMark(d.marking, o),
               tint: markingTint(o),
+              muted: o.ignored,
               href: open ? here() : here({ edit: key }),
               panel: open ? markingPanel(d.marking, o, href) : undefined,
               actions: open ? markingActions(d.marking, o, href) : undefined,
+              go: true,
             });
           }),
       }),
@@ -523,22 +684,31 @@ export function extrasTotal(m: ExtrasSummary, symbol: string): Total {
   };
 }
 
-function totalSide(total: Total, symbol: string, barLabel: string): Html[] {
-  return [
-    topBar({ crumbs: [{ label: total.label }] }),
-    balanceTotal({ amount: total.amount, symbol, note: total.note }),
-    shareBar({ label: barLabel, parts: total.parts.map((p) => ({ label: p.label, value: p.value, color: toneColor(p.tone) })) }),
-  ];
+function totalSide(total: Total, symbol: string, barLabel: string): Html {
+  return section({
+    title: total.label,
+    body: [
+      balanceTotal({ amount: total.amount, symbol, note: total.note }),
+      shareBar({ label: barLabel, parts: total.parts.map((p) => ({ label: p.label, value: p.value, color: toneColor(p.tone) })) }),
+    ],
+  });
 }
 
-function monthView(page: Page): { main: Html[]; side: Html[] } {
+/** A month: its weeks and its extras, and beside them what is left of the extras. */
+function monthView(page: Page): View {
   const { d, href, current } = page;
   const m = d.extras;
+  const link = (month: MonthString) => href('/', { view: 'month', month: month === monthOfWeek(current) ? null : month });
+  const next = shiftMonth(m.month, 1);
   return {
+    head: pageHead({
+      title: capitalize(monthName(m.month)),
+      prev: { label: 'Месяц раньше', href: link(shiftMonth(m.month, -1)) },
+      next: next <= monthOfWeek(addDays(current, 7 * PLAN_AHEAD)) ? { label: 'Месяц позже', href: link(next) } : null,
+      switcher: periodSwitch(page),
+      text: [monthSentence(m, d.weeks, current, d.symbol)],
+    }),
     main: [
-      topBar({ crumbs: [{ label: 'Бюджет' }, { label: capitalize(monthName(m.month)), icon: 'calendar' }], actions: syncButton(d) }),
-      monthSteps(page),
-      pageIntro({ title: capitalize(monthName(m.month)), text: monthSentence(m, d.weeks, current, d.symbol) }),
       section({
         title: 'Недели',
         body: entryList({
@@ -569,7 +739,7 @@ function monthView(page: Page): { main: Html[]; side: Html[] } {
         }),
       }),
     ],
-    side: totalSide(extrasTotal(m, d.symbol), d.symbol, 'Дополнительные'),
+    side: [totalSide(extrasTotal(m, d.symbol), d.symbol, 'Дополнительные')],
   };
 }
 
@@ -586,41 +756,6 @@ export function monthWeekLine(w: WeekSummary, current: DateString, symbol: strin
     tone: w.free < 0 ? 'red' : w.week === current ? 'violet' : w.week > current ? 'gray' : 'yellow',
     amount: Math.abs(w.free),
   };
-}
-
-/** Links to the week before, this week and the week after. */
-function weekSteps({ d, href, current }: Page): Html {
-  const week = d.week.week;
-  const link = (w: DateString) => href('/', { week: w === current ? null : w });
-  const next = addDays(week, 7);
-  return segmentedLinks({
-    label: 'Недели',
-    items: [
-      { label: '← Раньше', href: link(addDays(week, -7)) },
-      { label: 'Эта неделя', href: link(current), active: week === current },
-      ...(next <= addDays(current, 7 * PLAN_AHEAD) ? [{ label: 'Позже →', href: link(next) }] : []),
-    ],
-  });
-}
-
-/** Links to the month before, this month and the month after. */
-function monthSteps({ d, href, current }: Page): Html {
-  const month = d.extras.month;
-  const thisMonth = monthOfWeek(current);
-  const link = (m: MonthString) => href('/', { view: 'month', month: m === thisMonth ? null : m });
-  const next = shiftMonth(month, 1);
-  return segmentedLinks({
-    label: 'Месяцы',
-    items: [
-      { label: `← ${capitalize(monthName(shiftMonth(month, -1)))}`, href: link(shiftMonth(month, -1)) },
-      { label: 'Этот месяц', href: link(thisMonth), active: month === thisMonth },
-      ...(next <= monthOfWeek(addDays(current, 7 * PLAN_AHEAD)) ? [{ label: `${capitalize(monthName(next))} →`, href: link(next) }] : []),
-    ],
-  });
-}
-
-function syncButton(d: DashboardData): Html | null {
-  return d.canSync ? button({ label: 'Обновить', icon: 'refresh', action: '/sync' }) : null;
 }
 
 /**
@@ -914,10 +1049,9 @@ function weekFigures(w: WeekSummary, current: DateString, s: string): string {
   }
   const spent = `потрачено ${money(w.spent, s)} из ${money(w.limit, s)}`;
   if (w.week < current) return sentence(`За эту неделю ${spent}, ${w.free < 0 ? 'перерасход' : 'осталось'} ${money(Math.abs(w.free), s)}`);
+  // What is free the circle says.
   const plan = w.planned > 0 ? `, ещё ${money(w.planned, s)} ждут покупок из плана` : '';
-  return w.free >= 0
-    ? `${sentence(`Можно потратить ещё ${money(w.free, s)}`)} ${sentence(`${capitalize(spent)}${plan}`)}`
-    : sentence(`Неделя в минусе на ${money(-w.free, s)}: ${spent}${plan}`);
+  return w.free >= 0 ? sentence(`${capitalize(spent)}${plan}`) : sentence(`Неделя в минусе на ${money(-w.free, s)}: ${spent}${plan}`);
 }
 
 export function monthSentence(m: ExtrasSummary, weeks: WeekSummary[], current: DateString, s: string): string {

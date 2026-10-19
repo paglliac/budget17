@@ -22,18 +22,22 @@ export function createHref(keep: Record<string, string> = {}): Href {
   };
 }
 
-export type Section = 'overview' | 'review' | 'operations' | 'uncategorized' | 'income' | 'regular' | 'settings';
+export type Section = 'overview' | 'plan' | 'review' | 'operations' | 'uncategorized' | 'income' | 'regular' | 'settings';
 
+/**
+ * The sections, as the user's picture of the main page of 2026-10-19 names them where it can: «Главная», «Операции»
+ * and «План» first, as the tabs of the app go.
+ */
 export function appRail(active: Section, userName: string | null, href: Href): Html {
   return rail({
-    home: { label: 'Обзор', href: href('/') },
+    home: { label: 'Главная', href: href('/') },
     groups: [
       {
-        title: 'Меню',
         items: [
-          { icon: 'home', label: 'Обзор', href: href('/'), active: active === 'overview' },
-          { icon: 'target', label: 'Разбор месяца', href: href('/review'), active: active === 'review' },
+          { icon: 'home', label: 'Главная', href: href('/'), active: active === 'overview' },
           { icon: 'list', label: 'Операции', href: href('/operations'), active: active === 'operations' },
+          { icon: 'calendar', label: 'План', href: href('/plan'), active: active === 'plan' },
+          { icon: 'target', label: 'Разбор месяца', href: href('/review'), active: active === 'review' },
           { icon: 'tag', label: 'Без категории', href: href('/uncategorized'), active: active === 'uncategorized' },
           { icon: 'arrowDownLeft', label: 'Доходы', href: href('/income'), active: active === 'income' },
           { icon: 'repeat', label: 'Регулярные траты', href: href('/regular'), active: active === 'regular' },
@@ -42,7 +46,7 @@ export function appRail(active: Section, userName: string | null, href: Href): H
         ],
       },
     ],
-    footer: userName ? { title: 'Профиль', body: avatar({ name: userName }) } : undefined,
+    footer: userName && active !== 'overview' && active !== 'plan' ? { title: 'Профиль', body: avatar({ name: userName }) } : undefined,
   });
 }
 

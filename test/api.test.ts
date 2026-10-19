@@ -15,7 +15,6 @@ import {
   shopsScreen,
   spendingScreen,
   uncategorizedScreen,
-  weekLevel,
   weekScreen,
   weekWhyScreen,
   widgetScreen,
@@ -24,6 +23,7 @@ import {
   withRubleSign,
 } from '../src/web/api.ts';
 import { Settings } from '../src/settings.ts';
+import { weekLevel } from '../src/web/home.ts';
 import type { SavedBudget } from '../src/web/pages/dashboard.ts';
 import { submitMarking } from '../src/web/pages/marking.ts';
 import { submitWishPlan } from '../src/web/pages/wishes.ts';

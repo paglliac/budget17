@@ -45,6 +45,8 @@ export function operationRow(options: {
   /** Without a tone the dot is an empty ring, for an amount that counts nowhere in particular. */
   mark?: { label: string; tone?: Tone };
   unsigned?: boolean;
+  /** A chevron after the amount, for a row that opens. */
+  go?: boolean;
 }): Html {
   const { kind, amount, symbol } = options;
   const open = options.panel !== undefined;
@@ -67,7 +69,8 @@ export function operationRow(options: {
       }>
         <b>${value}</b>
         ${options.original ? html`<small>${money(options.original.amount, options.original.symbol, { cents: true })}</small>` : null}
-      </span>`;
+      </span>
+      ${options.go ? html`<span class="operation-go">${icon(open ? 'chevronDown' : 'chevronRight', 16)}</span>` : null}`;
   const actions = open ? (options.actions ?? []) : [];
   return html`
     <li class="operation-item${open ? ' open' : ''}${options.muted ? ' muted' : ''}"${options.id ? html` id="${options.id}"` : null}>
@@ -83,11 +86,14 @@ export function operationRow(options: {
     </li>`;
 }
 
-/** Operations of one day under a heading with the day's balance of incomes and expenses. */
-export function dayGroup(options: { date: DateString; today: DateString; net?: { amount: number; symbol: string }; rows: Html[] }): Html {
+/**
+ * Operations of one day under a heading with the day's balance of incomes and expenses. `ruled` draws a hairline
+ * between the rows and makes them roomier, as on the main page.
+ */
+export function dayGroup(options: { date: DateString; today: DateString; net?: { amount: number; symbol: string }; rows: Html[]; ruled?: boolean }): Html {
   const { title, subtitle } = dayHeading(options.date, options.today);
   return html`
-    <section class="day">
+    <section class="day${options.ruled ? ' ruled' : ''}">
       <header class="day-head">
         <h3>${title}</h3><span>${subtitle}</span>
         ${options.net && Math.round(options.net.amount) !== 0 ? html`<b>${money(options.net.amount, options.net.symbol, { sign: true })}</b>` : null}

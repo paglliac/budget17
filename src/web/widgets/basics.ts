@@ -92,6 +92,19 @@ export function segmentedLinks(options: { label: string; items: Array<{ label: s
   )}</nav>`;
 }
 
+/**
+ * Filters of a list as separate pills, the current one raised on white; a count on violet marks a filter with
+ * something waiting, such as expenses to sort. On a narrow screen the row scrolls sideways.
+ */
+export function filterChips(options: { label: string; items: Array<{ label: string; href: string; active?: boolean; count?: number }> }): Html {
+  return html`<nav class="filter-chips" aria-label="${options.label}">${options.items.map(
+    (item) =>
+      html`<a class="filter-chip" href="${item.href}"${item.active ? html` aria-current="page"` : null}>${item.label}${
+        item.count ? html`<span>${item.count}</span>` : null
+      }</a>`,
+  )}</nav>`;
+}
+
 /** A search box that submits a GET form; `params` keep the other filters. */
 export function searchField(options: {
   action: string;

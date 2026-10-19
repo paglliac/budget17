@@ -42,51 +42,98 @@ function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
   };
 }
 
-const options = { today, source: 'zenmoney' as const, canSync: true };
+/** The server synced at 18:42 today, by the clock the page writes it in. */
+const options = { today, source: 'zenmoney' as const, canSync: true, home: { syncedAt: new Date(2026, 9, 6, 18, 42).toISOString() } };
 /** The page with non-breaking spaces as plain ones, so the expected text reads naturally. */
 const render = (extra: Partial<Parameters<typeof loadDashboard>[2]> = {}, budget = saved()) =>
   String(renderDashboard(loadDashboard(data(), budget, { ...options, ...extra }), createHref())).replaceAll('\u00a0', ' ');
+/** The plan's page of a week. */
+const plan = (extra: Partial<Parameters<typeof loadDashboard>[2]> = {}, budget = saved()) => render({ view: 'plan', ...extra }, budget);
 /** The row of an expense, with no space between its tags. */
 const spendingRow = (page: string, id: string) => (new RegExp(`id="spending-${id}".*?</li>`, 's').exec(page)?.[0] ?? '').replace(/>\s+</g, '><');
 
 describe('dashboard', () => {
-  it('shows what is left this week, the plan with bought marks, regular payments and the spending', () => {
+  it('shows the week’s spending by days, and the plan with bought marks and regular payments on a page of its own', () => {
     const page = render();
 
-    assert.ok(page.includes('Неделя 5–11 октября'));
+    assert.ok(page.includes('<h1>Неделя 5–11 октября</h1>'));
     assert.ok(page.includes('<h3>Вчера</h3>'), 'the spending goes by days');
     assert.ok(page.includes('Неделя в минусе на 3 473 ₽: потрачено 40 473 ₽ из 45 000 ₽, ещё 8 000 ₽ ждут покупок из плана.'));
-    assert.ok(page.includes('action="/purchases/1/done"><button class="entry-icon-action" type="submit" title="Завершить: остаток вернётся"'));
-    assert.ok(page.includes('<b>Подарок</b><small>завершено, вернулось 5 000 ₽</small>'), 'a finished one gives its amount back');
-    assert.ok(!page.includes('Куплено'));
-    assert.ok(page.includes('регулярная · 7 октября') && page.includes('href="/regular?edit=7"'));
+    assert.ok(page.includes('Ждут разбора 2 операции на 40 473 ₽.'));
     assert.ok(page.includes('&lt;b&gt;Пятёрочка&lt;/b&gt;') && !page.includes('<b>Пятёрочка</b>'));
     assert.ok(!page.includes('Дарья Ч.'), 'last week’s spending is not this week’s');
-    assert.ok(page.includes('action="/sync"'));
+    assert.ok(!page.includes('id="purchase-1"') && !page.includes('Школа, ЛДК'), 'the plan is on its page');
     assert.ok(page.includes('href="/?view=month"'));
     assert.ok(!page.includes('Траты из ZenMoney') && !page.includes('Траты идут в неделю'), 'no notes under the spending');
+
+    const planned = plan();
+    assert.ok(planned.includes('<h1>План на 5–11 октября</h1>') && planned.includes('title="План" aria-current="page"'));
+    assert.ok(planned.includes('action="/purchases/1/done"><button class="entry-icon-action" type="submit" title="Завершить: остаток вернётся"'));
+    assert.ok(planned.includes('<b>Подарок</b><small>завершено, вернулось 5 000 ₽</small>'), 'a finished one gives its amount back');
+    assert.ok(!planned.includes('Куплено'));
+    assert.ok(planned.includes('регулярная · 7 октября') && planned.includes('href="/regular?edit=7"'));
   });
 
-  it('puts the spending into the main column and what is left, the plan and the wishes on the wide side', () => {
+  it('puts the circle beside the spending, and what the week allows, the plan and the wishes on the plan’s page', () => {
     const page = render();
-    const side = page.slice(page.indexOf('<aside'));
+    const side = page.slice(page.indexOf('<aside'), page.indexOf('</aside>'));
 
-    assert.ok(page.includes('class="shell-columns has-side wide-side"'));
+    assert.ok(page.includes('class="sheet has-side"'));
     assert.ok(!side.includes('id="spending-groceries"') && page.includes('id="spending-groceries"'));
-    assert.ok(side.indexOf('Можно потратить') < side.indexOf('aria-label="План на неделю"'));
-    assert.ok(side.indexOf('aria-label="План на неделю"') < side.indexOf('aria-label="Хочу купить"'));
-    assert.ok(!page.includes('action="/purchases"') && !page.includes('action="/wishes"'), 'forms for new entries are folded');
-    assert.ok(page.includes('href="/?edit=new-purchase"') && page.includes('href="/?edit=new-wish"'));
+    assert.ok(side.includes('class="circle wave-over"') && side.includes('<b class="circle-free-amount">3 473 ₽</b>') && side.includes('<small>сверх 45 000 ₽</small>'));
+    assert.ok(side.includes('<a class="circle-reserved" href="/plan">'), '«Зарезервировано» opens the plan');
+    assert.ok(side.replace(/>\s+</g, '><').includes('<b>8 000 ₽</b><small>гибкое</small>'));
 
-    const adding = render({ edit: 'new-purchase' });
-    assert.ok(adding.includes('id="new-purchase"') && adding.includes('action="/purchases"') && adding.includes('<a class="entry-quiet" href="/">Отмена</a>'));
+    const planned = plan();
+    assert.ok(planned.indexOf('id="limit"') < planned.indexOf('aria-label="План на неделю"'));
+    assert.ok(planned.indexOf('aria-label="План на неделю"') < planned.indexOf('aria-label="Хочу купить"'));
+    assert.ok(planned.includes('<span class="circle-reserved">'), 'the plan’s own circle opens nothing');
+    assert.ok(!planned.includes('action="/purchases"') && !planned.includes('action="/wishes"'), 'forms for new entries are folded');
+    assert.ok(planned.includes('href="/plan?edit=new-purchase"') && planned.includes('href="/plan?edit=new-wish"'));
+
+    const adding = plan({ edit: 'new-purchase' });
+    assert.ok(adding.includes('id="new-purchase"') && adding.includes('action="/purchases"') && adding.includes('<a class="entry-quiet" href="/plan">Отмена</a>'));
     assert.ok(!adding.includes('action="/wishes"'));
-    const invalid = render({ form: { kind: 'purchase', id: null, values: { title: '', amount: '1' }, errors: { title: 'Нужно название' }, envelope: 'week', week: null } });
+    const invalid = plan({ form: { kind: 'purchase', id: null, values: { title: '', amount: '1' }, errors: { title: 'Нужно название' }, envelope: 'week', week: null } });
     assert.ok(invalid.includes('Нужно название'), 'a form that came back with errors stays open');
 
-    const lastWeek = render({ week: '2026-09-28' });
-    assert.ok(lastWeek.includes('id="spending-last-week"') && lastWeek.includes('aria-label="План на неделю"'));
-    assert.ok(!lastWeek.includes('aria-label="Хочу купить"'), 'wishes are for this week');
+    assert.ok(render({ week: '2026-09-28' }).includes('id="spending-last-week"'));
+    const lastWeek = plan({ week: '2026-09-28' });
+    assert.ok(lastWeek.includes('aria-label="План на неделю"') && !lastWeek.includes('aria-label="Хочу купить"'), 'wishes are for this week');
+  });
+
+  it('tells under the circle what was spent today with when the data came, and the one thing to do next', () => {
+    const page = render();
+
+    assert.ok(page.includes('<small>Сегодня потрачено</small>'));
+    assert.ok(page.includes('action="/sync"') && page.includes('Обновлено 18:42'));
+    assert.ok(page.includes('href="/uncategorized"') && page.includes('<b>3</b>') && page.includes('<small>траты ждут разбора</small>'), 'expenses of the month to sort first');
+    assert.ok(!render({ canSync: false }).includes('action="/sync"'));
+
+    const sorted = render({}, { ...saved([['last-week', 'ignored']]), purchasePayments: new Map([['groceries', 1], ['transfer', 1]]) });
+    assert.ok(sorted.includes('<small>Доп. бюджет</small>') && sorted.includes('<small>из 100 000 ₽</small>') && sorted.includes('href="/?view=month"'), 'with nothing to do, the extras');
+
+    assert.ok(render({ week: '2026-09-28' }).includes('<small>Потрачено за неделю</small>'));
+    const ahead = render({ week: '2026-10-12' });
+    assert.ok(!ahead.includes('Сегодня потрачено') && ahead.includes('Неделя ещё не началась, трат пока нет.'));
+  });
+
+  it('filters the week’s spending: waiting for a category, counted in the budget, not counted at all, paying regular expenses', () => {
+    const budget = { ...saved([['transfer', 'outside']]), categorizations: new Map([['groceries', { regular: 7 }]]) };
+    const shown = (page: string) => ['groceries', 'transfer'].filter((id) => page.includes(`id="spending-${id}"`));
+
+    const all = render({}, budget);
+    assert.deepEqual(shown(all), ['groceries', 'transfer']);
+    assert.ok(all.includes('href="/" aria-current="page">Все операции</a>'));
+    assert.ok(all.includes('href="/?filter=pending">Ждут разбора<span>1</span></a>'), 'the transfer has no category');
+    assert.deepEqual(shown(render({ filter: 'pending' }, budget)), ['transfer']);
+    assert.deepEqual(shown(render({ filter: 'regular' }, budget)), ['groceries']);
+    const counted = render({ filter: 'counted' }, budget);
+    assert.deepEqual(shown(counted), [], 'both are outside the budget');
+    assert.ok(counted.includes('Таких трат на этой неделе нет.') && counted.includes('href="/?filter=counted" aria-current="page"'));
+    assert.deepEqual(shown(render({ filter: 'counted' })), ['groceries', 'transfer']);
+    assert.ok(render({ filter: 'counted', edit: 'spending-groceries' }).includes('href="/?filter=counted"'), 'an open expense closes into the same filter');
+    assert.deepEqual(shown(render({ filter: 'nonsense' })), ['groceries', 'transfer']);
   });
 
   it('marks where each expense counts with a dot before its amount instead of words', () => {
@@ -95,8 +142,8 @@ describe('dashboard', () => {
     assert.ok(spendingRow(page, 'groceries').includes('class="operation-mark" style="--tone:var(--yellow)" role="img" title="В неделе"'));
     assert.ok(spendingRow(page, 'groceries').includes('<b>473 ₽</b>'), 'no minus, as in the plan');
     assert.ok(spendingRow(page, 'transfer').includes('class="operation-mark ring" role="img" title="Вне бюджета"'));
-    assert.ok(/id="purchase-1".*?class="entry-mark" style="--tone:var\(--yellow\)" role="img" title="В неделе"/s.test(page), 'so do purchases');
-    assert.ok(/<b>Школа, ЛДК<\/b>.*?title="Вне бюджета"/s.test(page), 'and regular payments');
+    assert.ok(/id="purchase-1".*?class="entry-mark" style="--tone:var\(--yellow\)" role="img" title="В неделе"/s.test(plan()), 'so do purchases');
+    assert.ok(/<b>Школа, ЛДК<\/b>.*?title="Вне бюджета"/s.test(plan()), 'and regular payments');
     assert.ok(!page.includes('в неделе<') && !page.includes('вне бюджета<') && !page.includes('обычные<'));
 
     const extras = render({ view: 'month' }, saved([['last-week', 'extra']]));
@@ -120,18 +167,22 @@ describe('dashboard', () => {
     assert.ok(render({ source: 'demo' }).includes('Демо-данные.'));
   });
 
-  it('leaves out spending not counted at all, from the list and the figures', () => {
+  it('counts nothing of spending not counted at all, and lists it pale among all of them and under «Не расходы»', () => {
     const page = render({}, saved([['transfer', 'ignored']]));
 
-    assert.ok(!page.includes('Александр А.'));
-    assert.ok(page.includes('Можно потратить ещё 36 527 ₽.'));
+    assert.ok(page.includes('Потрачено 473 ₽ из 45 000 ₽, ещё 8 000 ₽ ждут покупок из плана.'));
+    assert.ok(page.includes('<b class="circle-free-amount">36 527 ₽</b>') && page.includes('Ждут разбора 1 операция на 473 ₽.'));
+    assert.ok(page.includes('<li class="operation-item muted" id="spending-transfer">') && spendingRow(page, 'transfer').includes('title="Не учитывается"'));
+    const others = render({ filter: 'ignored' }, saved([['transfer', 'ignored']]));
+    assert.ok(others.includes('id="spending-transfer"') && !others.includes('id="spending-groceries"'));
+    assert.ok(!render({ filter: 'counted' }, saved([['transfer', 'ignored']])).includes('id="spending-transfer"'));
   });
 
   it('advises when to buy a wish and offers to plan it', () => {
-    assert.ok(render().includes('На следующей неделе или сейчас из дополнительных'));
+    assert.ok(plan().includes('На следующей неделе или сейчас из дополнительных'));
 
-    const page = render({}, saved([['transfer', 'outside']]));
-    assert.ok(page.includes('Можно потратить ещё 36 527 ₽.'));
+    const page = plan({}, saved([['transfer', 'outside']]));
+    assert.ok(page.includes('<b class="circle-free-amount">36 527 ₽</b>'));
     assert.ok(page.includes('Можно на этой неделе, останется 32 027 ₽'));
     assert.ok(page.includes('action="/wishes/1/plan"'));
   });
@@ -142,7 +193,7 @@ describe('dashboard', () => {
     assert.ok(spending.includes('action="/spending/transfer/outside"'));
     assert.ok(!spending.includes('action="/spending/transfer/week"'));
 
-    const purchase = render({ edit: 'purchase-1' });
+    const purchase = plan({ edit: 'purchase-1' });
     assert.ok(purchase.includes('action="/purchases/1"') && purchase.includes('value="8000"'));
     assert.ok(purchase.includes('formaction="/purchases/1/move"') && purchase.includes('В дополнительные'));
     assert.ok(purchase.includes('formaction="/purchases/1/delete"'));
@@ -152,7 +203,7 @@ describe('dashboard', () => {
   it('keeps a payment of a regular expense outside the week, naming the expense, with no way back into the week', () => {
     const page = render({ edit: 'spending-transfer' }, { ...saved(), categorizations: new Map([['transfer', { regular: 7 }]]) });
 
-    assert.ok(page.includes('Можно потратить ещё 36 527 ₽.'));
+    assert.ok(page.includes('<b class="circle-free-amount">36 527 ₽</b>'));
     assert.ok(spendingRow(page, 'transfer').includes('<b>Школа, ЛДК</b><small>Основной · Александр А.</small>'), 'titled by what it paid, with the payee under it');
     assert.ok(spendingRow(page, 'transfer').includes('title="Вне бюджета"'));
     assert.ok(page.includes('action="/spending/transfer/extra"'));
@@ -201,22 +252,22 @@ describe('dashboard', () => {
     const purchaseOf = (page: string, title: string) => new RegExp(`<b>${title}</b><small>([^<]*)</small>`).exec(page)?.[1];
 
     const partly = render({}, linked([['groceries', 1]]));
-    assert.equal(purchaseOf(partly, 'Ботинки Савве'), 'оплачено 473 ₽ из 8 000 ₽');
+    assert.equal(purchaseOf(plan({}, linked([['groceries', 1]])), 'Ботинки Савве'), 'оплачено 473 ₽ из 8 000 ₽');
     assert.ok(partly.includes('ещё 7 527 ₽ ждут покупок из плана'));
     assert.ok(spendingRow(partly, 'groceries').includes('<b>Ботинки Савве</b><small>Основной · &lt;b&gt;Пятёрочка&lt;/b&gt;</small>'));
     assert.ok(spendingRow(partly, 'groceries').includes('title="В неделе"'));
 
-    const paid = render({}, linked([['transfer', 1]]));
+    const paid = plan({}, linked([['transfer', 1]]));
     assert.equal(purchaseOf(paid, 'Ботинки Савве'), 'куплено 5 октября, на 32 000 ₽ больше плана');
     assert.ok(!paid.includes('action="/purchases/1/done"'), 'nothing to finish once paid in full');
 
     const finished = linked([['groceries', 1]]);
     finished.purchases = finished.purchases.map((p) => (p.id === 1 ? { ...p, done: true } : p));
-    const page = render({}, finished);
+    const page = plan({}, finished);
     assert.equal(purchaseOf(page, 'Ботинки Савве'), 'завершено, вернулось 7 527 ₽');
     assert.ok(page.includes('473 ₽</b>'), 'it shows what it cost');
-    assert.ok(page.includes('Можно потратить ещё 4 527 ₽. Потрачено 40 473 ₽ из 45 000 ₽.'), 'the rest is back in the week');
-    assert.ok(render({ edit: 'purchase-1' }, finished).includes('formaction="/purchases/1/done">Вернуть в план</button>'));
+    assert.ok(page.includes('Потрачено 40 473 ₽ из 45 000 ₽.') && page.includes('<b class="circle-free-amount">4 527 ₽</b>'), 'the rest is back in the week');
+    assert.ok(plan({ edit: 'purchase-1' }, finished).includes('formaction="/purchases/1/done">Вернуть в план</button>'));
 
     const extra = render({ view: 'month' }, linked([['transfer', 3]]));
     assert.ok(extra.includes('В октябре на дополнительные осталось 60 000 ₽ из 100 000 ₽.'), 'the payment counts in extras, the jacket is bought');
@@ -229,9 +280,9 @@ describe('dashboard', () => {
     const linked = (ids: string[]) => ({ ...saved(), categorizations: new Map(ids.map((id) => [id, { regular: 7 }] as const)) });
     const school = (page: string) => /<b>Школа, ЛДК<\/b><small>([^<]*)<\/small>/.exec(page)?.[1];
 
-    assert.equal(school(render({}, linked(['groceries']))), 'оплачено 473 ₽ из 45 000 ₽ · 7 октября');
-    assert.equal(school(render({}, linked(['groceries', 'transfer', 'last-week']))), 'оплачено 5 октября', 'the latest of them');
-    assert.equal(school(render()), 'регулярная · 7 октября');
+    assert.equal(school(plan({}, linked(['groceries']))), 'оплачено 473 ₽ из 45 000 ₽ · 7 октября');
+    assert.equal(school(plan({}, linked(['groceries', 'transfer', 'last-week']))), 'оплачено 5 октября', 'the latest of them');
+    assert.equal(school(plan()), 'регулярная · 7 октября');
   });
 
   it('shows the month as weeks, with extras and a form to plan one', () => {
@@ -247,13 +298,15 @@ describe('dashboard', () => {
 
   it('steps through weeks and months, a year ahead at most', () => {
     const week = render();
-    assert.ok(week.includes('href="/?week=2026-09-28">← Раньше</a>') && week.includes('href="/?week=2026-10-12">Позже →</a>'));
-    assert.ok(week.includes('href="/" aria-current="page">Эта неделя</a>'));
-    assert.ok(!render({ week: '2027-10-04' }).includes('Позже →'), 'no step beyond a year');
+    assert.ok(week.includes('href="/?week=2026-09-28" title="Неделя раньше"') && week.includes('href="/?week=2026-10-12" title="Неделя позже"'));
+    assert.ok(week.includes('href="/" aria-current="page">Неделя</a>'));
+    assert.ok(!render({ week: '2027-10-04' }).includes('Неделя позже'), 'no step beyond a year');
+    assert.ok(render({ week: '2026-11-02' }).includes('href="/?view=month&amp;month=2026-11">Месяц</a>'), 'the month of the week shown');
+    assert.ok(plan().includes('href="/plan?week=2026-10-12" title="Неделя позже"'), 'the plan steps through weeks too');
 
     const month = render({ view: 'month' });
-    assert.ok(month.includes('href="/?view=month&amp;month=2026-09">← Сентябрь</a>'));
-    assert.ok(month.includes('href="/?view=month&amp;month=2026-11">Ноябрь →</a>'));
+    assert.ok(month.includes('href="/?view=month&amp;month=2026-09" title="Месяц раньше"'));
+    assert.ok(month.includes('href="/?view=month&amp;month=2026-11" title="Месяц позже"'));
     assert.ok(month.includes('href="/?week=2026-10-26"'), 'a week ahead opens from the month');
   });
 
@@ -286,9 +339,11 @@ describe('dashboard', () => {
 
     assert.ok(page.includes('Неделя 2–8 ноября'));
     assert.ok(page.includes('Неделя впереди: в плане 3 500 ₽, свободно 41 500 ₽ из 45 000 ₽.'));
-    assert.ok(page.includes('Будет свободно') && !page.includes('Завершить'), 'nothing paid it yet');
-    assert.ok(page.includes('регулярная · 7 ноября'));
-    assert.ok(page.includes('name="week" value="2026-11-02"'), 'a new purchase goes into the week shown');
+    assert.ok(page.includes('Будет свободно') && page.includes('<small>из 45 000 ₽</small>') && page.includes('href="/plan?week=2026-11-02"'));
+    const planned = plan({ week: '2026-11-02' }, budget);
+    assert.ok(planned.includes('Стрижка') && !planned.includes('Завершить'), 'nothing paid it yet');
+    assert.ok(planned.includes('регулярная · 7 ноября'));
+    assert.ok(plan({ week: '2026-11-02', edit: 'new-purchase' }, budget).includes('name="week" value="2026-11-02"'), 'a new purchase goes into the week shown');
     assert.ok(render({ week: '2026-11-09' }, budget).includes('Неделя впереди, в плане пока ничего: свободны все 45 000 ₽.'));
   });
 
@@ -297,9 +352,9 @@ describe('dashboard', () => {
     const page = render({}, budget);
 
     assert.ok(page.includes('Неделя 1–7 октября'), 'from Thursday to Wednesday');
-    assert.ok(page.includes('Можно потратить ещё 9 527 ₽. Потрачено 70 473 ₽ из 80 000 ₽. Бюджет этой недели изменён: 80 000 ₽ вместо 45 000 ₽.'));
-    assert.ok(page.includes('из 80 000 ₽ на неделю'));
-    assert.ok(page.includes('href="/?week=2026-09-24">← Раньше</a>') && page.includes('href="/?week=2026-10-08">Позже →</a>'));
+    assert.ok(page.includes('Потрачено 70 473 ₽ из 80 000 ₽. Бюджет этой недели изменён: 80 000 ₽ вместо 45 000 ₽.'));
+    assert.ok(page.includes('<b class="circle-free-amount">9 527 ₽</b>'));
+    assert.ok(page.includes('href="/?week=2026-09-24" title="Неделя раньше"') && page.includes('href="/?week=2026-10-08" title="Неделя позже"'));
     assert.ok(render({ week: '2026-10-05' }, budget).includes('Неделя 1–7 октября'), 'a Monday is no first day of a week now');
     assert.ok(render({ week: '2026-10-08' }, budget).includes('Неделя впереди, в плане пока ничего: свободны все 45 000 ₽.'));
 
@@ -308,31 +363,30 @@ describe('dashboard', () => {
     assert.ok(month.includes('По неделям потрачено 70 473 ₽ из 215 000 ₽.'));
   });
 
-  it('shows what the week allows under what is left, and opens it to change the amount or give the usual back', () => {
-    const usual = render();
-    const side = usual.slice(usual.indexOf('<aside'));
-    const row = (/id="limit".*?<\/li>/s.exec(side)?.[0] ?? '').replace(/>\s+</g, '><');
-    assert.ok(side.indexOf('Можно потратить') < side.indexOf('id="limit"') && side.indexOf('id="limit"') < side.indexOf('aria-label="План на неделю"'));
-    assert.ok(row.includes('<b>Бюджет недели</b><small>как обычно</small>') && row.includes('<b class="entry-amount">45 000 ₽</b>') && row.includes('href="/?edit=limit"'));
+  it('shows what the week allows over the plan, and opens it to change the amount or give the usual back', () => {
+    const usual = plan();
+    const row = (/id="limit".*?<\/li>/s.exec(usual)?.[0] ?? '').replace(/>\s+</g, '><');
+    assert.ok(usual.indexOf('id="limit"') < usual.indexOf('aria-label="План на неделю"'));
+    assert.ok(row.includes('<b>Бюджет недели</b><small>как обычно</small>') && row.includes('<b class="entry-amount">45 000 ₽</b>') && row.includes('href="/plan?edit=limit"'));
 
-    const open = render({ edit: 'limit' });
+    const open = plan({ edit: 'limit' });
     assert.ok(open.includes('action="/week-limits/2026-10-05"') && open.includes('name="amount" value="45000"'));
     assert.ok(!open.includes('Вернуть 45 000 ₽'), 'the usual amount has nothing to give back');
 
     const cut = { ...saved(), weekLimits: new Map([['2026-10-05', 30_000]]) };
-    assert.ok(render({}, cut).includes('<small>вместо 45 000 ₽</small>'));
-    assert.ok(render({ edit: 'limit' }, cut).includes('formaction="/week-limits/2026-10-05/delete">Вернуть 45 000 ₽</button>'));
+    assert.ok(plan({}, cut).includes('<small>вместо 45 000 ₽</small>'));
+    assert.ok(plan({ edit: 'limit' }, cut).includes('formaction="/week-limits/2026-10-05/delete">Вернуть 45 000 ₽</button>'));
 
-    const ahead = render({ week: '2026-10-19' });
-    assert.ok(ahead.includes('href="/?week=2026-10-19&amp;edit=limit"'), 'a week ahead is changed the same way');
-    const invalid = render(
+    const ahead = plan({ week: '2026-10-19' });
+    assert.ok(ahead.includes('href="/plan?week=2026-10-19&amp;edit=limit"'), 'a week ahead is changed the same way');
+    const invalid = plan(
       { week: '2026-10-19', form: { kind: 'limit', id: null, values: { title: '', amount: 'много' }, errors: { amount: 'Сумма в рублях, например 13 000' }, envelope: 'week', week: '2026-10-19' } },
     );
     assert.ok(invalid.includes('action="/week-limits/2026-10-19"') && invalid.includes('value="много"') && invalid.includes('Сумма в рублях, например 13 000'));
   });
 
   it('opens a purchase with the week it is planned for, to move it to another', () => {
-    const page = render({ edit: 'purchase-1' });
+    const page = plan({ edit: 'purchase-1' });
 
     assert.ok(page.includes('name="week"'));
     assert.ok(page.includes('<option value="2026-10-05" selected>Эта неделя</option>'));
@@ -424,7 +478,7 @@ describe('submitDashboard', () => {
 
     const invalid = submitDashboard(settings, '/purchases', form({ title: '', amount: '1', kind: 'required' }), context(settings));
     assert.equal(invalid.status === 'invalid' && invalid.form.purchaseKind, 'required', 'the form comes back with the kind picked');
-    const page = render({ form: invalid.status === 'invalid' ? invalid.form : undefined }).replaceAll(' ', ' ');
+    const page = plan({ form: invalid.status === 'invalid' ? invalid.form : undefined }).replaceAll(' ', ' ');
     assert.match(page, /<option value="required" selected>Обязательная: лучше не трогать<\/option>/);
   });
 

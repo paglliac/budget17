@@ -15,6 +15,7 @@ import {
   factList,
   emptyState,
   field,
+  filterChips,
   filterTag,
   footnote,
   iconBadge,
@@ -36,9 +37,10 @@ import { monthCalendar } from './widgets/calendar.ts';
 import { assistantAnswer, assistantHero, insightList, suggestionList } from './widgets/assistant.ts';
 import { categoryTile, figureCard, panelCard, paymentCard, statCard } from './widgets/cards.ts';
 import { categoryMap, flowChart, weekBars } from './widgets/charts.ts';
+import { circleFacts, weekCircle } from './widgets/circle.ts';
 import { entryDivider, entryForm, entryList, entryRow } from './widgets/entries.ts';
 import { amountList, categoryList, dayGroup, operationRow } from './widgets/operations.ts';
-import { appShell, grid, rail, screenOnly, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
+import { appShell, grid, headActions, pageHead, rail, screenOnly, stack, tabs, toolbar, topBar } from './widgets/shell.ts';
 
 /** Colours of a category's picker as the settings page gives them. */
 const STORY_COLORS = CATEGORY_COLORS.map((c) => ({ ...c, css: categoryColor(null, c.value) }));
@@ -140,7 +142,7 @@ export const WIDGET_DOCS: WidgetDoc[] = [
         name: 'С боковой панелью',
         surface: 'page',
         props: {
-          rail: rail({ groups: [{ title: 'Меню', items: [{ icon: 'home', label: 'Обзор', href: '#', active: true }] }] }),
+          rail: rail({ groups: [{ items: [{ icon: 'home', label: 'Главная', href: '#', active: true }] }] }),
           tabs: tabs({ label: 'Месяц', items: [{ label: 'Октябрь', href: '#', active: true }, { label: 'Сентябрь', href: '#' }] }),
           main: emptyState({ text: 'Основное содержимое страницы' }),
           side: emptyState({ text: 'Боковая панель' }),
@@ -150,25 +152,36 @@ export const WIDGET_DOCS: WidgetDoc[] = [
         name: 'С широкой боковой панелью',
         surface: 'page',
         props: {
-          rail: rail({ groups: [{ title: 'Меню', items: [{ icon: 'home', label: 'Обзор', href: '#', active: true }] }] }),
+          rail: rail({ groups: [{ items: [{ icon: 'home', label: 'Главная', href: '#', active: true }] }] }),
           main: emptyState({ text: 'Траты недели' }),
           side: emptyState({ text: 'Можно потратить и план' }),
           wideSide: true,
         },
       },
+      {
+        name: 'Одним листом, с шапкой',
+        surface: 'page',
+        props: {
+          rail: rail({ groups: [{ items: [{ icon: 'home', label: 'Главная', href: '#', active: true }, { icon: 'list', label: 'Операции', href: '#' }] }] }),
+          head: pageHead({ title: 'Неделя 12–18 октября', prev: { label: 'Неделя раньше', href: '#' }, next: { label: 'Неделя позже', href: '#' } }),
+          main: emptyState({ text: 'Траты недели по дням' }),
+          side: emptyState({ text: 'Круг и цифры под ним' }),
+        },
+      },
     ],
   ),
-  doc(rail, { group: 'Каркас', description: 'Навигация иконками по группам; текущая страница подсвечена, логотип ведёт на главную.' }, [
+  doc(rail, { group: 'Каркас', description: 'Разделы иконками с названиями, по группам; текущий подсвечен сиреневым, логотип ведёт на главную. На узком экране остаются только иконки.' }, [
     {
       name: 'Меню и профиль',
-      width: 90,
+      width: 230,
       props: {
-        home: { label: 'Обзор', href: '#' },
+        home: { label: 'Главная', href: '#' },
         groups: [
           {
-            title: 'Меню',
             items: [
-              { icon: 'home', label: 'Обзор', href: '#', active: true },
+              { icon: 'home', label: 'Главная', href: '#', active: true },
+              { icon: 'list', label: 'Операции', href: '#' },
+              { icon: 'calendar', label: 'План', href: '#' },
               { icon: 'layers', label: 'Виджеты', href: '#' },
             ],
           },
@@ -176,6 +189,22 @@ export const WIDGET_DOCS: WidgetDoc[] = [
         footer: { title: 'Профиль', body: avatar({ name: 'Мои финансы' }) },
       },
     },
+  ]),
+  doc(pageHead, { group: 'Каркас', description: 'Шапка листа: заголовок со стрелками на соседние недели или месяцы, переключатель в конце строки и пара фраз о главном под ней.' }, [
+    {
+      name: 'Неделя',
+      props: {
+        title: 'Неделя 3–9 октября',
+        prev: { label: 'Неделя раньше', href: '#' },
+        next: { label: 'Неделя позже', href: '#' },
+        switcher: segmentedLinks({ label: 'Период', items: [{ label: 'Неделя', href: '#', active: true }, { label: 'Месяц', href: '#' }] }),
+        text: ['Потрачено 19 372 ₽ из 30 000 ₽, ещё 11 203 ₽ ждут покупок из плана.', 'Ждут разбора 4 операции на 1 247 ₽.'],
+      },
+    },
+    { name: 'Последний месяц плана', props: { title: 'Октябрь 2027', prev: { label: 'Месяц раньше', href: '#' }, next: null } },
+  ]),
+  doc(headActions, { group: 'Каркас', description: 'Круглые ссылки над боковой колонкой листа, например поиск, и буква пользователя после них.' }, [
+    { name: 'Поиск и пользователь', width: 220, props: { items: [{ icon: 'search', label: 'Найти операцию', href: '#' }], user: 'kir' } },
   ]),
   doc(tabs, { group: 'Каркас', description: 'Вкладки над основной панелью, например месяцы.' }, [
     {
@@ -303,6 +332,22 @@ export const WIDGET_DOCS: WidgetDoc[] = [
   doc(searchField, { group: 'Фильтры', description: 'Поле поиска, отправляет GET-форму; params сохраняют остальные фильтры.' }, [
     { name: 'Пустое', width: 300, props: { action: '#', name: 'q', placeholder: 'Найти операцию' } },
     { name: 'С запросом', width: 300, props: { action: '#', name: 'q', value: 'кофе', placeholder: 'Найти операцию', params: { month: '2026-09' } } },
+  ]),
+  doc(filterChips, { group: 'Фильтры', description: 'Фильтры списка отдельными пилюлями; текущий приподнят на белом, число на фиолетовом — то, что ждёт. На узком экране ряд листается вбок.' }, [
+    {
+      name: 'Траты недели',
+      width: 640,
+      props: {
+        label: 'Какие траты',
+        items: [
+          { label: 'Все операции', href: '#', active: true },
+          { label: 'Ждут разбора', href: '#', count: 4 },
+          { label: 'Учтённые', href: '#' },
+          { label: 'Не расходы', href: '#' },
+          { label: 'Регулярные', href: '#' },
+        ],
+      },
+    },
   ]),
   doc(filterTag, { group: 'Фильтры', description: 'Действующий фильтр; ссылка убирает его.' }, [
     { name: 'Категория', width: 160, props: { label: 'Продукты', href: '#', color: '#4FAE7F' } },
@@ -719,9 +764,60 @@ export const WIDGET_DOCS: WidgetDoc[] = [
       },
     },
   ]),
-  doc(dayGroup, { group: 'Операции', description: 'Операции одного дня под заголовком с итогом дня.' }, [
+  doc(dayGroup, { group: 'Операции', description: 'Операции одного дня под заголовком с итогом дня; с линейками строки просторнее и разделены чертой, как на главной.' }, [
     { name: 'Сегодня', width: 560, props: { date: TODAY, today: TODAY, net: { amount: -1_807.9, symbol: '₽' }, rows: operationRows } },
     { name: 'Давно', width: 560, props: { date: '2026-09-12', today: TODAY, rows: operationRows.slice(0, 1) } },
+    {
+      name: 'С линейками',
+      width: 620,
+      props: {
+        date: '2026-10-04',
+        today: TODAY,
+        ruled: true,
+        rows: [
+          operationRow({ title: 'FORSHTADT BREWERY', details: 'Основной · Алкоголь', icon: 'wine', color: 'var(--blue)', kind: 'expense', amount: 841, symbol: '₽', unsigned: true, href: '#', mark: { label: 'В неделе', tone: 'yellow' }, go: true }),
+          operationRow({ title: 'Begemag-44', details: 'Основной · Продукты', icon: 'cart', color: '#4FAE7F', kind: 'expense', amount: 802, symbol: '₽', unsigned: true, href: '#', mark: { label: 'В неделе', tone: 'yellow' }, go: true }),
+          operationRow({ title: 'Снятие наличных', details: 'Основной · без категории', icon: 'banknote', color: 'var(--gray)', kind: 'expense', amount: 5_000, symbol: '₽', unsigned: true, href: '#', mark: { label: 'Не учитывается' }, muted: true, go: true }),
+        ],
+      },
+    },
+  ]),
+  doc(weekCircle, {
+    group: 'Операции',
+    description: 'Круг главной, как в приложении: свободное на сиреневой линзе с волной (фиолетовая — хватает, бледная — меньше дневной доли, нет — ноль, красная — перерасход, и тогда сумма — насколько сверх), рядом зарезервированное по типам, оно ведёт в план. Волна поднимается при открытии и медленно плывёт, если система не просит меньше движения.',
+  }, [
+    {
+      name: 'Хватает',
+      width: 420,
+      props: { free: { label: 'Свободно', amount: 21_000, note: 'до конца недели', state: 'enough', share: 0.47 }, reserved: { label: 'Зарезервировано', amount: 21_500, parts: [{ label: 'обязательное', amount: 7_000 }, { label: 'гибкое', amount: 14_500 }], href: '#' }, symbol: '₽' },
+    },
+    {
+      name: 'Осталось мало',
+      width: 420,
+      props: { free: { label: 'Свободно', amount: 4_998, note: 'до конца недели', state: 'low', share: 0.11 }, reserved: { label: 'Зарезервировано', amount: 14_400, parts: [{ label: 'обязательное', amount: 13_200 }, { label: 'гибкое', amount: 1_200 }], href: '#' }, symbol: '₽' },
+    },
+    {
+      name: 'Перерасход',
+      width: 420,
+      props: { free: { label: 'Свободно', amount: -16_372, note: 'сверх 45 000 ₽', state: 'over', share: 0.364 }, reserved: { label: 'Зарезервировано', amount: 0, parts: [{ label: 'обязательное', amount: 0 }, { label: 'гибкое', amount: 0 }] }, symbol: '₽' },
+    },
+  ]),
+  doc(circleFacts, { group: 'Операции', description: 'Цифры под кругом рядом через черту: что это — над цифрой или под ней, цифра крупно, красная, когда предупреждает. Одна может вести дальше со стрелкой, другая — нести маленькую кнопку, например обновить из ZenMoney.' }, [
+    {
+      name: 'Сегодня и разбор',
+      width: 420,
+      props: {
+        items: [
+          { above: 'Сегодня потрачено', figure: '2 350 ₽', action: { label: 'Обновлено 18:42', icon: 'refresh', action: '#' } },
+          { figure: '4', below: 'траты ждут разбора', href: '#' },
+        ],
+      },
+    },
+    {
+      name: 'Не хватает на желание',
+      width: 420,
+      props: { items: [{ above: 'Сегодня потрачено', figure: '0 ₽' }, { above: 'Не хватает', figure: '12 000 ₽', tone: 'red', below: 'Шины Kia K5', href: '#' }] },
+    },
   ]),
   doc(amountList, { group: 'Операции', description: 'Суммы одна под другой: с точкой или иконкой, по желанию с полосой доли, пометкой и ссылкой; открытая подсвечена.' }, [
     {

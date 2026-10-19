@@ -60,7 +60,7 @@ describe('month review page', () => {
     assert.ok(html.includes('+73 547 ₽'), 'what the weeks spent over their limits');
     assert.ok(html.includes('Школа'));
     assert.ok(html.includes('href="/?week=2026-09-14"'), 'a week’s bar leads to the week');
-    assert.ok(html.includes('title="Разбор месяца" aria-label="Разбор месяца" aria-current="page"'));
+    assert.ok(html.includes('title="Разбор месяца" aria-current="page"'));
   });
 
   it('maps what the weeks were made of, what to check hatched, each part opening on the side', () => {

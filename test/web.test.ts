@@ -74,7 +74,7 @@ describe('pageDocument', () => {
 describe('rail', () => {
   it('leads home from the logo, keeping the demo switch', () => {
     const page = String(appRail('operations', null, createHref({ demo: '1' })));
-    assert.match(page, /<a class="rail-logo" href="\/\?demo=1" title="Обзор" aria-label="Обзор"><img src="\/favicon.png"/);
+    assert.match(page, /<a class="rail-logo" href="\/\?demo=1" title="Главная" aria-label="Главная"><img src="\/favicon.png"/);
   });
 
   it('shows the logo without a link when there is no home', () => {

@@ -5,9 +5,25 @@ import { icon, type IconName } from '../icons.ts';
 
 /**
  * Icon rail on the left, optional tabs, the main panel and an optional side panel on the right. A wide side panel
- * has room for lists of its own, such as a plan.
+ * has room for lists of its own, such as a plan. With `head` the page is one sheet instead of panels: the head over
+ * the main column, the side beside both; once the side goes under the main column, it comes between the head and the
+ * main column, so what the side tells comes first.
  */
-export function appShell(options: { rail: Content; tabs?: Content; main: Content; side?: Content; wideSide?: boolean }): Html {
+export function appShell(options: { rail: Content; tabs?: Content; head?: Content; main: Content; side?: Content; wideSide?: boolean }): Html {
+  if (options.head !== undefined) {
+    return html`
+    <div class="shell">
+      ${options.rail}
+      <div class="shell-body">
+        ${options.tabs}
+        <div class="sheet${options.side ? ' has-side' : ''}">
+          <header class="sheet-head">${options.head}</header>
+          ${options.side ? html`<aside class="sheet-side">${options.side}</aside>` : null}
+          <main class="sheet-main">${options.main}</main>
+        </div>
+      </div>
+    </div>`;
+  }
   return html`
     <div class="shell">
       ${options.rail}
@@ -29,11 +45,11 @@ export interface RailItem {
 }
 
 /**
- * Navigation between pages as icons, in titled groups, with something like an avatar at the bottom. The logo on top
- * leads to `home` when given.
+ * Navigation between pages, each an icon with its name, in groups that may have a title, with something like an
+ * avatar at the bottom. The logo on top leads to `home` when given. A narrow screen keeps only the icons.
  */
 export function rail(options: {
-  groups: Array<{ title: string; items: RailItem[] }>;
+  groups: Array<{ title?: string; items: RailItem[] }>;
   home?: { label: string; href: string };
   footer?: { title: string; body: Content };
 }): Html {
@@ -45,17 +61,48 @@ export function rail(options: {
         : html`<span class="rail-logo">${logo}</span>`}
       ${options.groups.map(
         (group) => html`
-          <span class="rail-title">${group.title}</span>
+          ${group.title ? html`<span class="rail-title">${group.title}</span>` : null}
           ${group.items.map(
             (item) =>
-              html`<a class="rail-item" href="${item.href}" title="${item.label}" aria-label="${item.label}"${
+              html`<a class="rail-item" href="${item.href}" title="${item.label}"${
                 item.active ? html` aria-current="page"` : null
-              }>${icon(item.icon, 18)}</a>`,
+              }>${icon(item.icon, 20)}<span>${item.label}</span></a>`,
           )}`,
       )}
       <span class="rail-fill"></span>
       ${options.footer ? html`<span class="rail-title">${options.footer.title}</span>${options.footer.body}` : null}
     </nav>`;
+}
+
+/**
+ * The head of a sheet: the title, with arrows to the one before and after it, such as weeks, a switch at the end of
+ * the line, and a few sentences on what matters now under it.
+ */
+export function pageHead(options: {
+  title: string;
+  prev?: { label: string; href: string };
+  next?: { label: string; href: string } | null;
+  switcher?: Content;
+  text?: string[];
+}): Html {
+  const step = (to: { label: string; href: string } | null | undefined, name: 'chevronLeft' | 'chevronRight') =>
+    to ? html`<a class="head-step" href="${to.href}" title="${to.label}" aria-label="${to.label}">${icon(name, 18)}</a>` : html`<span class="head-step" aria-hidden="true">${icon(name, 18)}</span>`;
+  return html`
+    <div class="head">
+      <div class="head-line">
+        <h1>${options.title}</h1>
+        ${options.prev !== undefined || options.next !== undefined ? html`<span class="head-steps">${step(options.prev, 'chevronLeft')}${step(options.next, 'chevronRight')}</span>` : null}
+        ${options.switcher ? html`<span class="head-switch">${options.switcher}</span>` : null}
+      </div>
+      ${options.text?.length ? html`<p class="head-text">${options.text.map((line, i) => html`${i > 0 ? html`<br>` : null}${line}`)}</p>` : null}
+    </div>`;
+}
+
+/** Round icon links at the top of a sheet's side, such as search, and the user's letter after them. */
+export function headActions(options: { items: Array<{ icon: IconName; label: string; href: string }>; user?: string | null }): Html {
+  return html`<div class="head-actions">${options.items.map(
+    (item) => html`<a class="head-action" href="${item.href}" title="${item.label}" aria-label="${item.label}">${icon(item.icon, 20)}</a>`,
+  )}${options.user ? html`<span class="head-user" title="${options.user}">${options.user.charAt(0).toUpperCase()}</span>` : null}</div>`;
 }
 
 /** Tabs on top of the main panel, such as months. */
