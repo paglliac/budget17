@@ -119,6 +119,14 @@ final class ScreensTests: XCTestCase {
         }
         app.swipeUp()
         shot("plan-more")
+        // What is paid already waits folded at the end.
+        let paid = app.buttons["plan-paid"]
+        if paid.exists {
+            paid.tap()
+            sleep(1)
+            app.swipeUp()
+            shot("plan-paid")
+        }
         tab("Главная")
         XCTAssert(reserved.waitForExistence(timeout: 5), "«Главная» shows the main page")
 

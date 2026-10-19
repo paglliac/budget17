@@ -467,19 +467,24 @@ struct WeekSpendingView: View {
 }
 
 /// What a week's plan holds: what is reserved, required and flexible, with the purchases from the week's money, then the
-/// ones from the extras and the regular payments of the week. «+» adds a purchase to the week or to the extras; the
-/// wishes have a tab of their own.
+/// ones from the extras and the regular payments of the week. What is paid already, bought, finished, set aside or paid
+/// as a regular payment, folds into «Оплачено» at the end, which unfolds on a tap. «+» adds a purchase to the week or to
+/// the extras; the wishes have a tab of their own.
 struct PlanContent: View {
     let screen: WeekScreen
     @Binding var sheet: BudgetSheet?
     @State private var error: String?
+    @State private var showPaid = false
 
     var body: some View {
         let s = screen
         let r = s.home.reserved
-        let fromWeek = s.plan.filter { $0.purchase?.envelope == "week" }
-        let fromExtras = s.plan.filter { $0.purchase?.envelope == "extra" }
-        let regular = s.plan.filter { $0.regular != nil }
+        // A pale row is one paid already.
+        let paid = s.plan.filter(\.row.muted)
+        let left = s.plan.filter { !$0.row.muted }
+        let fromWeek = left.filter { $0.purchase?.envelope == "week" }
+        let fromExtras = left.filter { $0.purchase?.envelope == "extra" }
+        let regular = left.filter { $0.regular != nil }
         VStack(alignment: .leading, spacing: 0) {
             LilacAmount(amount: r.amount, symbol: s.symbol, size: 44).padding(.top, 6)
             LilacBar(first: r.required.amount, second: r.flexible.amount).padding(.top, 20)
@@ -511,6 +516,22 @@ struct PlanContent: View {
             if !regular.isEmpty {
                 LilacHeading("Регулярные платежи")
                 plan(regular)
+            }
+            if !paid.isEmpty {
+                Button {
+                    withAnimation(.snappy) { showPaid.toggle() }
+                } label: {
+                    LilacHeading(title: "Оплачено", subtitle: "\(paid.count)") {
+                        Image(systemName: "chevron.down")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Lilac.muted)
+                            .rotationEffect(.degrees(showPaid ? 180 : 0))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("plan-paid")
+                if showPaid { plan(paid) }
             }
         }
         .errorAlert($error)
