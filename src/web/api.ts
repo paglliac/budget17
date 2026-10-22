@@ -673,13 +673,64 @@ function operationChip(m: Pick<SavedMarking, 'marks' | 'purchases'>, o: Operatio
   return null;
 }
 
-/** Operations of a month by day, filtered as on the page, and the month's spending, or incomes, by category. */
+/** How the app's list of operations can go: by day, or by what they went for; each names the way to the other. */
+const GROUPINGS = { day: 'По дням', category: 'По категориям' } as const;
+type Grouping = keyof typeof GROUPINGS;
+
+/**
+ * Operations by what they went for, the largest group first, each newest first: expenses and incomes by their category
+ * as «Категории» sums them, transfers together. What does not count stays in its category and adds nothing to it.
+ */
+function byWhatFor(operations: readonly Operation[]): Array<{ id: string; title: string; net: number; items: Operation[] }> {
+  const groups = new Map<string, { id: string; title: string; net: number; items: Operation[] }>();
+  for (const o of operations) {
+    const id = o.kind === 'transfer' ? 'transfer' : `${o.kind}-${o.category?.id ?? 'none'}`;
+    const title = o.kind === 'transfer' ? 'Переводы' : (o.category?.title ?? (o.kind === 'income' ? 'Доход' : 'Без категории'));
+    const group = groups.get(id) ?? { id, title, net: 0, items: [] };
+    group.net += netOf(o);
+    group.items.push(o);
+    groups.set(id, group);
+  }
+  return [...groups.values()].sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
+}
+
+/** Operations of a month by day or by category, filtered as on the page, and the month's spending, or incomes, by category. */
 export function operationsScreen(
   data: EntityCollections,
   saved: SavedMarking,
-  options: { today: DateString; month?: string | null; kind?: string | null; category?: string | null; query?: string | null },
+  options: { today: DateString; month?: string | null; kind?: string | null; category?: string | null; query?: string | null; group?: string | null },
 ) {
   const d = loadOperations(data, saved, options);
+  const group: Grouping = options.group === 'category' ? 'category' : 'day';
+  const line = (o: Operation, details: string) => ({
+    ...row({ id: o.id, title: o.name, ...operationLine(o), logo: logoOf(o), details, amount: o.amount, muted: o.ignored }),
+    kind: o.kind,
+    comment: writtenAbout(o),
+    hold: o.hold,
+    original: o.original ? { amount: o.original.amount, symbol: o.original.instrument.symbol } : null,
+    spending: o.kind !== 'transfer' ? o.id : null,
+    chip: operationChip(saved, o),
+    optional: o.optional,
+  });
+  // By day a row says what it went for; under its category, what it paid when that says more, and its day.
+  const days =
+    group === 'day'
+      ? byDay(d.operations, (o) => o.date, options.today).map((day) => ({
+          id: day.date,
+          ...day,
+          net: day.items.reduce((s, o) => s + netOf(o), 0),
+          items: day.items.map((o) => line(o, o.kind === 'transfer' ? `${o.account} → ${o.toAccount}` : operationCategory(o))),
+        }))
+      : byWhatFor(d.operations).map((g) => ({
+          id: g.id,
+          date: null,
+          title: g.title,
+          subtitle: '',
+          net: g.net,
+          items: g.items.map((o) =>
+            line(o, [o.kind === 'transfer' ? `${o.account} → ${o.toAccount}` : (o.regular?.title ?? o.purchase?.title), dayMonth(o.date)].filter(Boolean).join(' · ')),
+          ),
+        }));
   const kinds = [
     { value: null, label: 'Все', count: d.counts.all },
     { value: 'expense', label: 'Расходы', count: d.counts.expense },
@@ -699,33 +750,13 @@ export function operationsScreen(
     category: d.filter.category ?? null,
     categoryTitle: d.categoryTitle,
     query: d.filter.query ?? null,
-    /**
-     * What the operations that pass the filter spent and brought, how many there are, and how much of what they spent
-     * could have been done without.
-     */
-    totals: { expense: sum((o) => o.kind === 'expense'), income: sum((o) => o.kind === 'income'), optional: sum((o) => o.optional), count: d.operations.length },
-    days: byDay(d.operations, (o) => o.date, options.today).map((day) => ({
-      ...day,
-      net: day.items.reduce((s, o) => s + netOf(o), 0),
-      items: day.items.map((o) => ({
-        ...row({
-          id: o.id,
-          title: o.name,
-          ...operationLine(o),
-          logo: logoOf(o),
-          details: o.kind === 'transfer' ? `${o.account} → ${o.toAccount}` : operationCategory(o),
-          amount: o.amount,
-          muted: o.ignored,
-        }),
-        kind: o.kind,
-        comment: writtenAbout(o),
-        hold: o.hold,
-        original: o.original ? { amount: o.original.amount, symbol: o.original.instrument.symbol } : null,
-        spending: o.kind !== 'transfer' ? o.id : null,
-        chip: operationChip(saved, o),
-        optional: o.optional,
-      })),
-    })),
+    /** What the operations that pass the filter spent and brought, and how many there are. */
+    totals: { expense: sum((o) => o.kind === 'expense'), income: sum((o) => o.kind === 'income'), count: d.operations.length },
+    group,
+    /** The other way the list can go, as its switch names it. */
+    regroup: group === 'day' ? { value: 'category', label: GROUPINGS.category } : { value: 'day', label: GROUPINGS.day },
+    /** Days, newest first, or categories, the largest first; a category has no date. */
+    days,
     /** Expenses of the month that wait for a category, as «Ждут разбора» counts them. */
     pending: loadUncategorized(data, saved, { today: options.today, month: d.month }).pending.length,
     empty: operationsEmpty(d),

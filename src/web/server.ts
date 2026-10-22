@@ -458,6 +458,7 @@ function apiScreen(path: string, params: URLSearchParams, { today, demo }: Conte
         kind: params.get('kind'),
         category: params.get('category'),
         query: params.get('q'),
+        group: params.get('group'),
       });
     case '/api/uncategorized':
       return uncategorizedScreen(collections(), loadSettings(savedMarking), { today, month: params.get('month') });

@@ -201,6 +201,12 @@ final class ScreensTests: XCTestCase {
         tab("Операции")
         XCTAssert(app.buttons["categories"].waitForExistence(timeout: 10), "operations load")
         shot("operations")
+        // The list goes by category and back by day.
+        app.buttons["regroup"].tap()
+        sleep(2)
+        shot("operations-by-category")
+        app.buttons["regroup"].tap()
+        sleep(1)
         app.buttons["categories"].tap()
         if sheet("categories-sheet").waitForExistence(timeout: 5) {
             shot("categories-spending")

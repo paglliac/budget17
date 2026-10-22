@@ -515,13 +515,25 @@ struct OperationRow: Decodable, Hashable, Identifiable {
     }
 }
 
+/// A day of the operations, or a category when they go by category.
 struct OperationDay: Decodable, Hashable, Identifiable {
-    let date: String
+    let id: String
     let title: String
     let subtitle: String
     let net: Double
     let items: [OperationRow]
-    var id: String { date }
+
+    private enum CodingKeys: String, CodingKey { case id, date, title, subtitle, net, items }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // A server before the categories names a day by its date alone.
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? c.decode(String.self, forKey: .date)
+        title = try c.decode(String.self, forKey: .title)
+        subtitle = try c.decode(String.self, forKey: .subtitle)
+        net = try c.decode(Double.self, forKey: .net)
+        items = try c.decode([OperationRow].self, forKey: .items)
+    }
 }
 
 struct OperationsScreen: Decodable {
@@ -535,6 +547,9 @@ struct OperationsScreen: Decodable {
     let categoryTitle: String?
     let query: String?
     let totals: Totals
+    /// The other way the list can go, by day or by category, as its switch names it; nil from a server before this.
+    let regroup: Option?
+    /// Days, newest first, or categories, the largest first.
     let days: [OperationDay]
     let empty: String
     /// Расходы по категориям, Доходы по категориям, or Необязательные по категориям when only those are shown.
@@ -543,12 +558,10 @@ struct OperationsScreen: Decodable {
     /// Expenses of the month that wait for a category.
     let pending: Int
 
-    /// What the operations that pass the filter spent and brought, how many there are, and how much of what they spent
-    /// could have been done without (nil from a server before this).
+    /// What the operations that pass the filter spent and brought, and how many there are.
     struct Totals: Decodable, Hashable {
         let expense: Double
         let income: Double
-        let optional: Double?
         let count: Int
     }
 

@@ -108,6 +108,7 @@ const screens: Record<string, unknown> = {
   operations: operationsScreen(data, saved(), { today }),
   'operations-income': operationsScreen(data, saved(), { today, kind: 'income' }),
   'operations-optional': operationsScreen(data, saved(), { today, kind: 'optional' }),
+  'operations-categories': operationsScreen(data, saved(), { today, group: 'category' }),
   uncategorized: uncategorizedScreen(data, saved(), { today }),
   regular: regularScreen(data, saved(), { today }),
   income: incomeScreen(data, settings.incomes(), { today }),

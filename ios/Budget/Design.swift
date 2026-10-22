@@ -101,20 +101,25 @@ struct LilacSegmented<Value: Hashable>: View {
     }
 }
 
-/// A plain icon button of the new style's header, such as the calendar.
+/// A plain icon button of the new style's header, such as the calendar, with its name under it when that is not
+/// plain from the icon, as «Категории» has.
 struct LilacIconButton: View {
     let systemImage: String
     let label: String
+    var caption: String?
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .symbolVariant(.none)
-                .font(.system(size: 21, weight: .light))
-                .foregroundStyle(Lilac.accent)
-                .frame(width: 40, height: 40)
-                .contentShape(Rectangle())
+            VStack(spacing: -6) {
+                Image(systemName: systemImage)
+                    .symbolVariant(.none)
+                    .font(.system(size: 21, weight: .light))
+                    .foregroundStyle(Lilac.accent)
+                    .frame(width: 40, height: 40)
+                if let caption { Text(caption).font(.footnote).foregroundStyle(Lilac.muted).fixedSize() }
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -331,6 +336,8 @@ struct LilacRow<Accessory: View>: View {
     var unplanned = false
     /// A line under the amount in its colour, such as how far over the plan.
     var amountNote: (text: String, color: Color)?
+    /// The chip as a ring before its words, without a capsule, as the operations draw where an expense counts.
+    var ringChip = false
     @ViewBuilder var accessory: () -> Accessory
 
     var body: some View {
@@ -362,7 +369,14 @@ struct LilacRow<Accessory: View>: View {
                         .foregroundStyle(amountNote.color)
                         .fixedSize()
                 }
-                if let chip {
+                if let chip, ringChip {
+                    HStack(spacing: 6) {
+                        Circle().strokeBorder(chip.color, lineWidth: 1.2).frame(width: 9, height: 9)
+                        Text(chip.text).font(.footnote)
+                    }
+                    .foregroundStyle(chip.color)
+                    .fixedSize()
+                } else if let chip {
                     Text(chip.text)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(chip.color)
@@ -390,10 +404,10 @@ struct LilacRow<Accessory: View>: View {
 extension LilacRow where Accessory == EmptyView {
     init(marker: LilacMarker, title: String, details: String, amount: Double?, symbol: String, chip: (text: String, color: Color)? = nil,
          muted: Bool = false, first: Bool = false, chevron: Bool = true, signed: Bool = false, amountColor: Color = .primary,
-         unplanned: Bool = false, amountNote: (text: String, color: Color)? = nil) {
+         unplanned: Bool = false, amountNote: (text: String, color: Color)? = nil, ringChip: Bool = false) {
         self.init(marker: marker, title: title, details: details, amount: amount, symbol: symbol, chip: chip, muted: muted, first: first,
                   chevron: chevron, signed: signed, amountColor: amountColor, unplanned: unplanned, amountNote: amountNote,
-                  accessory: { EmptyView() })
+                  ringChip: ringChip, accessory: { EmptyView() })
     }
 }
 
@@ -566,6 +580,33 @@ extension LilacTitle where Trailing == EmptyView {
     }
 }
 
+/// A screen's title that picks what it shows, such as the month of the operations: the screen's name small, what it
+/// shows large with a chevron that opens the choice, and buttons at its end.
+struct LilacPickerTitle<Choices: View, Trailing: View>: View {
+    let screen: String
+    let text: String
+    @ViewBuilder var choices: () -> Choices
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(screen).font(.body).foregroundStyle(Lilac.muted)
+                Menu(content: choices) {
+                    HStack(alignment: .center, spacing: 10) {
+                        Text(text).font(.system(size: 34, weight: .bold)).lineLimit(1).minimumScaleFactor(0.7)
+                        Image(systemName: "chevron.down").font(.system(size: 17, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.primary)
+                }
+            }
+            Spacer(minLength: 8)
+            trailing()
+        }
+        .padding(.top, 6)
+    }
+}
+
 /// A screen's main figure with what it is over it and what it is out of under it.
 struct LilacSummary: View {
     /// nil when a heading over it already says what it is.
@@ -585,37 +626,34 @@ struct LilacSummary: View {
     }
 }
 
-/// Two figures side by side with a hairline between, such as what was spent and what came in.
+/// Figures in a line, each after what it is, with a hairline between, such as what was spent and what came in.
 struct LilacFigures: View {
     struct Item: Hashable {
         let label: String
         let amount: Double
-        var sign = false
         var color: Color = .primary
-        var note: String?
-        var noteColor: Color = Lilac.muted
     }
 
     let items: [Item]
     let symbol: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 20) {
+        HStack(alignment: .center, spacing: 16) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                if index > 0 { Rectangle().fill(Lilac.hairline).frame(width: 0.5, height: 52) }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(Money.text(item.amount, symbol, sign: item.sign))
-                        .font(.system(size: 22, weight: .bold))
+                if index > 0 { Rectangle().fill(Lilac.hairline).frame(width: 1, height: 22) }
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(item.label).font(.callout).foregroundStyle(Lilac.muted)
+                    Text(Money.text(item.amount, symbol))
+                        .font(.system(size: 19, weight: .bold))
                         .monospacedDigit()
                         .foregroundStyle(item.color)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                    Text(item.label).font(.subheadline).foregroundStyle(Lilac.muted)
-                    if let note = item.note { Text(note).font(.footnote).foregroundStyle(item.noteColor) }
+                        .contentTransition(.numericText(value: item.amount))
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -699,9 +737,10 @@ struct LilacEmpty: View {
     }
 }
 
-/// Chips in a row that scrolls sideways, the picked one on white, each with its count; a count can be a violet badge,
-/// as «Ждут разбора» has.
-struct LilacFilterChips<Value: Hashable>: View {
+/// Tabs in a row that scrolls sideways, each with its count, the picked one dark and underlined in violet over a
+/// hairline; a count can be a violet badge, as «Ждут разбора» has. A control such as how the list goes stays at the
+/// row's end.
+struct LilacFilterTabs<Value: Hashable, Trailing: View>: View {
     struct Item: Identifiable {
         let value: Value
         let label: String
@@ -712,46 +751,120 @@ struct LilacFilterChips<Value: Hashable>: View {
 
     let items: [Item]
     @Binding var selection: Value
+    @ViewBuilder var trailing: () -> Trailing
+    @Namespace private var tabs
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(items) { item in
-                    let picked = item.value == selection
-                    Button { withAnimation(.snappy) { selection = item.value } } label: {
-                        HStack(spacing: 6) {
-                            Text(item.label)
-                            if let count = item.count {
-                                if item.badge {
-                                    Text("\(count)")
-                                        .font(.caption.weight(.bold))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 6)
-                                        .frame(minWidth: 20, minHeight: 20)
-                                        .background(Lilac.accent, in: Capsule())
-                                } else {
-                                    Text("\(count)").foregroundStyle(Lilac.muted).monospacedDigit()
-                                }
-                            }
-                        }
-                        .font(.subheadline.weight(picked ? .semibold : .regular))
-                        .foregroundStyle(picked ? Color.primary : Color.primary.opacity(0.7))
-                        .padding(.horizontal, 14)
-                        .frame(height: 38)
-                        .background(picked ? Lilac.surface : Lilac.track, in: Capsule())
-                        .shadow(color: .black.opacity(picked ? 0.07 : 0), radius: 6, y: 2)
+        HStack(alignment: .center, spacing: 12) {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(alignment: .center, spacing: 22) {
+                        ForEach(items) { item in tab(item).id(item.id) }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("filter-\(item.label)")
-                    .accessibilityAddTraits(picked ? .isSelected : [])
+                    .padding(.leading, 20)
+                    .padding(.trailing, 24)
+                }
+                .scrollIndicators(.hidden)
+                // The tabs past the end fade out, so the cut one reads as more to scroll to.
+                .mask(LinearGradient(stops: [.init(color: .black, location: 0.85), .init(color: .clear, location: 1)], startPoint: .leading, endPoint: .trailing))
+                // The picked tab comes into sight, even when picked from elsewhere, as «Ждут разбора» from the main page.
+                .onAppear { proxy.scrollTo(picked, anchor: .center) }
+                .onChange(of: selection) { withAnimation(.snappy) { proxy.scrollTo(picked, anchor: .center) } }
+            }
+            .padding(.leading, -20)
+            trailing()
+        }
+        .overlay(alignment: .bottom) { Rectangle().fill(Lilac.hairline).frame(height: 1) }
+        .sensoryFeedback(.selection, trigger: selection)
+    }
+
+    private var picked: String? { items.first { $0.value == selection }?.id }
+
+    private func tab(_ item: Item) -> some View {
+        let picked = item.value == selection
+        return Button { withAnimation(.snappy) { selection = item.value } } label: {
+            HStack(spacing: 6) {
+                Text(item.label)
+                    .fontWeight(picked ? .semibold : .regular)
+                    .foregroundStyle(picked ? Color.primary : Lilac.muted)
+                if let count = item.count {
+                    if item.badge {
+                        Text("\(count)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .frame(minWidth: 20, minHeight: 20)
+                            .background(Lilac.accent, in: Capsule())
+                    } else {
+                        Text("\(count)").foregroundStyle(Lilac.muted.opacity(0.8)).monospacedDigit()
+                    }
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 4)
+            .font(.subheadline)
+            .frame(height: 44)
+            .overlay(alignment: .bottom) {
+                if picked {
+                    Capsule().fill(Lilac.accent).frame(height: 3).matchedGeometryEffect(id: "picked", in: tabs)
+                }
+            }
+            .contentShape(Rectangle())
         }
-        .scrollIndicators(.hidden)
-        .padding(.horizontal, -20)
-        .sensoryFeedback(.selection, trigger: selection)
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("filter-\(item.label)")
+        .accessibilityAddTraits(picked ? .isSelected : [])
+    }
+}
+
+/// A group of a list on a line down its left side, as the operations go by day: a violet dot in a halo on the line
+/// with the group's title and total beside it, and its rows hung off the line under the title. The line runs from the
+/// first group's dot to the end of the last group's rows.
+struct LilacTimelineGroup<Content: View>: View {
+    let title: String
+    var subtitle = ""
+    var total: String?
+    var first = false
+    var last = false
+    @ViewBuilder var content: () -> Content
+
+    /// Above the title, and its height, by which the dot sits on the title's middle.
+    private var top: CGFloat { first ? 18 : 26 }
+    private let height: CGFloat = 26
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title).fontWeight(.semibold)
+                if !subtitle.isEmpty { Text(subtitle).foregroundStyle(Lilac.muted) }
+                Spacer(minLength: 8)
+                if let total { Text(total).monospacedDigit().foregroundStyle(Lilac.muted) }
+            }
+            .font(.body)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(height: height)
+            .padding(.top, top)
+            .padding(.bottom, 2)
+            content()
+        }
+        .padding(.leading, 32)
+        .background(alignment: .topLeading) {
+            ZStack(alignment: .top) {
+                Rectangle()
+                    .fill(Lilac.soft.opacity(0.6))
+                    .frame(width: 1.5)
+                    .padding(.top, first ? top + height / 2 : 0)
+                    .padding(.bottom, last ? 14 : 0)
+                ZStack {
+                    Circle().fill(Lilac.tint)
+                    Circle().strokeBorder(Lilac.soft.opacity(0.7), lineWidth: 1)
+                    Circle().fill(Lilac.accent).frame(width: 7, height: 7)
+                }
+                .frame(width: 18, height: 18)
+                .padding(.top, top + height / 2 - 9)
+            }
+            .frame(width: 18)
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
     }
 }
 

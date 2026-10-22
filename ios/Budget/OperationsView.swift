@@ -13,14 +13,16 @@ enum OperationsFilter: Hashable {
     }
 }
 
-/// Operations of a month by day, filtered by kind, category and text, as on the web page; an expense or an income opens
-/// to be marked. «Ждут разбора» shows the expenses that came without a category instead, with suggestions to accept, and
-/// what was sorted.
+/// Operations of a month by day, or by category, filtered by kind, category and text, as on the web page; an expense or
+/// an income opens to be marked. «Ждут разбора» shows the expenses that came without a category instead, with
+/// suggestions to accept, and what was sorted.
 struct OperationsView: View {
     @Binding var filter: OperationsFilter
     @State private var month: String?
     @State private var category: String?
     @State private var query: String?
+    /// nil goes by day.
+    @State private var group: String?
     @State private var searching = false
     @State private var search = ""
     @State private var showCategories = false
@@ -28,22 +30,17 @@ struct OperationsView: View {
     @FocusState private var searchFocused: Bool
 
     var body: some View {
-        Screen(path: "operations", query: ["month": month, "kind": filter.kind, "category": category, "q": query]) { (s: OperationsScreen) in
+        Screen(path: "operations", query: ["month": month, "kind": filter.kind, "category": category, "q": query, "group": group]) { (s: OperationsScreen) in
             GeometryReader { geometry in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        LilacTitle(text: "Операции") {
-                            LilacIconButton(systemImage: "magnifyingglass", label: "Найти") {
-                                withAnimation(.snappy) { searching = true }
-                                searchFocused = true
-                            }
-                        }
+                        header(s)
                         if searching { searchField }
-                        controls(s).padding(.top, 10)
-                        if filter != .pending {
-                            LilacFigures(items: figures(s), symbol: s.symbol).padding(.top, 16)
+                        filters(s)
+                        if filter != .pending, !figures(s).isEmpty {
+                            LilacFigures(items: figures(s), symbol: s.symbol).padding(.top, 22)
                         }
-                        LilacFilterChips(items: chips(s), selection: $filter).padding(.top, 16)
+                        LilacFilterTabs(items: tabs(s), selection: $filter) { regroup(s) }.padding(.top, 20)
                         if filter == .pending {
                             PendingList(month: month, sheet: $sheet)
                         } else {
@@ -65,6 +62,25 @@ struct OperationsView: View {
         }
         .background(LilacBackground())
         .budgetSheets($sheet)
+    }
+
+    /// The month to pick as the title, search, and the spending by category that filters the operations.
+    private func header(_ s: OperationsScreen) -> some View {
+        let index = s.months.firstIndex { $0.value == s.month } ?? 0
+        return LilacPickerTitle(screen: "Операции", text: s.months[index].label) {
+            ForEach(Array(s.months.enumerated()), id: \.element.value) { i, option in
+                Button(option.label) { month = i == 0 ? nil : option.value }
+            }
+        } trailing: {
+            HStack(alignment: .top, spacing: 14) {
+                LilacIconButton(systemImage: "magnifyingglass", label: "Найти") {
+                    withAnimation(.snappy) { searching = true }
+                    searchFocused = true
+                }
+                LilacIconButton(systemImage: "slider.horizontal.3", label: "Категории", caption: "Категории") { showCategories = true }
+                    .accessibilityIdentifier("categories")
+            }
+        }
     }
 
     private var searchField: some View {
@@ -90,74 +106,90 @@ struct OperationsView: View {
         .padding(.top, 10)
     }
 
-    /// The month to pick, the spending by category, and the filters set, each with a cross.
-    private func controls(_ s: OperationsScreen) -> some View {
-        let index = s.months.firstIndex { $0.value == s.month } ?? 0
-        return FlowLayout(spacing: 8) {
-            Menu {
-                ForEach(Array(s.months.enumerated()), id: \.element.value) { i, option in
-                    Button(option.label) { month = i == 0 ? nil : option.value }
+    /// The category and the text the operations are filtered by, each with a cross.
+    @ViewBuilder
+    private func filters(_ s: OperationsScreen) -> some View {
+        if s.categoryTitle != nil || s.query != nil {
+            FlowLayout(spacing: 8) {
+                if let title = s.categoryTitle {
+                    Button { category = nil } label: { chipLabel(title, systemImage: "xmark") }.buttonStyle(.plain)
                 }
-            } label: {
-                chipLabel(s.months[index].label, systemImage: "chevron.down")
+                if let q = s.query {
+                    Button {
+                        query = nil
+                        search = ""
+                    } label: { chipLabel("«\(q)»", systemImage: "xmark") }
+                    .buttonStyle(.plain)
+                }
             }
-            .accessibilityIdentifier("month")
-            Button { showCategories = true } label: { chipLabel("По категориям", systemImage: "chart.pie") }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("categories")
-            if let title = s.categoryTitle {
-                Button { category = nil } label: { chipLabel(title, systemImage: "xmark", highlighted: true) }.buttonStyle(.plain)
-            }
-            if let q = s.query {
-                Button {
-                    query = nil
-                    search = ""
-                } label: { chipLabel("«\(q)»", systemImage: "xmark", highlighted: true) }
-                .buttonStyle(.plain)
-            }
+            .padding(.top, 14)
         }
     }
 
-    /// What the operations spent, with what of it could have been done without, and what they brought; the expenses
-    /// that could have been done without, alone, are what they cost.
+    /// What the operations spent and what they brought; a view of one kind has only its own figure, in orange for the
+    /// expenses that could have been done without.
     private func figures(_ s: OperationsScreen) -> [LilacFigures.Item] {
-        if s.kind == "optional" { return [.init(label: "необязательные", amount: s.totals.expense, color: Palette.optional)] }
-        let optional = s.totals.optional.flatMap { $0 >= 0.5 ? "\(Money.text($0, s.symbol)) необязательные" : nil }
-        return [
-            .init(label: "потрачено", amount: s.totals.expense, note: optional, noteColor: Palette.optional),
-            .init(label: "получено", amount: s.totals.income, sign: true, color: Palette.color("green")),
-        ]
+        let spent = LilacFigures.Item(label: "Потрачено", amount: s.totals.expense, color: s.kind == "optional" ? Palette.optional : .primary)
+        let received = LilacFigures.Item(label: "Получено", amount: s.totals.income, color: Palette.color("green"))
+        switch s.kind {
+        case "expense", "optional": return [spent]
+        case "income": return [received]
+        case "transfer": return []
+        default: return [spent, received]
+        }
     }
 
-    private func chipLabel(_ text: String, systemImage: String, highlighted: Bool = false) -> some View {
+    private func chipLabel(_ text: String, systemImage: String) -> some View {
         HStack(spacing: 6) {
             Text(text)
             Image(systemName: systemImage).font(.caption.weight(.semibold))
         }
         .font(.subheadline.weight(.medium))
-        .foregroundStyle(highlighted ? Lilac.accent : Color.primary)
+        .foregroundStyle(Lilac.accent)
         .padding(.horizontal, 14)
         .frame(height: 36)
-        .background(highlighted ? Lilac.tint : Lilac.surface, in: Capsule())
-        .shadow(color: .black.opacity(highlighted ? 0 : 0.05), radius: 6, y: 2)
+        .background(Lilac.tint, in: Capsule())
     }
 
-    private func chips(_ s: OperationsScreen) -> [LilacFilterChips<OperationsFilter>.Item] {
+    private func tabs(_ s: OperationsScreen) -> [LilacFilterTabs<OperationsFilter, AnyView>.Item] {
+        typealias Item = LilacFilterTabs<OperationsFilter, AnyView>.Item
         let all = s.kinds.first { $0.value == nil }
-        let kinds = s.kinds.compactMap { kind in kind.value.map { LilacFilterChips<OperationsFilter>.Item(value: .kind($0), label: kind.label, count: kind.count) } }
-        return [LilacFilterChips<OperationsFilter>.Item(value: .all, label: all?.label ?? "Все", count: all?.count),
-                LilacFilterChips<OperationsFilter>.Item(value: .pending, label: "Ждут разбора", count: s.pending > 0 ? s.pending : nil, badge: true)]
+        let kinds = s.kinds.compactMap { kind in kind.value.map { Item(value: .kind($0), label: kind.label, count: kind.count) } }
+        return [Item(value: .all, label: all?.label ?? "Все", count: all?.count),
+                Item(value: .pending, label: "Ждут разбора", count: s.pending > 0 ? s.pending : nil, badge: true)]
             + kinds
+    }
+
+    /// The switch between the list by day and by category, at the end of the tabs.
+    private func regroup(_ s: OperationsScreen) -> AnyView {
+        guard filter != .pending, let regroup = s.regroup else { return AnyView(EmptyView()) }
+        return AnyView(
+            Button { withAnimation(.snappy) { group = regroup.value == "day" ? nil : regroup.value } } label: {
+                HStack(spacing: 5) {
+                    Text(regroup.label)
+                    Image(systemName: "arrow.up.arrow.down").font(.footnote.weight(.medium))
+                }
+                .font(.footnote)
+                .foregroundStyle(Lilac.muted)
+                .frame(height: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .accessibilityIdentifier("regroup")
+        )
     }
 
     @ViewBuilder
     private func list(_ s: OperationsScreen) -> some View {
         if s.days.isEmpty { LilacEmpty(text: s.empty) }
-        ForEach(s.days) { day in
-            LilacDayHeading(title: day.title, subtitle: day.subtitle, total: abs(day.net) >= 0.5 ? Money.text(day.net, s.symbol, sign: true) : nil)
-            ForEach(Array(day.items.enumerated()), id: \.element.id) { index, operation in
-                OperationLine(operation: operation, symbol: s.symbol, first: index == 0) {
-                    if let id = operation.spending { sheet = .spending(id) }
+        ForEach(Array(s.days.enumerated()), id: \.element.id) { index, day in
+            LilacTimelineGroup(title: day.title, subtitle: day.subtitle, total: abs(day.net) >= 0.5 ? Money.text(day.net, s.symbol, sign: true) : nil,
+                               first: index == 0, last: index == s.days.count - 1) {
+                ForEach(Array(day.items.enumerated()), id: \.element.id) { index, operation in
+                    OperationLine(operation: operation, symbol: s.symbol, first: index == 0) {
+                        if let id = operation.spending { sheet = .spending(id) }
+                    }
                 }
             }
         }
@@ -165,8 +197,8 @@ struct OperationsView: View {
 }
 
 /// An operation: whom it went to or came from with what it went for, a minus for an expense and green for an income,
-/// orange for an expense that could have been done without, what else the bank said, and a chip when an expense is not
-/// an ordinary one of the week.
+/// orange for an expense that could have been done without, what else the bank said, and a ring with words when an
+/// expense is not an ordinary one of the week.
 struct OperationLine: View {
     let operation: OperationRow
     let symbol: String
@@ -188,10 +220,11 @@ struct OperationLine: View {
                 first: first,
                 chevron: false,
                 signed: operation.kind != "transfer",
-                amountColor: operation.kind == "income" ? Palette.color("green") : operation.optional ? Palette.optional : .primary
+                amountColor: operation.kind == "income" ? Palette.color("green") : operation.optional ? Palette.optional : .primary,
+                ringChip: true
             ) {
                 if !notes.isEmpty {
-                    Text(notes.joined(separator: " · ")).font(.caption).foregroundStyle(Lilac.muted).lineLimit(2)
+                    Text(notes.joined(separator: " · ")).font(.footnote).foregroundStyle(Lilac.muted).lineLimit(2)
                 }
             }
         }
@@ -216,32 +249,34 @@ struct PendingList: View {
             VStack(alignment: .leading, spacing: 0) {
                 LilacSummary(label: s.total.label, amount: s.total.amount, symbol: s.symbol, note: s.total.note, size: 30).padding(.top, 16)
                 if s.pending.isEmpty { LilacEmpty(text: s.empty) }
-                ForEach(s.pending, id: \.date) { day in
-                    LilacDayHeading(title: day.title, subtitle: day.subtitle)
-                    ForEach(Array(day.items.enumerated()), id: \.element.id) { index, item in
-                        // A tap on the row opens it; «Принять» is a button of its own inside the row.
-                        LilacRow(marker: .expense(item.row, dot: Lilac.red), title: item.row.title, details: item.row.details, amount: item.row.amount, symbol: s.symbol,
-                                 first: index == 0) {
-                            if let suggestion = item.suggestion {
-                                LilacInlineAction(label: "Принять") { accept(item.spending, suggestion.choice) }
+                ForEach(Array(s.pending.enumerated()), id: \.element.date) { index, day in
+                    LilacTimelineGroup(title: day.title, subtitle: day.subtitle, first: index == 0, last: index == s.pending.count - 1) {
+                        ForEach(Array(day.items.enumerated()), id: \.element.id) { index, item in
+                            // A tap on the row opens it; «Принять» is a button of its own inside the row.
+                            LilacRow(marker: .expense(item.row, dot: Lilac.red), title: item.row.title, details: item.row.details, amount: item.row.amount, symbol: s.symbol,
+                                     first: index == 0) {
+                                if let suggestion = item.suggestion {
+                                    LilacInlineAction(label: "Принять") { accept(item.spending, suggestion.choice) }
+                                }
                             }
+                            .onTapGesture { sheet = .spending(item.spending, queue: queue) }
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityIdentifier(item.id)
                         }
-                        .onTapGesture { sheet = .spending(item.spending, queue: queue) }
-                        .accessibilityAddTraits(.isButton)
-                        .accessibilityIdentifier(item.id)
                     }
                 }
                 if !s.sorted.isEmpty {
                     LilacHeading("Разобрано")
-                    ForEach(s.sorted, id: \.date) { day in
-                        LilacDayHeading(title: day.title, subtitle: day.subtitle)
-                        ForEach(Array(day.items.enumerated()), id: \.element.id) { index, expense in
-                            Button { sheet = .spending(expense.spending) } label: {
-                                LilacRow(marker: .expense(expense.row), title: expense.row.title, details: expense.row.details,
-                                         amount: expense.row.amount, symbol: s.symbol, chip: WeekSpendingList.chip(expense.row.mark), first: index == 0,
-                                         chevron: false, amountColor: expense.optional ? Palette.optional : .primary)
+                    ForEach(Array(s.sorted.enumerated()), id: \.element.date) { index, day in
+                        LilacTimelineGroup(title: day.title, subtitle: day.subtitle, first: index == 0, last: index == s.sorted.count - 1) {
+                            ForEach(Array(day.items.enumerated()), id: \.element.id) { index, expense in
+                                Button { sheet = .spending(expense.spending) } label: {
+                                    LilacRow(marker: .expense(expense.row), title: expense.row.title, details: expense.row.details,
+                                             amount: expense.row.amount, symbol: s.symbol, chip: WeekSpendingList.chip(expense.row.mark), first: index == 0,
+                                             chevron: false, amountColor: expense.optional ? Palette.optional : .primary, ringChip: true)
+                                }
+                                .buttonStyle(.card)
                             }
-                            .buttonStyle(.card)
                         }
                     }
                 }
