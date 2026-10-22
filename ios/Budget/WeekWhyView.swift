@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Why a week went below zero, opened from the red figure on the main circle, as what to do about it: where the week
-/// is; «Проверь траты», the expenses the week counts only by default that are a lot, alone or as a run of small ones,
+/// is; «Что изменилось», the changes made in the app that took from the week, each opening what it changed;
+/// «Проверь траты», the expenses the week counts only by default that are a lot, alone or as a run of small ones,
 /// each to open and mark or to confirm with «Верно», which the server keeps; then reminders, each only when it is a
 /// lot, to keep to the plan or to spend less on the optional, folded to their rows.
 struct WeekWhyView: View {
@@ -26,6 +27,7 @@ struct WeekWhyView: View {
                     .padding(.top, 6)
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("why-now")
+                    if let changes = s.changes { changeList(changes, screen: s) }
                     if let check = s.check { checks(check, symbol: s.symbol) }
                     if !s.reminders.isEmpty { reminders(s.reminders, symbol: s.symbol).padding(.top, 22) }
                     if let empty = s.empty { LilacEmpty(text: empty).padding(.top, 12) }
@@ -40,6 +42,19 @@ struct WeekWhyView: View {
         .lilacTitle("Почему неделя ушла в минус")
         .errorAlert($error)
         .sensoryFeedback(.success, trigger: confirmed)
+    }
+
+    @ViewBuilder
+    private func changeList(_ changes: WeekWhyScreen.Changes, screen s: WeekWhyScreen) -> some View {
+        LilacHeading(changes.title)
+        ForEach(Array(changes.rows.enumerated()), id: \.element.id) { index, item in
+            Button { open(item, screen: s) } label: {
+                LilacRow(marker: item.spending != nil ? .expense(item.row) : .icon(item.row), title: item.row.title, details: item.row.details,
+                         amount: item.row.amount, symbol: s.symbol, first: index == 0, chevron: false)
+            }
+            .buttonStyle(.card)
+            .accessibilityIdentifier(item.id)
+        }
     }
 
     @ViewBuilder
@@ -132,6 +147,22 @@ struct WeekWhyView: View {
             } catch {
                 self.error = error.localizedDescription
             }
+        }
+    }
+
+    /// What a change opens: the expense, the purchase's form, the wish, the form of what the week allows, or the plan.
+    private func open(_ item: WhyChange, screen s: WeekWhyScreen) {
+        if let spending = item.spending {
+            sheet = .spending(spending)
+        } else if let wish = item.wish {
+            sheet = .wish(wish)
+        } else if let purchase = item.purchase {
+            sheet = .purchase(PurchaseDraft(purchase: purchase, week: purchase.week, envelope: purchase.envelope, choices: s.weekChoices ?? [],
+                                            actions: item.actions, symbol: s.symbol))
+        } else if item.limit, let limit = s.limit {
+            sheet = .weekLimit(WeekLimitDraft(week: s.week, title: s.subtitle, limit: limit, symbol: s.symbol))
+        } else if item.plan {
+            openPlan()
         }
     }
 

@@ -15,13 +15,15 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { mainCurrency } from '../balances.ts';
-import { localDate } from '../dates.ts';
+import { weekChanges } from '../changes.ts';
+import { addDays, localDate } from '../dates.ts';
 import { renderSyncResult } from '../format.ts';
 import { listOperations } from '../ledger.ts';
 import { Settings } from '../settings.ts';
 import { appLogo, fetchSiteIcon, shopByKey } from '../shops.ts';
 import { Store } from '../store.ts';
 import { sync } from '../sync.ts';
+import { weekOf } from '../week.ts';
 import { ZenMoneyClient } from '../zenmoney/client.ts';
 import type { EntityCollections } from '../zenmoney/types.ts';
 import {
@@ -207,7 +209,38 @@ function savedMarking(settings: Settings): SavedMarking {
 }
 
 function savedBudget(settings: Settings): SavedBudget {
-  return { ...savedMarking(settings), weekLimits: settings.weekLimits(), wishes: settings.wishes() };
+  return { ...savedMarking(settings), weekLimits: settings.weekLimits(), wishes: settings.wishes(), changes: settings.weekChanges() };
+}
+
+/** Forms that can move a week's money: the plan, wishes, what a week allows, and where expenses count or what they paid. */
+const MOVES_WEEKS = /^\/(purchases|wishes|week-limits|spending|review|regular)(\/|$)/;
+/** How many weeks back a change is looked for in expenses; purchases and what weeks allow are looked at in all weeks. */
+const CHANGE_WEEKS = 8;
+
+/**
+ * Submits a form and keeps what it did to the weeks' money (see changes.ts), with who sent it: the app sends the name
+ * the phone was given, percent-encoded, in X-Budget-Who. Demo data is not the user's, so nothing is kept for it.
+ */
+function submitKeepingChanges(path: string, body: URLSearchParams, request: IncomingMessage, context: Context): FormResult | null {
+  const { today, demo } = context;
+  if (demo || !MOVES_WEEKS.test(path)) return submitForm(path, body, request, context);
+  // A form changes settings.db only, so the expenses are read once.
+  const collections = loadCollections(false, today);
+  const budget = () => loadSettings((s) => budgetOf(collections, savedBudget(s), { today, from: addDays(weekOf(today, s.weekStart()), -7 * CHANGE_WEEKS) }));
+  const before = budget();
+  const result = submitForm(path, body, request, context);
+  if (result?.status === 'saved') {
+    const changes = weekChanges(before, budget());
+    if (changes.length > 0) loadSettings((s) => s.addWeekChanges(changes, { at: Date.now(), who: whoSent(request) }));
+  }
+  return result;
+}
+
+/** The name of the phone a request came from, when it has one. */
+function whoSent(request: IncomingMessage): string | null {
+  const header = request.headers['x-budget-who'];
+  const sent = (typeof header === 'string' ? decoded(header) : null)?.trim().slice(0, 40);
+  return sent ? sent : null;
 }
 
 /** The page a form was sent from, without the entry it had open, so saving closes the form. */
@@ -556,7 +589,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       sendJson(response, saved.status === 'saved' ? 200 : 422, saved);
       return;
     }
-    const result = submitForm(path, await readForm(request, /^\/(categories|shops)/.test(path) ? CATEGORY_FORM_LIMIT : undefined), request, context);
+    const result = submitKeepingChanges(path, await readForm(request, /^\/(categories|shops)/.test(path) ? CATEGORY_FORM_LIMIT : undefined), request, context);
     if (result === null) {
       if (isApi) sendJson(response, 404, { error: 'Такого действия нет' });
       else send(response, 405, 'text/plain', 'Метод не поддерживается');

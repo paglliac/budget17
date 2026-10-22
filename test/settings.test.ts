@@ -90,6 +90,21 @@ describe('Settings', () => {
     assert.deepEqual([...settings.weekLimits()], [['2026-10-12', 30_000], ['2026-10-19', 50_000]]);
   });
 
+  it('keeps what changes did to the weeks, with when and by whom, and moves them with the weeks', () => {
+    using settings = new Settings(':memory:');
+    assert.deepEqual(settings.weekChanges(), []);
+    const race = { kind: 'purchase' as const, id: 35, title: 'Участие в Кедродзилле', wish: null };
+    settings.addWeekChanges([{ week: '2026-10-17', before: 1_500.26, after: -1_999.74, subject: race, what: { kind: 'added' } }], { at: 1_792_667_777_426, who: 'Таня' });
+    settings.addWeekChanges([{ week: '2026-10-17', before: -1_999.74, after: -2_999.74, subject: { kind: 'limit' }, what: { kind: 'amount', from: 45_000, to: 44_000 } }], { at: 1_792_667_800_000, who: null });
+    assert.deepEqual(settings.weekChanges(), [
+      { at: 1_792_667_777_426, week: '2026-10-17', before: 1_500.26, after: -1_999.74, subject: race, what: { kind: 'added' }, who: 'Таня' },
+      { at: 1_792_667_800_000, week: '2026-10-17', before: -1_999.74, after: -2_999.74, subject: { kind: 'limit' }, what: { kind: 'amount', from: 45_000, to: 44_000 }, who: null },
+    ]);
+
+    settings.setWeekStart(0);
+    assert.deepEqual(settings.weekChanges().map((c) => c.week), ['2026-10-19', '2026-10-19'], 'Saturday 17 – Friday 23 October is mostly the week of Monday 19');
+  });
+
   it('remembers the user’s own name in transfers to themselves and forgets it', () => {
     using settings = new Settings(':memory:');
     assert.equal(settings.selfPayee(), null);

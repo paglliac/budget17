@@ -13,6 +13,7 @@ import {
   type SubcategorySetup,
 } from './categories.ts';
 import type { Categorization } from './categorization.ts';
+import type { ChangeSubject, ChangeWhat, KeptChange, WeekChange } from './changes.ts';
 import type { ClaudeAnswer, ClaudeDecision, ClaudeReview, ClaudeSaved } from './claude-review.ts';
 import type { MonthString } from './dates.ts';
 import { isIncomeModel, type Income, type IncomeInput } from './income.ts';
@@ -235,6 +236,20 @@ const SCHEMA = `
     amount REAL NOT NULL CHECK (amount > 0)
   ) STRICT;
 
+  -- What changes made in the app did to the weeks' money (changes.ts): when a change was made, in Unix milliseconds, the
+  -- week whose free money it moved, what was free before and after, what it was about and what happened to it, as
+  -- JSON, and who made it, as the phone that sent it is named, when it is.
+  CREATE TABLE IF NOT EXISTS week_change (
+    id INTEGER PRIMARY KEY,
+    at INTEGER NOT NULL,
+    week TEXT NOT NULL,
+    before REAL NOT NULL,
+    after REAL NOT NULL,
+    subject TEXT NOT NULL,
+    what TEXT NOT NULL,
+    who TEXT
+  ) STRICT;
+
   -- Claude's review of a month (claude-review.ts): its answer as JSON, when it came, and what each expense of the
   -- month's weeks was then, as JSON of state by ZenMoney transaction id. A new answer replaces the month's.
   CREATE TABLE IF NOT EXISTS claude_review (
@@ -450,6 +465,9 @@ export class Settings {
       const wishes = this.#db.prepare('SELECT id, buy_week FROM wish WHERE buy_week IS NOT NULL').all();
       const moveWish = this.#db.prepare('UPDATE wish SET buy_week = ? WHERE id = ?');
       for (const w of wishes) moveWish.run(alignWeek(String(w.buy_week), start), Number(w.id));
+      const changes = this.#db.prepare('SELECT id, week FROM week_change').all();
+      const moveChange = this.#db.prepare('UPDATE week_change SET week = ? WHERE id = ?');
+      for (const c of changes) moveChange.run(alignWeek(String(c.week), start), Number(c.id));
     });
   }
 
@@ -461,6 +479,30 @@ export class Settings {
         .all()
         .map((row) => [String(row.week), Number(row.amount)] as const),
     );
+  }
+
+  /** The changes made in the app that moved a week's money, in the order they were made. */
+  weekChanges(): KeptChange[] {
+    return this.#db
+      .prepare('SELECT at, week, before, after, subject, what, who FROM week_change ORDER BY at, id')
+      .all()
+      .map((row) => ({
+        at: Number(row.at),
+        week: String(row.week),
+        before: Number(row.before),
+        after: Number(row.after),
+        subject: JSON.parse(String(row.subject)) as ChangeSubject,
+        what: JSON.parse(String(row.what)) as ChangeWhat,
+        who: row.who === null ? null : String(row.who),
+      }));
+  }
+
+  /** Keeps what a change did to the weeks, made at `at` in Unix milliseconds, by whom when known. */
+  addWeekChanges(changes: readonly WeekChange[], { at, who }: { at: number; who: string | null }): void {
+    const insert = this.#db.prepare('INSERT INTO week_change (at, week, before, after, subject, what, who) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    this.#transaction(() => {
+      for (const c of changes) insert.run(at, c.week, c.before, c.after, JSON.stringify(c.subject), JSON.stringify(c.what), who);
+    });
   }
 
   /** Sets what a week allows; null gives it the usual limit back. */

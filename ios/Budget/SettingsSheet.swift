@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Behind the gear of «Ещё»: the day a week begins on, round figures and where the extras' widget tells plenty and
-/// tight, then the server. They show what the server sent
+/// tight, then whose phone this is, kept on the phone, and the server. They show what the server sent
 /// last at once, and are left out until the server has sent them once. The amount of one week is changed on the week
 /// itself.
 struct SettingsSheet: View {
@@ -9,15 +9,21 @@ struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var budget: BudgetSettingsScreen?
     @State private var error: String?
+    /// The phone's name as it is typed; kept as it changes.
+    @State private var who = ""
 
     var body: some View {
         LilacForm(title: "Настройки") {
             if let budget { BudgetSection(screen: budget, error: $error) }
+            LilacTextField(label: "Чей телефон", text: $who, placeholder: "Имя")
+                .accessibilityIdentifier("who")
             LilacFieldLabel(text: "Сервер")
             ServerPanel { dismiss() }
         }
         .errorAlert($error)
         .task(id: session.version) { await load() }
+        .onAppear { who = session.who }
+        .onChange(of: who) { _, typed in session.name(typed) }
         .accessibilityIdentifier("settings")
     }
 

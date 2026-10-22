@@ -12,6 +12,7 @@
 // and the money the plan holds shows among the purchases without a form.
 
 import { summarizeBalances } from '../../balances.ts';
+import type { KeptChange } from '../../changes.ts';
 import { addDays, localDate, shiftMonth, type MonthString } from '../../dates.ts';
 import { amountText, parseAmount, parseTitle } from '../../input.ts';
 import { listOperations, type Operation } from '../../ledger.ts';
@@ -93,6 +94,8 @@ export interface SavedBudget extends SavedMarking {
   wishes: Wish[];
   /** What the user allowed for a week instead of WEEK_LIMIT, by the week's first day. */
   weekLimits: ReadonlyMap<DateString, number>;
+  /** Changes made in the app that moved a week's money, in the order they were made; none when not given. */
+  changes?: readonly KeptChange[];
 }
 
 export type FormField = 'title' | 'amount';

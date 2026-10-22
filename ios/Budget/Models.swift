@@ -244,8 +244,9 @@ struct WeekHome: Decodable, Hashable {
     }
 }
 
-/// Why a week went below zero, as what to do about it: where the week is, the expenses to check where they count, and
-/// reminders, each only when it is a lot; `empty` when there is nothing of either.
+/// Why a week went below zero, as what to do about it: where the week is, what changes made in the app took from it,
+/// the expenses to check where they count, and reminders, each only when it is a lot; `empty` when there is nothing of
+/// any. The week's choices and what it allows are for the forms the changes open.
 struct WeekWhyScreen: Decodable {
     let symbol: String
     let week: String
@@ -254,13 +255,46 @@ struct WeekWhyScreen: Decodable {
     let title: String
     let subtitle: String
     let now: Figure
+    let changes: Changes?
     let check: Checks?
     let reminders: [WhyReminder]
     let empty: String?
+    let weekChoices: [OptionGroup]?
+    let limit: WeekLimit?
+
+    struct Changes: Decodable, Hashable {
+        let title: String
+        let rows: [WhyChange]
+    }
 
     struct Checks: Decodable, Hashable {
         let title: String
         let rows: [WhyCheck]
+    }
+}
+
+/// A change made in the app that took from the week, with who made it, what happened and when under it; it opens an
+/// expense to mark, a purchase's form, a wish, the plan once the purchase is gone from the week, or the form of what the
+/// week allows.
+struct WhyChange: Decodable, Hashable, Identifiable {
+    let row: Row
+    let spending: String?
+    let purchase: Purchase?
+    let actions: [PurchaseAction]
+    let wish: Int?
+    let limit: Bool
+    let plan: Bool
+    var id: String { row.id }
+
+    init(from decoder: Decoder) throws {
+        row = try Row(from: decoder)
+        let c = try decoder.extra()
+        spending = try c.optional("spending")
+        purchase = try c.optional("purchase")
+        actions = try c.optional("actions") ?? []
+        wish = try c.optional("wish")
+        limit = try c.optional("limit") ?? false
+        plan = try c.optional("plan") ?? false
     }
 }
 

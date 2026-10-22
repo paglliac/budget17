@@ -154,6 +154,14 @@ function moveSettings(db: DatabaseSync): void {
     for (const [key, value] of Object.entries(params)) if ((key === 'day' || key.endsWith('Day')) && value >= 1 && value <= 31) params[key] = shiftDay(value);
     db.prepare('UPDATE income SET params = ? WHERE id = ?').run(JSON.stringify(params), i.id);
   }
+  // What changes did to the weeks, with when they were made; snapshots taken before changes were kept have no table.
+  if (rows('SELECT name FROM sqlite_master WHERE name = \'week_change\'').length > 0) {
+    for (const c of rows<{ id: number; at: number; week: string; what: string }>('SELECT id, at, week, what FROM week_change')) {
+      const what = JSON.parse(c.what) as { kind: string; from?: unknown; to?: unknown };
+      if (what.kind === 'moved') Object.assign(what, { from: shift(what.from), to: shift(what.to) });
+      db.prepare('UPDATE week_change SET at = ?, week = ?, what = ? WHERE id = ?').run(c.at + days * 86_400_000, date(c.week), JSON.stringify(what), c.id);
+    }
+  }
   for (const table of ['claude_review', 'claude_request']) {
     const months = rows<{ month: string }>(`SELECT month FROM ${table}`).map((r) => r.month);
     // Through a name no month has, since one month's new name may be another's old one.

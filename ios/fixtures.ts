@@ -4,6 +4,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { weekChanges } from '../src/changes.ts';
 import { Settings } from '../src/settings.ts';
 import {
   budgetSettingsScreen,
@@ -23,7 +24,7 @@ import {
   wishesScreen,
 } from '../src/web/api.ts';
 import { demoCollections } from '../src/web/demo.ts';
-import type { SavedBudget } from '../src/web/pages/dashboard.ts';
+import { budgetOf, type SavedBudget } from '../src/web/pages/dashboard.ts';
 import { submitWishPlan } from '../src/web/pages/wishes.ts';
 
 const folder = process.argv[2];
@@ -49,7 +50,6 @@ const kids = settings.addOwnCategory('Дети');
 settings.dressCategory(kids.id, { icon: 'baby', color: '#1E90FF' });
 settings.setCategoryPhoto(kids.id, { type: 'image/jpeg', data: new Uint8Array([0xff, 0xd8, 0xff, 0xe0]) });
 settings.addOwnCategory('Кэшбэк', 'income');
-settings.setWeekLimit('2026-10-05', 30_000);
 // Shops get a logo: the demo's chains by the icons of their sites, one by a photo of the user's, and one a name.
 const icon = { type: 'image/png' as const, data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) };
 for (const site of ['5ka.ru', 'lenta.com', 'samokat.ru', 'perekrestok.ru', 'vkusvill.ru', 'magnit.ru']) settings.putSiteIcon(site, icon, new Date(`${today}T09:00:00Z`));
@@ -72,8 +72,19 @@ const saved = (): SavedBudget => ({
   weekLimits: settings.weekLimits(),
   wishes: settings.wishes(),
   shops: settings.shopSetup(),
+  changes: settings.weekChanges(),
 });
 const budget = { today, source: 'demo' as const, canSync: false };
+
+// Changes that took from the week, kept as the server keeps them: a purchase added from a named phone, and what the
+// week allows lowered.
+const keepChanges = (change: () => void, at: string, who: string | null) => {
+  const before = budgetOf(data, saved(), { today });
+  change();
+  settings.addWeekChanges(weekChanges(before, budgetOf(data, saved(), { today })), { at: Date.parse(at), who });
+};
+keepChanges(() => settings.addPurchase({ title: 'Участие в забеге', amount: 2_000, week: '2026-10-05', envelope: 'week', kind: 'required', done: false }), '2026-10-06T19:40:00', 'Таня');
+keepChanges(() => settings.setWeekLimit('2026-10-05', 30_000), '2026-10-07T09:10:00', null);
 
 // One expense of the week pays the groceries, another moves to the extras and could have been done without, so their
 // rows and choices show up.

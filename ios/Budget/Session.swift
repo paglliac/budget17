@@ -17,8 +17,11 @@ final class Session {
     private(set) var pending = 0
     /// Why the app signed out by itself, for the login screen.
     private(set) var notice: String?
+    /// Whose phone this is, as the user named it; the server says by it who made a change.
+    private(set) var who: String
 
     private static let serverKey = "server"
+    private static let whoKey = "who"
     private let copies = Saved()
 
     /// The server is kept as text, so a launch argument can set it too: -server http://localhost:4318. The widget reads
@@ -26,6 +29,7 @@ final class Session {
     init() {
         server = UserDefaults.standard.string(forKey: Self.serverKey).flatMap(Self.url(from:))
         token = Keychain.read(Keychain.token)
+        who = UserDefaults.standard.string(forKey: Self.whoKey) ?? ""
         if let server, Keychain.read(Keychain.server) != server.absoluteString { Keychain.save(server.absoluteString, Keychain.server) }
         if let server { Self.remember(server, token) }
     }
@@ -50,7 +54,13 @@ final class Session {
         try await signIn(address: kept.address, token: kept.token)
     }
 
-    var client: APIClient? { server.map { APIClient(base: $0, token: token) } }
+    var client: APIClient? { server.map { APIClient(base: $0, token: token, who: who) } }
+
+    /// Names the phone; an empty name says nothing about who made a change.
+    func name(_ who: String) {
+        self.who = who.trimmingCharacters(in: .whitespacesAndNewlines)
+        UserDefaults.standard.set(self.who, forKey: Self.whoKey)
+    }
 
     /// Checks the server and the token before keeping them, so a wrong address leaves the working one and what it saved.
     func signIn(address: String, token: String) async throws {

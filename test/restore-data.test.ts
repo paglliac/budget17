@@ -41,6 +41,8 @@ function snapshot(): string {
   settings.addRegularExpense({ title: 'Коммуналка', amount: 8_000, day: 10, start: '2026-11-01', end: null, icon: null });
   settings.addIncome({ title: 'Зарплата', model: 'salary', params: { salary: 200_000, advanceDay: 20, payDay: 5 } });
   settings.setClaudeToken('sk-test');
+  const race = { kind: 'purchase' as const, id: 35, title: 'Участие в Кедродзилле', wish: null };
+  settings.addWeekChanges([{ week: '2026-10-10', before: 1_500, after: -2_000, subject: race, what: { kind: 'moved', from: '2026-10-17', to: '2026-10-10' } }], { at: 1_791_990_000_000, who: 'Таня' });
   return dir;
 }
 
@@ -78,6 +80,9 @@ describe('make restore-data', () => {
     assert.deepEqual(settings.regularExpenses().map((e) => [e.day, e.start]), [[11, '2026-11-02']]);
     assert.deepEqual(settings.incomes()[0]?.params, { salary: 200_000, advanceDay: 21, payDay: 6 });
     assert.equal(settings.claudeToken(), null, 'a copy never reviews months on the user’s subscription');
+    assert.deepEqual(settings.weekChanges().map((c) => [c.at, c.week, c.what]), [
+      [1_791_990_000_000 + 86_400_000, '2026-10-11', { kind: 'moved', from: '2026-10-18', to: '2026-10-11' }],
+    ]);
   });
 
   it('names the extras of a wish’s plan by the month its week lands in', () => {

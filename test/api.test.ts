@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { NO_SETUP } from '../src/categories.ts';
+import type { KeptChange } from '../src/changes.ts';
 import type { Envelope } from '../src/week.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import {
@@ -252,6 +253,46 @@ describe('api', () => {
     assert.deepEqual(ahead.now, { label: 'будет', amount: -500 });
     assert.deepEqual(rows(ahead.reminders), [['Придерживайся плана', 'План больше недели', 500]]);
     assert.deepEqual(rows(ahead.reminders[0].rows), [['План больше недели', '1 500 ₽ из 1 000 ₽', 500]]);
+  });
+
+  it('tells what changes made in the app took from the week since it began, by whom and on which day', () => {
+    const boots = { kind: 'purchase' as const, id: 1, title: 'Ботинки Савве', wish: null };
+    const lamp = { kind: 'purchase' as const, id: 9, title: 'Лампа', wish: null };
+    const change = (at: string, week: string, before: number, after: number, subject: KeptChange['subject'], what: KeptChange['what'], who: string | null = null): KeptChange =>
+      ({ at: Date.parse(at), week, before, after, subject, what, who });
+    const changes: KeptChange[] = [
+      // Made before the week began: the week began with it.
+      change('2026-10-04T21:00:00', '2026-10-05', 12_527, 12_054, { kind: 'expense', id: 'pyaterochka', title: 'Пятёрочка' }, { kind: 'counted', from: { envelope: 'extra', paid: null }, to: { envelope: 'week', paid: null } }),
+      change('2026-10-05T12:00:00', '2026-10-05', 44_527, 4_527, { kind: 'expense', id: 'transfer', title: 'Александр А.' }, { kind: 'counted', from: { envelope: 'extra', paid: null }, to: { envelope: 'week', paid: null } }, 'Кирилл'),
+      change('2026-10-05T19:40:00', '2026-10-05', 4_527, -3_473, boots, { kind: 'added' }, 'Таня'),
+      // Put into the plan and taken out again: it took nothing in the end.
+      change('2026-10-05T20:00:00', '2026-10-05', -3_473, -4_707, lamp, { kind: 'added' }),
+      change('2026-10-05T20:05:00', '2026-10-05', -4_707, -3_473, lamp, { kind: 'removed' }),
+      // Gave back: not why the week went below zero.
+      change('2026-10-06T08:00:00', '2026-10-05', -4_473, -3_473, { kind: 'purchase', id: 2, title: 'Подарок', wish: null }, { kind: 'done' }),
+      change('2026-10-06T09:10:00', '2026-10-05', -2_473, -3_473, { kind: 'limit' }, { kind: 'amount', from: 46_000, to: 45_000 }),
+      change('2026-10-01T10:00:00', '2026-10-19', 45_000, 43_500, { kind: 'purchase', id: 4, title: 'Стрижка', wish: null }, { kind: 'added' }),
+      change('2026-10-06T10:00:00', '2026-10-19', 43_500, 42_000, { kind: 'purchase', id: 4, title: 'Стрижка', wish: null }, { kind: 'amount', from: 0, to: 1_500 }),
+    ];
+    const why = plain(weekWhyScreen(data(), { ...saved(), changes }, budget));
+    const rows = (list: Array<{ title: string; details: string; amount: number }>) => list.map((r) => [r.title, r.details, r.amount]);
+    assert.equal(why.changes.title, 'Что изменилось');
+    assert.deepEqual(rows(why.changes.rows), [
+      ['Бюджет недели', '46 000 → 45 000 · сегодня', -1_000],
+      ['Ботинки Савве', 'Таня · в план · вчера', -8_000],
+      ['Александр А.', 'Кирилл · в неделю · вчера', -40_000],
+    ]);
+    const [limit, purchase, expense] = why.changes.rows;
+    assert.equal(limit.limit, true, 'what the week allows opens its form');
+    assert.deepEqual(why.limit, { amount: 45_000, usual: 45_000 });
+    assert.deepEqual([purchase.purchase.id, purchase.actions.map((a: { action: string }) => a.action), purchase.spending], [1, ['move', 'done'], null], 'a purchase opens its form');
+    assert.ok(why.weekChoices.length > 0);
+    assert.equal(expense.spending, 'transfer', 'an expense opens to be marked');
+
+    // A week ahead has nothing to begin with but what the current one began with.
+    const ahead = plain(weekWhyScreen(data(), { ...saved(), changes }, { ...budget, week: '2026-10-19' }));
+    assert.deepEqual(rows(ahead.changes.rows), [['Стрижка', '0 → 1 500 · сегодня', -1_500]]);
+    assert.equal(plain(weekWhyScreen(data(), saved(), budget)).changes, null);
   });
 
   it('tells how full the week is for the wave on the circle', () => {

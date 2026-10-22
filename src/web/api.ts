@@ -6,7 +6,8 @@
 
 import { mainCurrency } from '../balances.ts';
 import type { Suggestion } from '../categorization.ts';
-import { addDays, dateOf, daysInMonth, monthOf, shiftMonth, weekday, type MonthString } from '../dates.ts';
+import { subjectKey, type ChangeWhat, type ExpenseCount, type KeptChange } from '../changes.ts';
+import { addDays, dateOf, daysInMonth, localDate, monthOf, shiftMonth, weekday, type MonthString } from '../dates.ts';
 import { INCOME_MODEL_IDS, incomeModel, incomeValues, monthlyIncome, type Income, type IncomeModelId } from '../income.ts';
 import { listOperations, type Operation } from '../ledger.ts';
 import { paymentDate, regularTotals, regularValues, type RegularExpense } from '../regular.ts';
@@ -332,12 +333,13 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
 
 /**
  * Why a week went below zero, opened from the red figure on the app's circle, as what the user can do about it (see
- * week-why.ts): where the week is, the expenses to check where they count, a lot alone or a run of small ones close
- * together, each with the expenses «Верно» confirms (posted to /api/spending/confirmed); and reminders, each only when
- * it is a lot: to keep to the plan, with the purchases that cost more, and to spend less on the optional, with where
- * the week would be without them. An expense opens to be marked, a purchase or the plan opens the plan. With nothing to
- * check or remind of, `empty` says so. With round figures what is free is as on the circle and the week without the optional to the hundred; the rows
- * keep their amounts.
+ * week-why.ts): where the week is; what changes made in the app took from it (see changeRows), with the week's choices
+ * and what it allows for the forms they open; the expenses to check where they count, a lot alone or a run of small
+ * ones close together, each with the expenses «Верно» confirms (posted to /api/spending/confirmed); and reminders, each
+ * only when it is a lot: to keep to the plan, with the purchases that cost more, and to spend less on the optional,
+ * with where the week would be without them. An expense opens to be marked, a purchase or the plan opens the plan.
+ * With nothing changed, to check or to remind of, `empty` says so. With round figures what is free is as on the circle
+ * and the week without the optional to the hundred; the rows keep their amounts.
  */
 export function weekWhyScreen(data: EntityCollections, saved: SavedBudget, options: BudgetOptions & { week?: string | null }) {
   const { today } = options;
@@ -345,10 +347,12 @@ export function weekWhyScreen(data: EntityCollections, saved: SavedBudget, optio
   const d = loadDashboard(data, saved, { ...options, week: shown, month: monthOfWeek(shown) });
   const { current, symbol } = d;
   const phase = shown > current ? 'ahead' : shown < current ? 'past' : 'current';
-  const why = weekWhy(budgetOf(data, saved, { today, from: shown }), shown, saved.confirmedSpending);
+  const budget = budgetOf(data, saved, { today, from: shown });
+  const why = weekWhy(budget, shown, saved.confirmedSpending);
   const round = (amount: number) => (saved.roundFigures ? Math.round(amount / ROUND_STEP) * ROUND_STEP : amount);
   const total = (rows: Array<{ amount: number | null }>) => rows.reduce((sum, r) => sum + (r.amount ?? 0), 0);
   const check = why.check.map((c) => checkRow(c, d.marking, symbol, today));
+  const changes = changeRows(saved, { week: shown, current, today, symbol, summary: d.week, expenses: [...budget.expenses, ...d.ignored], marking: d.marking });
   const reminders = [];
   if (why.remindPlan) {
     const rows = why.over.map((o) => overspendRow(o, symbol));
@@ -387,10 +391,119 @@ export function weekWhyScreen(data: EntityCollections, saved: SavedBudget, optio
     title: 'Почему неделя ушла в минус',
     subtitle: `Неделя ${weekLabel(shown)}`,
     now: { label: phase === 'current' ? 'сейчас' : phase === 'past' ? 'итог недели' : 'будет', amount: saved.roundFigures ? roundWeek(d.week).free : why.now },
+    changes: changes.length > 0 ? { title: 'Что изменилось', rows: changes } : null,
     check: check.length > 0 ? { title: 'Проверь траты', rows: check } : null,
     reminders,
-    empty: check.length + reminders.length === 0 ? 'Ни крупных трат, ни перерасходов' : null,
+    empty: changes.length + check.length + reminders.length === 0 ? 'Ни крупных трат, ни перерасходов' : null,
+    weekChoices: weekChoices(current),
+    /** What the week allows and the usual amount, for the form of what the week allows; posted as on the week tab. */
+    limit: { amount: d.week.limit, usual: WEEK_LIMIT },
   };
+}
+
+/**
+ * What changes made in the app took from a week, as rows: one for each thing changed — a purchase, what the week
+ * allows, an expense — with what its changes took together, the latest first. Only changes made since the week began
+ * count, or for a week ahead since the current one began: what was planned before is what the week began with. A thing
+ * whose changes gave back as much as they took is left out. The details say who changed it, when the phone was named,
+ * what happened and on which day. A purchase opens its form, or the plan once it is gone from the week; the money a
+ * wish's plan holds opens the wish; an expense opens its sheet; what the week allows opens its form.
+ */
+function changeRows(
+  saved: Pick<SavedBudget, 'changes' | 'wishPayments'>,
+  { week, current, today, symbol, summary, expenses, marking }: {
+    week: DateString;
+    current: DateString;
+    today: DateString;
+    symbol: string;
+    summary: WeekSummary;
+    /** The expenses to find the changed ones in, those not counted at all too. */
+    expenses: readonly Operation[];
+    marking: Pick<Marking, 'marks' | 'purchases'>;
+  },
+) {
+  const since = week < current ? week : current;
+  const bySubject = new Map<string, KeptChange[]>();
+  for (const c of saved.changes ?? []) {
+    if (c.week !== week || localDate(new Date(c.at)) < since) continue;
+    const key = subjectKey(c.subject);
+    bySubject.set(key, [...(bySubject.get(key) ?? []), c]);
+  }
+  const rows = [...bySubject].flatMap(([key, list]): ChangeRow[] => {
+    const amount = list.reduce((sum, c) => sum + c.after - c.before, 0);
+    if (amount > -0.5) return [];
+    const last = list.at(-1)!;
+    const who = [...new Set(list.flatMap((c) => (c.who ? [c.who] : [])))].join(', ');
+    const what = [...new Set(list.map((c) => changeWords(c.what, week)))].join(', ');
+    const details = [who, what, dayTitle(localDate(new Date(last.at)), today).toLowerCase()].filter(Boolean).join(' · ');
+    const fields = { id: `change-${key}`, details, amount };
+    const opens = { at: last.at, spending: null, purchase: null, actions: [], wish: null, limit: false, plan: false };
+    const subject = last.subject;
+    switch (subject.kind) {
+      case 'purchase': {
+        const status = summary.purchases.find((p) => p.purchase.id === subject.id);
+        if (status) {
+          const p = purchaseRow(status, current, symbol, saved);
+          return [{ ...row({ ...fields, title: p.title, icon: p.icon, color: p.color, mark: p.mark }), ...opens, purchase: p.purchase, actions: p.actions, wish: p.wish }];
+        }
+        const icon = subject.wish === null ? categoryIcon(subject.title) : 'sparkles';
+        const look = row({ ...fields, title: subject.title, icon, color: categoryColor(`purchase-${subject.id}`, null, subject.title) });
+        return [{ ...look, ...opens, wish: subject.wish, plan: subject.wish === null }];
+      }
+      case 'expense': {
+        const o = expenses.find((e) => e.id === subject.id);
+        const base = o ? expenseRow(marking, o) : row({ ...fields, title: subject.title, icon: 'receipt', color: toneColor('gray') });
+        return [{ ...base, ...fields, muted: false, ...opens, spending: subject.id }];
+      }
+      case 'limit':
+        return [{ ...row({ ...fields, title: 'Бюджет недели', icon: 'wallet', color: toneColor('violet') }), ...opens, limit: true }];
+    }
+  });
+  return rows.sort((a, b) => b.at - a.at).map(({ at: _, ...change }) => change);
+}
+
+/** A change as a row, with what it opens: an expense, a purchase with what its form offers, a wish, the plan or what the week allows. */
+type ChangeRow = Row & {
+  at: number;
+  spending: string | null;
+  purchase: ReturnType<typeof purchaseRow>['purchase'] | null;
+  actions: ReturnType<typeof purchaseActions>;
+  wish: number | null;
+  limit: boolean;
+  plan: boolean;
+};
+
+/** What happened to what a change was about, as the week it moved sees it: «в план», «3 000 → 3 500», «из дополнительных». */
+function changeWords(what: ChangeWhat, week: DateString): string {
+  switch (what.kind) {
+    case 'added':
+      return 'в план';
+    case 'removed':
+      return 'убрано из плана';
+    case 'moved':
+      return what.to === week ? `перенесено с ${dayMonth(what.from)}` : `перенесено на ${dayMonth(what.to)}`;
+    case 'amount':
+      return `${num(what.from)} → ${num(what.to)}`;
+    case 'envelope':
+      return what.to === 'week' ? 'из дополнительных' : 'в дополнительные';
+    case 'done':
+      return 'завершено';
+    case 'reopened':
+      return 'снова в плане';
+    case 'counted':
+      return countedWords(what.from, what.to);
+  }
+}
+
+/** Where an expense went: what it pays now, where it counts, or what it no longer pays. */
+function countedWords(from: ExpenseCount, to: ExpenseCount): string {
+  if (to.envelope === 'ignored') return 'не учитывается';
+  if (to.paid) return to.paid.kind === 'saving' ? `отложено на «${to.paid.title}»` : `оплата «${to.paid.title}»`;
+  if (to.envelope === 'extra') return 'в дополнительные';
+  if (to.envelope === 'outside') return 'вне бюджета';
+  if (from.paid) return `отвязана от «${from.paid.title}»`;
+  if (from.envelope === 'ignored') return 'снова учитывается';
+  return 'в неделю';
 }
 
 /**

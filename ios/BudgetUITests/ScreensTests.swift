@@ -23,13 +23,21 @@ final class ScreensTests: XCTestCase {
         XCTAssert(reserved.waitForExistence(timeout: 15), "the main page loads")
         shot("home")
 
-        // A week past its amount tells why from its red figure: expenses to check and reminders, opened to their rows.
+        // A week past its amount tells why from its red figure: what changed, expenses to check and reminders, opened to
+        // their rows.
         let why = app.buttons["week-why"]
         if why.exists {
             why.tap()
             if app.descendants(matching: .any)["why-now"].waitForExistence(timeout: 10) {
                 sleep(2)
                 shot("week-why")
+                // A purchase changed in the app opens its form.
+                let change = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'change-purchase-'")).firstMatch
+                if change.exists {
+                    change.tap()
+                    if sheet("purchase-sheet").waitForExistence(timeout: 5) { shot("week-why-change") }
+                    app.buttons["Отмена"].tap()
+                }
                 for id in ["remind-optional", "remind-plan"] where app.buttons[id].exists { app.buttons[id].tap() }
                 shot("week-why-reminders")
                 app.swipeUp()

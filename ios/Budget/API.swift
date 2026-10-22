@@ -24,6 +24,8 @@ struct APIClient {
     let base: URL
     /// Empty for a server without ACCESS_TOKEN, such as the one on the Mac.
     let token: String
+    /// Whose phone this is, for the server to say who made a change; empty when the phone has no name.
+    var who = ""
 
     func get<T: Decodable>(_ path: String, _ query: [String: String?] = [:]) async throws -> T {
         try JSONDecoder().decode(T.self, from: await data(path, query))
@@ -43,6 +45,7 @@ struct APIClient {
         var request = request(url(path))
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        if !who.isEmpty { request.setValue(Self.header(who), forHTTPHeaderField: "X-Budget-Who") }
         request.httpBody = Data(form.map { "\(Self.encode($0))=\(Self.encode($1))" }.sorted().joined(separator: "&").utf8)
         _ = try await load(request)
     }
@@ -93,6 +96,12 @@ struct APIClient {
         let failure = try? JSONDecoder().decode(Failure.self, from: data)
         if let errors = failure?.errors { throw APIError.invalid(errors) }
         throw APIError.server(failure?.error ?? "Сервер ответил ошибкой \(http.statusCode).")
+    }
+
+    /// Percent-encodes a header's value: a header is ASCII, and letters of other alphabets do not pass as they are.
+    private static func header(_ text: String) -> String {
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+        return text.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
     }
 
     /// Percent-encodes a form value; `+` and `&` must not pass as they are.
