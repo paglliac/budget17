@@ -559,6 +559,104 @@ struct LilacFieldLabel: View {
     }
 }
 
+/// A soft lilac cloud under the one block of a page that is written in, as the user's picture of 2026-10-22 draws it
+/// under what an expense was: rounder at the top left, trailing off at the bottom right.
+struct LilacBlob: Shape {
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
+        let point = { (x: CGFloat, y: CGFloat) in CGPoint(x: rect.minX + x * w, y: rect.minY + y * h) }
+        var path = Path()
+        path.move(to: point(0.04, 0.3))
+        path.addCurve(to: point(0.56, 0.04), control1: point(0.1, 0.02), control2: point(0.36, 0.1))
+        path.addCurve(to: point(0.98, 0.34), control1: point(0.76, -0.02), control2: point(0.99, 0.1))
+        path.addCurve(to: point(0.78, 0.9), control1: point(0.97, 0.58), control2: point(0.94, 0.84))
+        path.addCurve(to: point(0.22, 0.94), control1: point(0.6, 0.97), control2: point(0.42, 0.86))
+        path.addCurve(to: point(0.04, 0.3), control1: point(0.0, 1.02), control2: point(-0.02, 0.56))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// A line of a sheet that tells one thing about what is open and offers one step: its icon or photo on a large disc,
+/// grey or in a colour, what it is, a muted line under it, and the step in violet with an arrow. A tap on the line unfolds what is
+/// under it, and a chevron says so when there is one. A hairline parts it from the line above.
+struct LilacStepRow: View {
+    let icon: String
+    /// nil draws the disc grey.
+    var color: Color?
+    /// A photo on the disc instead of the icon, such as a category's.
+    var photo: String?
+    let title: String
+    var detail: String?
+    var step: String?
+    /// Whether what is under the line is unfolded, for its chevron; nil for a line without one.
+    var open: Bool?
+    /// For the line's tap, and for its step.
+    var identifier: String?
+    var stepIdentifier: String?
+    let toggle: () -> Void
+    var act: () -> Void = {}
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Group {
+                if let photo {
+                    RemotePhoto(path: photo).frame(width: 50, height: 50).background(color ?? Lilac.track).clipShape(Circle())
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 19, weight: .medium))
+                        .foregroundStyle(color ?? Lilac.muted)
+                        .frame(width: 50, height: 50)
+                        .background(color.map { $0.opacity(0.14) } ?? Lilac.track.opacity(0.7), in: Circle())
+                }
+            }
+            .allowsHitTesting(false)
+            VStack(alignment: .leading, spacing: 3) {
+                Group {
+                    Text(title).font(.body).foregroundStyle(Color.primary).lineLimit(1).minimumScaleFactor(0.85)
+                    if let detail {
+                        Text(detail).font(.callout).foregroundStyle(Lilac.muted).lineLimit(3)
+                    }
+                }
+                .allowsHitTesting(false)
+                if let step {
+                    Button(action: act) {
+                        HStack(spacing: 8) {
+                            Text(step)
+                            Image(systemName: "arrow.right")
+                        }
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(Lilac.accent)
+                        .frame(minHeight: 30)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 6)
+                    .accessibilityIdentifier(stepIdentifier ?? step)
+                }
+            }
+            Spacer(minLength: 8)
+            if let open {
+                Image(systemName: "chevron.down")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(open ? Lilac.accent : Lilac.muted)
+                    .rotationEffect(.degrees(open ? 180 : 0))
+                    .allowsHitTesting(false)
+            }
+        }
+        .padding(.vertical, 18)
+        // The line's tap lies under it, so the step on top keeps its own.
+        .background {
+            Button(action: toggle) { Color.clear.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .accessibilityLabel(title)
+                .accessibilityIdentifier(identifier ?? title)
+                .accessibilityValue(open == true ? "открыто" : "")
+        }
+        .overlay(alignment: .top) { Rectangle().fill(Lilac.hairline).frame(height: 0.5) }
+    }
+}
+
 /// A screen's title in the new style, large, with buttons at its end such as search or the gear.
 struct LilacTitle<Trailing: View>: View {
     let text: String

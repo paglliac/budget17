@@ -1,16 +1,18 @@
 import SwiftUI
 
-/// An expense opened to mark it. On top what it is: whom it went to, how much and when, what the bank said and what is
-/// suggested; the shop's name leaves for the shop on its tab, to name and dress it for all its expenses (see
-/// ShopsPanel). Then what it was for — a category, or the payment of a regular expense or a purchase it made — alone on
-/// a card; a tap on it unfolds all of them as tiles and cards to pick another, and a pick folds them back. While nothing
-/// is picked they are unfolded. Under it whether the expense was needed or could have been done without, what the user
-/// wrote about it, and at the bottom where it counts: the place picked alone on a large card, which unfolds the others
-/// the same way. Opened from the expenses that wait for a category, it steps through them: «1 из 4». An income
-/// opens the same way, only it pays nothing, so it takes just a category, and it counts among the incomes or not at all.
-/// Choices post to /api/spending/:id/:choice, the description to /api/spending/:id/description when its field is left.
+/// An expense opened to mark it, after the user's picture of 2026-10-22. On top whom it went to, when and from where,
+/// and the exact amount. Then what the user writes about it, large on a lilac cloud, sent once typing pauses. Under it
+/// three lines, each with one step: what of the plan it paid, whose step unfolds the payments, or links the one that
+/// looks like it; where it counts, with what that means for the week and «Вернуть в неделю» when it was moved out of it;
+/// and «Категория и другие настройки» with the category's icon and whether it could have been done without, which unfolds the
+/// categories as tiles, the switch, the shop and what else the bank said. A tap on a line unfolds its choices, and a
+/// pick folds them back. While the expense has neither a category nor a payment the last line is unfolded. Opened
+/// from the expenses that wait for a category, it steps through them: «1 из 4». An income opens the same way, only it
+/// pays nothing, so it has no line of the plan, and it counts among the incomes or not at all.
+/// Choices post to /api/spending/:id/:choice, the description to /api/spending/:id/description.
 struct MarkingSheet: View {
-    enum Mode: Hashable { case category, payment }
+    /// The lines of the sheet that unfold their choices.
+    private enum Part { case plan, place, more }
 
     /// The expenses to step through, this one among them; empty for one expense alone.
     let queue: [String]
@@ -18,19 +20,23 @@ struct MarkingSheet: View {
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openShop) private var openShop
-    /// nil until picked: the payments when the expense paid one or one is suggested, the categories otherwise.
-    @State private var mode: Mode?
     /// A choice made and not yet confirmed by the server, shown as made already.
     @State private var applying: String?
     @State private var showOthers = false
-    /// Whether the categories and payments are unfolded; nil until the card is tapped, unfolded while nothing is picked.
-    @State private var picking: Bool?
-    /// Whether the places the expense can count in are unfolded; folded to the picked one until tapped.
-    @State private var placing = false
+    /// The lines unfolded by a tap.
+    @State private var unfolded: Set<Part> = []
+    /// Whether «Категория и другие настройки» was tapped open or shut; until then it is open while nothing is picked.
+    @State private var more: Bool?
+    /// «Трата» or «Доход», once the server says which.
+    @State private var heading = "Трата"
     /// The description as typed, until the server sends it back.
     @State private var draft: String?
-    /// The draft last sent, so leaving the field and then the sheet sends it once.
+    /// The draft last sent, so a pause, leaving the field and then the sheet send it once.
     @State private var sent: String?
+    /// Whether the server has kept the description since it was last typed.
+    @State private var kept = false
+    /// The description waiting for a pause in typing to be sent.
+    @State private var pause: Task<Void, Never>?
     @FocusState private var writing: Bool
     @State private var error: String?
     @State private var saved = 0
@@ -45,12 +51,12 @@ struct MarkingSheet: View {
             topBar
             Screen(path: "spending/\(id)") { (s: SpendingScreen) in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 0) {
                         header(s)
-                        choice(s)
-                        optional(s)
                         description(s)
-                        envelopes(s)
+                        if !s.isIncome { plan(s) }
+                        place(s)
+                        settings(s)
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 24)
@@ -58,7 +64,9 @@ struct MarkingSheet: View {
                 .scrollIndicators(.hidden)
                 .scrollDismissesKeyboard(.interactively)
                 .accessibilityIdentifier("marking")
+                .onAppear { heading = s.isIncome ? "Доход" : "Трата" }
                 .onChange(of: s) {
+                    heading = s.isIncome ? "Доход" : "Трата"
                     withAnimation(.snappy) { applying = nil }
                     if !writing, let draft, Self.oneLine(draft) == (s.description ?? "") {
                         self.draft = nil
@@ -95,40 +103,45 @@ struct MarkingSheet: View {
         saveDescription()
         withAnimation(.snappy) {
             id = other
-            mode = nil
             applying = nil
             showOthers = false
-            picking = nil
-            placing = false
+            unfolded = []
+            more = nil
             draft = nil
             sent = nil
+            kept = false
         }
     }
 
+    /// Back on the left, the title in the middle, and in a queue where the expense is in it with arrows up and down to
+    /// the one before and after, as Mail steps through letters.
     private var topBar: some View {
-        HStack(spacing: 4) {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark").font(.system(size: 18, weight: .medium)).frame(width: 40, height: 40).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Готово")
-            Spacer()
-            if let index, queue.count > 1 {
-                Button { step(to: queue[index - 1]) } label: { Image(systemName: "chevron.left").frame(width: 36, height: 36) }
-                    .buttonStyle(.plain)
-                    .disabled(index == 0)
-                    .opacity(index == 0 ? 0.3 : 1)
-                    .accessibilityLabel("Предыдущая")
-                Text("\(index + 1) из \(queue.count)").font(.subheadline).foregroundStyle(Lilac.muted).monospacedDigit()
-                Button { if let next { step(to: next) } } label: { Image(systemName: "chevron.right").frame(width: 36, height: 36) }
-                    .buttonStyle(.plain)
-                    .disabled(next == nil)
-                    .opacity(next == nil ? 0.3 : 1)
-                    .accessibilityLabel("Следующая")
+        ZStack {
+            Text(heading).font(.headline)
+            HStack(spacing: 2) {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 20, weight: .medium)).frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Готово")
+                Spacer()
+                if let index, queue.count > 1 {
+                    Text("\(index + 1) из \(queue.count)").font(.subheadline).foregroundStyle(Lilac.muted).monospacedDigit().padding(.trailing, 4)
+                    Button { step(to: queue[index - 1]) } label: { Image(systemName: "chevron.up").frame(width: 34, height: 44) }
+                        .buttonStyle(.plain)
+                        .disabled(index == 0)
+                        .opacity(index == 0 ? 0.3 : 1)
+                        .accessibilityLabel("Предыдущая")
+                    Button { if let next { step(to: next) } } label: { Image(systemName: "chevron.down").frame(width: 34, height: 44) }
+                        .buttonStyle(.plain)
+                        .disabled(next == nil)
+                        .opacity(next == nil ? 0.3 : 1)
+                        .accessibilityLabel("Следующая")
+                }
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 10)
+        .padding(.top, 8)
     }
 
     // MARK: - What is chosen
@@ -143,13 +156,13 @@ struct MarkingSheet: View {
     }
 
     /// The payment the expense made, among the likely ones or the others.
-    private func currentPayment(_ s: SpendingScreen) -> (label: String, icon: String)? {
-        if let applying, applying.hasPrefix("regular-") || applying.hasPrefix("purchase-") {
-            if let c = s.payments.choices.first(where: { $0.choice == applying }) { return (c.label, c.icon ?? "repeat") }
-            if let o = s.payments.others.flatMap(\.options).first(where: { $0.value == applying }) { return (o.label, o.icon ?? "repeat") }
+    private func currentPayment(_ s: SpendingScreen) -> (label: String, detail: String?, icon: String)? {
+        if let applying, ["regular-", "purchase-", "wish-", "save-"].contains(where: applying.hasPrefix) {
+            if let c = s.payments.choices.first(where: { $0.choice == applying }) { return (c.label, c.detail, c.icon ?? "repeat") }
+            if let o = s.payments.others.flatMap(\.options).first(where: { $0.value == applying }) { return (o.label, nil, o.icon ?? "repeat") }
         }
         guard let key = current(s.payments.choices, clearedBy: "unlink"), let c = s.payments.choices.first(where: { $0.choice == key }) else { return nil }
-        return (c.label, c.icon ?? "repeat")
+        return (c.label, c.detail, c.icon ?? "repeat")
     }
 
     private func currentCategory(_ s: SpendingScreen) -> Choice? {
@@ -157,45 +170,43 @@ struct MarkingSheet: View {
         return s.categories.choices.first { $0.choice == key }
     }
 
-    /// Unfolded when tapped open, or while the expense has neither a category nor a payment.
-    private func isPicking(_ s: SpendingScreen) -> Bool {
-        picking ?? (currentPayment(s) == nil && currentCategory(s) == nil)
+    /// Whether the expense could have been done without, as switched a moment ago or as the server says.
+    private func isOptional(_ s: SpendingScreen) -> Bool {
+        applying == "optional" ? true : applying == "required" ? false : s.optional?.current ?? false
     }
 
-    private func shownMode(_ s: SpendingScreen) -> Mode {
-        if s.isIncome { return .category }
-        if let mode { return mode }
-        let paid = s.payments.choices.contains { $0.isCurrent || $0.isSuggested }
-        return paid && s.categories.choices.allSatisfy { !$0.isCurrent } ? .payment : .category
+    private func canUndo(_ s: SpendingScreen, _ undo: String) -> Bool {
+        applying == nil && s.undo.contains { $0.choice == undo }
     }
 
-    /// The lists of the sheet that unfold to pick from.
-    private enum List { case choices, places }
+    private func isOpen(_ part: Part, _ s: SpendingScreen) -> Bool {
+        part == .more ? more ?? (currentPayment(s) == nil && currentCategory(s) == nil) : unfolded.contains(part)
+    }
 
-    /// Picks a category or a payment, and folds the others away once its tick has shown.
-    private func pick(_ choice: String) {
-        picking = true
+    private func toggle(_ part: Part, _ s: SpendingScreen) {
+        let open = isOpen(part, s)
+        withAnimation(.snappy) {
+            if part == .more {
+                more = !open
+            } else if open {
+                unfolded.remove(part)
+            } else {
+                unfolded.insert(part)
+            }
+        }
+    }
+
+    /// Makes a choice, and folds the line it was made on once its tick has shown, unless the sheet has moved to another
+    /// expense by then.
+    private func pick(_ choice: String, folding part: Part) {
+        if part == .more { more = true }
         choose(choice)
-        fold(.choices)
-    }
-
-    /// Picks where the expense counts, and folds the other places away once its tick has shown.
-    private func place(_ choice: String) {
-        choose(choice)
-        fold(.places)
-    }
-
-    /// Folds a list a moment after a pick, unless the sheet has moved to another expense by then.
-    private func fold(_ list: List) {
         let spending = id
         Task {
             try? await Task.sleep(for: .milliseconds(350))
             guard id == spending else { return }
             withAnimation(.snappy) {
-                switch list {
-                case .choices: picking = false
-                case .places: placing = false
-                }
+                if part == .more { more = false } else { unfolded.remove(part) }
             }
         }
     }
@@ -223,155 +234,264 @@ struct MarkingSheet: View {
         return s.isIncome ? ("arrowDownLeft", Palette.color("green"), nil) : ("tag", Palette.color("gray"), nil)
     }
 
-    /// The expense in the middle: its shop's logo on a large disc, or else what it is for, the exact amount, whom it went
-    /// to, when and from where, what else the bank said and what is suggested. The shop's name leaves for the shop: the
-    /// title itself, or a line under it when the title is what the expense paid.
+    /// The expense in a line: its shop's logo, or else what it went for, on a disc; its shop, or else its title, over the
+    /// day and where from; the exact amount at the end. What it paid has a line of its own, and the time is among what
+    /// else the bank said.
     private func header(_ s: SpendingScreen) -> some View {
         let (icon, color, photo) = look(s)
-        let shopName = s.shop.map { $0.title.isEmpty ? $0.placeholder : $0.title }
-        return VStack(spacing: 6) {
+        return HStack(spacing: 16) {
             ZStack {
-                Circle().fill(Lilac.surface).frame(width: 108, height: 108).shadow(color: .black.opacity(0.07), radius: 16, y: 6)
                 if let logo = s.shop?.logo {
-                    LilacMarker.logo(logo).view.frame(width: 76, height: 76)
+                    LilacMarker.logo(logo).view
                 } else if let photo {
-                    CategoryDisc(icon: icon, color: color, photo: photo, size: 76)
+                    CategoryDisc(icon: icon, color: color, photo: photo, size: 52)
                 } else {
-                    Circle().fill(color.opacity(0.15)).frame(width: 60, height: 60)
-                    Image(systemName: Icons.symbol(icon)).font(.system(size: 24, weight: .semibold)).foregroundStyle(color)
+                    Circle().fill(color.opacity(0.14))
+                    Image(systemName: Icons.symbol(icon)).font(.system(size: 20, weight: .medium)).foregroundStyle(color)
                 }
             }
-            .padding(.bottom, 10)
-            Text(Money.exact(s.amount, s.symbol)).font(.system(size: 38, weight: .bold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
-            if let found = s.shop, shopName == s.title {
-                shopButton(found, name: s.title, font: .title3, color: .primary)
-            } else {
-                Text(s.title).font(.title3).multilineTextAlignment(.center)
-                if let found = s.shop, let shopName { shopButton(found, name: shopName, font: .subheadline, color: Lilac.muted) }
+            .frame(width: 52, height: 52)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(s.shop.map { $0.title.isEmpty ? $0.placeholder : $0.title } ?? s.title).font(.system(size: 19, weight: .medium)).lineLimit(2)
+                Text("\(Self.day(s.when)) · \(s.account)").font(.callout).foregroundStyle(Lilac.muted).lineLimit(1).minimumScaleFactor(0.8)
             }
-            Text("\(s.when) · \(s.account)").font(.subheadline).foregroundStyle(Lilac.muted)
-            ForEach(s.notes + (s.hint.map { [$0] } ?? []), id: \.self) { note in
-                Text(note).font(.subheadline).foregroundStyle(Lilac.muted).multilineTextAlignment(.center)
-            }
+            Spacer(minLength: 8)
+            Text(Money.exact(s.amount, s.symbol)).font(.system(size: 20, weight: .bold)).monospacedDigit().lineLimit(1).fixedSize()
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 4)
+        .padding(.top, 14)
+        .padding(.bottom, 18)
     }
 
-    /// The shop's name with a pencil, which closes the sheet for the shop on its tab.
-    private func shopButton(_ found: Shop, name: String, font: Font, color: Color) -> some View {
+    /// What the user wrote about the expense, large on a lilac cloud; it is sent when typing pauses, on return and when
+    /// the field or the sheet is left, and says so once the server has it.
+    private func description(_ s: SpendingScreen) -> some View {
+        let text = Binding(
+            get: { draft ?? s.description ?? "" },
+            set: { typed in
+                if typed.contains("\n") {
+                    draft = typed.replacingOccurrences(of: "\n", with: " ")
+                    writing = false
+                } else {
+                    draft = typed
+                    waitForPause()
+                }
+                withAnimation(.snappy) { kept = false }
+            }
+        )
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(s.isIncome ? "Что это за доход?" : "Что это за трата?").font(.subheadline).foregroundStyle(Lilac.muted)
+            TextField(s.isIncome ? "Например, долг" : "Например, обед", text: text, axis: .vertical)
+                .font(.system(size: 28))
+                .lineLimit(1...4)
+                .focused($writing)
+                .submitLabel(.done)
+                .tint(Lilac.accent)
+                .accessibilityIdentifier("description")
+            if kept && !(draft ?? s.description ?? "").isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Lilac.accent)
+                        .frame(width: 26, height: 26)
+                        .background(Lilac.accent.opacity(0.16), in: Circle())
+                    Text("Сохранено только что").font(.subheadline).foregroundStyle(Lilac.muted)
+                }
+                .transition(.opacity)
+                .accessibilityIdentifier("description-kept")
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 40)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            LilacBlob()
+                .fill(LinearGradient(colors: [Lilac.tint.opacity(0.7), Lilac.tint, Lilac.tint.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .blur(radius: 10)
+                .padding(.horizontal, -20)
+        }
+        .padding(.bottom, 8)
+    }
+
+    /// Sends the description once typing stops for a moment.
+    private func waitForPause() {
+        pause?.cancel()
+        pause = Task {
+            try? await Task.sleep(for: .milliseconds(900))
+            guard !Task.isCancelled else { return }
+            saveDescription()
+        }
+    }
+
+    /// Sends the description typed, once; an empty one takes it away.
+    private func saveDescription() {
+        pause?.cancel()
+        guard let draft, draft != sent else { return }
+        sent = draft
+        let path = "spending/\(id)/description"
+        let spending = id
+        Task {
+            do {
+                try await session.send(path, ["description": draft])
+                saved += 1
+                if id == spending, self.draft == draft { withAnimation(.snappy) { kept = true } }
+            } catch {
+                sent = nil
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    /// The day of «21 октября, 17:41», without the time.
+    private static func day(_ when: String) -> String {
+        when.components(separatedBy: ", ").first ?? when
+    }
+
+    /// The description as the server keeps it: in one line, without extra spaces.
+    private static func oneLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    /// What of the plan the expense paid: the payment with its day or plan, whose step unfolds the others; or, linked to
+    /// nothing, the payment it looks like with a step that links it, or a step that unfolds the payments.
+    private func plan(_ s: SpendingScreen) -> some View {
+        let payment = currentPayment(s)
+        let likely = payment == nil ? s.payments.choices.first(where: \.isSuggested) : nil
+        let open = isOpen(.plan, s)
+        return VStack(alignment: .leading, spacing: 0) {
+            LilacStepRow(
+                icon: Icons.symbol(payment?.icon ?? "tag"),
+                color: payment == nil ? nil : Lilac.accent,
+                title: payment?.label ?? "Не связано с планом",
+                detail: payment?.detail ?? likely.map { ["Похоже на «\($0.label)»", $0.detail].compactMap { $0 }.joined(separator: " · ") },
+                step: payment != nil ? "Изменить" : likely != nil ? "Связать" : "Связать с покупкой",
+                identifier: "plan",
+                stepIdentifier: "plan-step",
+                toggle: { toggle(.plan, s) },
+                act: {
+                    if let likely { pick(likely.choice, folding: .plan) } else { toggle(.plan, s) }
+                }
+            )
+            if open {
+                VStack(alignment: .leading, spacing: 10) {
+                    payments(s)
+                    if canUndo(s, "unlink") {
+                        LilacInlineAction(label: s.undo.first { $0.choice == "unlink" }?.label ?? "Отвязать") { pick("unlink", folding: .plan) }
+                    }
+                }
+                .padding(.bottom, 18)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    /// Where the expense counts and what that means for the week, with a step back into the week when it was moved out
+    /// of it; an income's step counts it or not. A tap on the line unfolds every place to pick another.
+    private func place(_ s: SpendingScreen) -> some View {
+        let picked = current(s.envelopes, clearedBy: "") ?? s.envelopes.first?.choice ?? "week"
+        let words = Self.placeWords[s.isIncome && picked == "ignored" ? "ignored-income" : picked] ?? (s.envelopes.first { $0.choice == picked }?.label ?? "", "")
+        let back: (label: String, choice: String)? =
+            s.isIncome ? (picked == "counted" ? ("Не учитывать", "ignored") : ("Учитывать", "counted"))
+            : picked != "week" && s.envelopes.contains(where: { $0.choice == "week" }) ? ("Вернуть в неделю", "week") : nil
+        let open = isOpen(.place, s)
+        return VStack(alignment: .leading, spacing: 0) {
+            LilacStepRow(
+                icon: Self.envelopeIcons[picked] ?? "circle",
+                color: picked == "ignored" ? nil : Lilac.accent,
+                title: words.title,
+                detail: words.detail.isEmpty ? nil : "\(Money.text(s.amount, s.symbol)) \(words.detail)",
+                step: back?.label ?? (picked == "week" ? "Перенести" : "Изменить"),
+                identifier: "place",
+                stepIdentifier: "place-step",
+                toggle: { toggle(.place, s) },
+                act: {
+                    if let back { pick(back.choice, folding: .place) } else { toggle(.place, s) }
+                }
+            )
+            if open {
+                VStack(spacing: 10) {
+                    ForEach(Array(s.envelopes.enumerated()), id: \.element.id) { index, choice in
+                        PaymentCard(label: choice.label, detail: choice.detail, symbol: Self.envelopeIcons[choice.choice] ?? "circle",
+                                    selected: choice.choice == picked, suggested: false, compact: true) {
+                            if choice.choice != picked { pick(choice.choice, folding: .place) }
+                        }
+                        .modifier(Unfold(index: index))
+                        .accessibilityLabel(choice.label)
+                    }
+                }
+                .padding(.bottom, 18)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    /// The category, by its icon on its colour, and whether the expense could have been done without, in a line that
+    /// unfolds the categories as tiles to pick another, the switch, the shop and what else the bank said; without a
+    /// category, a grey tag and the one it looks like with a step that takes it.
+    private func settings(_ s: SpendingScreen) -> some View {
+        let category = currentCategory(s)
+        let likely = category == nil ? s.categories.choices.first(where: \.isSuggested) : nil
+        let named = category?.label ?? likely.map { "Похоже на «\($0.label)»" } ?? (s.categories.choices.isEmpty ? nil : "Без категории")
+        let summary = [named, isOptional(s) ? s.optional?.label : nil].compactMap { $0 }.joined(separator: " · ")
+        let open = isOpen(.more, s)
+        return VStack(alignment: .leading, spacing: 0) {
+            LilacStepRow(
+                icon: Icons.symbol(category?.icon ?? "tag"),
+                color: category.map { Palette.color($0.color ?? "gray") },
+                photo: category?.photo,
+                title: "Категория и другие настройки",
+                detail: summary.isEmpty ? nil : summary,
+                step: likely == nil ? nil : "Принять",
+                open: open,
+                identifier: "more",
+                stepIdentifier: "more-step",
+                toggle: { toggle(.more, s) },
+                act: { if let likely { pick(likely.choice, folding: .more) } }
+            )
+            if open {
+                VStack(alignment: .leading, spacing: 14) {
+                    categories(s)
+                    if canUndo(s, "uncategorize") {
+                        LilacInlineAction(label: s.undo.first { $0.choice == "uncategorize" }?.label ?? "Убрать категорию") { pick("uncategorize", folding: .more) }
+                    }
+                    optional(s)
+                    if let found = s.shop { shopButton(found) }
+                    ForEach([s.when] + s.notes, id: \.self) { note in
+                        Text(note).font(.subheadline).foregroundStyle(Lilac.muted)
+                    }
+                }
+                .padding(.bottom, 18)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    /// The shop with a pencil, which closes the sheet for the shop on its tab, to name and dress it for all its expenses.
+    private func shopButton(_ found: Shop) -> some View {
         Button {
             dismiss()
             openShop(found)
         } label: {
-            HStack(spacing: 6) {
-                Text(name).font(font).foregroundStyle(color).multilineTextAlignment(.center)
-                Image(systemName: "pencil").font(.footnote.weight(.semibold)).foregroundStyle(Lilac.muted)
+            HStack(spacing: 12) {
+                Image(systemName: "storefront").font(.subheadline).foregroundStyle(Lilac.muted)
+                Text("Магазин «\(found.title.isEmpty ? found.placeholder : found.title)»").foregroundStyle(Color.primary)
+                Spacer(minLength: 8)
+                Image(systemName: "pencil").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.muted)
             }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 50)
+            .background(Lilac.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("shop")
     }
 
-    /// What the expense was for, alone on a card that unfolds the categories and payments under it to pick another; an
-    /// income unfolds only the categories.
-    private func choice(_ s: SpendingScreen) -> some View {
-        let open = isPicking(s)
-        return VStack(alignment: .leading, spacing: 14) {
-            picked(s, open: open)
-            if open {
-                VStack(alignment: .leading, spacing: 14) {
-                    if !s.isIncome {
-                        LilacSegmented(
-                            items: [Segment(value: Mode.category, label: "Категория"), Segment(value: Mode.payment, label: "Платёж")],
-                            selection: Binding(get: { shownMode(s) }, set: { mode = $0 }),
-                            width: nil
-                        )
-                    }
-                    Group {
-                        switch shownMode(s) {
-                        case .category: categories(s)
-                        case .payment: payments(s)
-                        }
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
-                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: -10)), removal: .opacity.combined(with: .scale(scale: 0.97, anchor: .top))))
-            }
-        }
-    }
-
-    /// The payment the expense made or its category, on its colour; the cross takes back what the app said about it,
-    /// and the card or its chevron unfolds the rest.
-    private func picked(_ s: SpendingScreen, open: Bool) -> some View {
-        let payment = currentPayment(s)
-        let category = currentCategory(s)
-        let undo = payment != nil ? "unlink" : "uncategorize"
-        let canUndo = applying == nil && s.undo.contains { $0.choice == undo }
-        let title = payment?.label ?? category?.label ?? (s.isIncome ? "Без категории" : "Не размечена")
-        let subtitle = payment != nil ? "оплатила платёж"
-            : category != nil ? (category?.detail == "из ZenMoney" ? "категория из ZenMoney" : "категория")
-            : s.isIncome ? "выберите категорию" : "выберите категорию или платёж"
-        let (icon, color, photo) = look(s)
-        let toggle = { withAnimation(.snappy) { picking = !open } }
-        return HStack(spacing: 10) {
-            Button(action: toggle) {
-                HStack(spacing: 12) {
-                    if let photo {
-                        CategoryDisc(icon: icon, color: color, photo: photo, size: 42)
-                    } else {
-                        Image(systemName: Icons.symbol(icon))
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(color)
-                            .frame(width: 42, height: 42)
-                            .background(color.opacity(0.15), in: Circle())
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title).font(.body.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(2)
-                        Text(subtitle).font(.footnote).foregroundStyle(Lilac.muted)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("picked")
-            if canUndo {
-                Button { picking = nil; choose(undo) } label: {
-                    Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(Lilac.muted.opacity(0.7))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(s.undo.first { $0.choice == undo }?.label ?? "Отменить")
-            }
-            Button(action: toggle) {
-                Image(systemName: "chevron.down")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(open ? Lilac.accent : Lilac.muted)
-                    .rotationEffect(.degrees(open ? 180 : 0))
-                    .frame(width: 32, height: 42)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(open ? "Свернуть" : "Выбрать другое")
-        }
-        .padding(.leading, 14)
-        .padding(.trailing, 8)
-        .padding(.vertical, 12)
-        .background(Lilac.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(open ? Lilac.accent.opacity(0.35) : .clear, lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
-        .id(title)
-        .transition(.asymmetric(insertion: .scale(scale: 0.95).combined(with: .opacity), removal: .opacity))
-    }
-
     /// Whether the expense could have been done without, as a switch on a card; it shows turned at once.
     @ViewBuilder
     private func optional(_ s: SpendingScreen) -> some View {
         if let option = s.optional {
-            let on = applying == "optional" ? true : applying == "required" ? false : option.current
+            let on = isOptional(s)
             Toggle(isOn: Binding(get: { on }, set: { choose($0 ? "optional" : "required") })) {
                 HStack(spacing: 12) {
                     Image(systemName: "cart.badge.minus").font(.subheadline).foregroundStyle(on ? Palette.optional : Lilac.muted)
@@ -385,54 +505,6 @@ struct MarkingSheet: View {
             .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
             .accessibilityIdentifier("optional")
         }
-    }
-
-    /// What the user wrote about the expense, in a field that grows to four lines; return or leaving it sends it.
-    private func description(_ s: SpendingScreen) -> some View {
-        let text = Binding(
-            get: { draft ?? s.description ?? "" },
-            set: { typed in
-                if typed.contains("\n") {
-                    draft = typed.replacingOccurrences(of: "\n", with: " ")
-                    writing = false
-                } else {
-                    draft = typed
-                }
-            }
-        )
-        return HStack(spacing: 12) {
-            Image(systemName: "text.alignleft").font(.subheadline).foregroundStyle(Lilac.muted)
-            TextField("Описание", text: text, axis: .vertical)
-                .lineLimit(1...4)
-                .focused($writing)
-                .submitLabel(.done)
-                .accessibilityIdentifier("description")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 15)
-        .background(Lilac.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
-    }
-
-    /// Sends the description typed, once; an empty one takes it away.
-    private func saveDescription() {
-        guard let draft, draft != sent else { return }
-        sent = draft
-        let path = "spending/\(id)/description"
-        Task {
-            do {
-                try await session.send(path, ["description": draft])
-                saved += 1
-            } catch {
-                sent = nil
-                self.error = error.localizedDescription
-            }
-        }
-    }
-
-    /// The description as the server keeps it: in one line, without extra spaces.
-    private static func oneLine(_ text: String) -> String {
-        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
     @ViewBuilder
@@ -451,7 +523,7 @@ struct MarkingSheet: View {
                             if index < s.categories.choices.count {
                                 let choice = s.categories.choices[index]
                                 CategoryTile(choice: choice, selected: choice.choice == picked) {
-                                    if choice.choice != picked { pick(choice.choice) }
+                                    if choice.choice != picked { pick(choice.choice, folding: .more) }
                                 }
                                 .modifier(Unfold(index: index))
                             } else {
@@ -469,10 +541,11 @@ struct MarkingSheet: View {
         let picked = applying.flatMap { ["regular-", "purchase-", "wish-", "save-"].contains(where: $0.hasPrefix) ? $0 : nil } ?? current(s.payments.choices, clearedBy: "unlink")
         VStack(spacing: 10) {
             ForEach(Array(s.payments.choices.enumerated()), id: \.element.id) { index, choice in
-                PaymentCard(label: choice.label, detail: choice.detail, icon: choice.icon ?? "repeat", selected: choice.choice == picked, suggested: choice.isSuggested) {
-                    if choice.choice != picked { pick(choice.choice) }
+                PaymentCard(label: choice.label, detail: choice.detail, symbol: Icons.symbol(choice.icon ?? "repeat"), selected: choice.choice == picked, suggested: choice.isSuggested) {
+                    if choice.choice != picked { pick(choice.choice, folding: .plan) }
                 }
                 .modifier(Unfold(index: index))
+                .accessibilityIdentifier("payment")
             }
             if s.payments.choices.isEmpty && s.payments.others.isEmpty {
                 LilacEmpty(text: s.payments.empty)
@@ -496,8 +569,8 @@ struct MarkingSheet: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(group.label).font(.subheadline).foregroundStyle(Lilac.muted).padding(.top, 6)
                             ForEach(group.options, id: \.value) { option in
-                                PaymentCard(label: option.label, detail: nil, icon: option.icon ?? "repeat", selected: option.value == picked, suggested: false, compact: true) {
-                                    if option.value != picked { pick(option.value) }
+                                PaymentCard(label: option.label, detail: nil, symbol: Icons.symbol(option.icon ?? "repeat"), selected: option.value == picked, suggested: false, compact: true) {
+                                    if option.value != picked { pick(option.value, folding: .plan) }
                                 }
                             }
                         }
@@ -508,57 +581,16 @@ struct MarkingSheet: View {
         }
     }
 
-    /// Where the expense counts: the picked place alone, as a large lilac card with what it means; a tap on it unfolds
-    /// the others around it, one after another, and a pick folds them back.
-    private func envelopes(_ s: SpendingScreen) -> some View {
-        let picked = current(s.envelopes, clearedBy: "")
-        let open = placing || picked == nil
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Где считается").font(.subheadline).foregroundStyle(Lilac.muted).padding(.top, 6)
-            ForEach(Array(s.envelopes.enumerated()), id: \.element.id) { index, choice in
-                let selected = choice.choice == picked
-                if open || selected {
-                    Button {
-                        if !selected { place(choice.choice) } else { withAnimation(.snappy) { placing = !open } }
-                    } label: {
-                        HStack(spacing: 14) {
-                            ZStack {
-                                Circle().fill(selected ? Lilac.accent.opacity(0.16) : Lilac.track)
-                                if selected {
-                                    Image(systemName: Self.envelopeIcons[choice.choice] ?? "circle").font(.system(size: 15, weight: .semibold)).foregroundStyle(Lilac.accent)
-                                } else {
-                                    Circle().fill(Lilac.muted.opacity(0.6)).frame(width: 7, height: 7)
-                                }
-                            }
-                            .frame(width: 42, height: 42)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(choice.label).font(.body.weight(.semibold)).foregroundStyle(Color.primary)
-                                if let detail = choice.detail { Text(detail).font(.footnote).foregroundStyle(Lilac.muted) }
-                            }
-                            Spacer(minLength: 8)
-                            if selected {
-                                Image(systemName: open ? "checkmark" : "chevron.down")
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(Lilac.accent)
-                                    .contentTransition(.symbolEffect(.replace))
-                            }
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .background(selected ? Lilac.tint : Lilac.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                        .shadow(color: .black.opacity(selected ? 0 : 0.05), radius: 8, y: 3)
-                    }
-                    .buttonStyle(PressableStyle())
-                    .modifier(Unfold(index: index, animated: !selected))
-                    .transition(.asymmetric(insertion: .identity, removal: .opacity.combined(with: .scale(scale: 0.96))))
-                    .accessibilityLabel(choice.label)
-                    .accessibilityHint(selected ? (open ? "Свернуть" : "Выбрать другое") : "")
-                    .accessibilityIdentifier(selected && !open ? "place" : choice.choice)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                }
-            }
-        }
-    }
+    /// Where an expense or an income counts, as the line of the sheet names it, with what its amount does there; in the
+    /// week, where an expense counts unless moved, that goes without saying.
+    private static let placeWords: [String: (title: String, detail: String)] = [
+        "week": ("Учитывается в неделе", ""),
+        "extra": ("Из дополнительных", "из доп. бюджета месяца"),
+        "outside": ("Не учитывается в неделе", "не уменьшают свободное на неделю"),
+        "ignored": ("Не учитывается", "нет ни в неделе, ни в суммах месяца"),
+        "counted": ("Учитывается в доходах", "в полученном и накоплениях месяца"),
+        "ignored-income": ("Не учитывается", "нет в полученном и накоплениях месяца"),
+    ]
 
     private static let envelopeIcons = ["week": "calendar", "extra": "bag", "outside": "arrow.uturn.right", "ignored": "eye.slash", "counted": "arrow.down.left"]
 }
@@ -623,11 +655,13 @@ struct CategoryTile: View {
     }
 }
 
-/// A payment the expense could have made: a regular expense or a purchase, with its date or plan and what is left.
+/// A payment the expense could have made: a regular expense or a purchase, with its date or plan and what is left; or a
+/// place it can count in, as compact.
 struct PaymentCard: View {
     let label: String
     let detail: String?
-    let icon: String
+    /// An SF Symbol's name.
+    let symbol: String
     let selected: Bool
     let suggested: Bool
     var compact = false
@@ -636,7 +670,7 @@ struct PaymentCard: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Image(systemName: Icons.symbol(icon))
+                Image(systemName: symbol)
                     .font(.system(size: compact ? 13 : 15, weight: .semibold))
                     .foregroundStyle(selected ? Lilac.accent : Lilac.muted)
                     .frame(width: compact ? 32 : 40, height: compact ? 32 : 40)

@@ -151,14 +151,17 @@ final class ScreensTests: XCTestCase {
             expense.tap()
             if sheet("marking").waitForExistence(timeout: 10) {
                 shot("spending")
-                unfold()
-                shot("spending-unfolded")
-                app.buttons["Платёж"].tap()
+                app.buttons["plan"].tap()
                 shot("spending-payment")
+                app.buttons["plan"].tap()
+                app.buttons["place"].tap()
+                shot("spending-places")
+                app.buttons["place"].tap()
+                unfoldMore()
+                shot("spending-unfolded")
                 app.swipeUp()
                 shot("spending-more")
-                // The shop's name leaves for the shop on «Ещё», whose form is left with «Отмена».
-                app.swipeDown()
+                // The shop leaves for the shop on «Ещё», whose form is left with «Отмена».
                 let shop = app.buttons["shop"]
                 if shop.waitForExistence(timeout: 2) {
                     shop.tap()
@@ -218,6 +221,17 @@ final class ScreensTests: XCTestCase {
         app.buttons["filter-Ждут разбора"].tap()
         sleep(2)
         shot("operations-pending")
+        // An expense waiting for a category opens among the others that wait: «1 из 3».
+        let waiting = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'spending-'")).firstMatch
+        if waiting.waitForExistence(timeout: 3) {
+            waiting.tap()
+            if sheet("marking").waitForExistence(timeout: 10) {
+                shot("pending-sheet")
+                app.buttons["Готово"].tap()
+            } else {
+                XCTFail("the expense waiting for a category opens")
+            }
+        }
         app.buttons["filter-Доходы"].tap()
         sleep(2)
         shot("operations-income")
@@ -226,8 +240,8 @@ final class ScreensTests: XCTestCase {
             income.tap()
             if sheet("marking").waitForExistence(timeout: 10) {
                 shot("income-sheet")
-                app.buttons["picked"].tap()
-                shot("income-sheet-folded")
+                app.buttons["more"].tap()
+                shot("income-sheet-toggled")
                 app.buttons["Готово"].tap()
             } else {
                 XCTFail("the income opens")
@@ -332,44 +346,63 @@ final class ScreensTests: XCTestCase {
         XCTAssert(sheet("marking").waitForExistence(timeout: 10))
         shot("marking-before")
 
-        unfold()
-        let tile = sheet("marking").buttons.matching(NSPredicate(format: "label BEGINSWITH 'Продукты'")).firstMatch
+        unfoldMore()
+        // The category it had, to go back to: its tile, ZenMoney's too, or none.
+        let tiles = sheet("marking").buttons
+        let had = tiles.matching(NSPredicate(format: "selected == true")).firstMatch
+        let hadLabel = had.exists ? had.label : nil
+        let other = hadLabel?.hasPrefix("Продукты") == true ? "Дом" : "Продукты"
+        let tile = tiles.matching(NSPredicate(format: "label BEGINSWITH %@", other)).firstMatch
+        reveal(tile)
         tile.tap()
         shot("marking-category")
-        XCTAssert(app.staticTexts["категория"].waitForExistence(timeout: 5), "the category shows on top")
-        XCTAssert(app.buttons["Платёж"].waitForNonExistence(timeout: 5), "a pick folds the others away")
+        XCTAssert(tile.waitForNonExistence(timeout: 5), "a pick folds the categories away")
+        XCTAssert(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", other)).firstMatch.waitForExistence(timeout: 5), "the category shows in its line")
         shot("marking-folded")
-        let undo = app.buttons["Убрать категорию"]
-        if undo.waitForExistence(timeout: 5) { undo.tap() }
+        unfoldMore()
+        if let hadLabel {
+            let back = tiles.matching(NSPredicate(format: "label == %@", hadLabel)).firstMatch
+            reveal(back)
+            back.tap()
+        } else {
+            let undo = app.buttons["Убрать категорию"]
+            reveal(undo)
+            undo.tap()
+        }
+        app.swipeDown()
         sleep(1)
         shot("marking-category-undone")
 
-        unfold()
-        shot("marking-unfolded")
-        app.buttons["Платёж"].tap()
+        app.buttons["plan"].tap()
         shot("marking-payments")
-        let card = sheet("marking").buttons.matching(NSPredicate(format: "label CONTAINS '₽'")).firstMatch
+        let card = sheet("marking").buttons.matching(identifier: "payment").firstMatch
         // The cards fade in one after another when they unfold.
         wait(for: [expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: card)], timeout: 5)
         card.tap()
-        XCTAssert(app.staticTexts["оплатила платёж"].waitForExistence(timeout: 5), "the payment shows on top")
+        XCTAssert(card.waitForNonExistence(timeout: 5), "a pick folds the payments away")
+        XCTAssert(stepSays("plan-step", "Изменить"), "the payment shows in its line")
         shot("marking-payment")
+        app.buttons["plan"].tap()
         let unlink = app.buttons["Отвязать"]
         if unlink.waitForExistence(timeout: 5) { unlink.tap() }
-        sleep(1)
+        XCTAssert(stepSays("plan-step", "Связать"), "and it is unlinked")
         shot("marking-payment-undone")
 
         let description = sheet("description")
         description.tap()
-        description.typeText("Проверка описания\n")
-        sleep(2)
+        description.typeText("Проверка описания")
+        // Sent once typing pauses, with nothing more pressed.
+        XCTAssert(sheet("description-kept").waitForExistence(timeout: 5), "the description is sent on a pause")
+        description.typeText("\n")
         shot("marking-description")
         // Could it have been done without: the switch turns at once, and the server keeps it.
+        unfoldMore()
         let optional = app.switches["optional"]
         // The switch is at the end of its card; its name before it does not turn it.
         let flip = { optional.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap() }
         // The expense may be marked so already; the test turns it and back.
         XCTAssert(optional.waitForExistence(timeout: 5))
+        reveal(optional)
         let before = optional.value as? String == "1" ? "1" : "0"
         let after = before == "1" ? "0" : "1"
         flip()
@@ -381,22 +414,31 @@ final class ScreensTests: XCTestCase {
         expense.tap()
         XCTAssert(description.waitForExistence(timeout: 10))
         XCTAssertEqual(description.value as? String, "Проверка описания", "the description is kept")
+        unfoldMore()
+        reveal(optional)
         XCTAssertEqual(switched(optional, to: after), .completed, "the server kept it")
         flip()
         XCTAssertEqual(switched(optional, to: before), .completed, "and it turns back")
+        app.swipeDown()
         // At the end of the text, so the deletes take all of it.
         description.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
         description.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Проверка описания".count) + "\n")
         sleep(1)
-        XCTAssert(["", "Описание"].contains(description.value as? String ?? ""), "the description is taken away")
+        XCTAssert(["", "Например, обед"].contains(description.value as? String ?? ""), "the description is taken away")
 
-        XCTAssert(sheet("place").waitForExistence(timeout: 5), "only the place picked shows")
         let extra = countIn("Дополнительные")
-        XCTAssert(extra.wait(for: \.isSelected, toEqual: true, timeout: 5))
-        XCTAssert(sheet("place").waitForExistence(timeout: 5), "a pick folds the other places away")
+        XCTAssert(extra.waitForNonExistence(timeout: 5), "a pick folds the other places away")
+        XCTAssert(stepSays("place-step", "Вернуть в неделю"), "an expense moved out of the week can go back")
         shot("marking-extra")
-        let week = countIn("Неделя")
-        XCTAssert(week.wait(for: \.isSelected, toEqual: true, timeout: 5))
+        app.buttons["place-step"].tap()
+        XCTAssert(stepSays("place-step", "Перенести"), "and it is back in the week")
+    }
+
+    /// Waits for the step of a line of the open expense to begin with `words`.
+    private func stepSays(_ identifier: String, _ words: String) -> Bool {
+        let step = app.buttons[identifier]
+        let says = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@", words), object: step)
+        return XCTWaiter.wait(for: [says], timeout: 5) == .completed
     }
 
     /// Waits for a switch to show on (1) or off (0).
@@ -414,10 +456,18 @@ final class ScreensTests: XCTestCase {
         return place
     }
 
-    /// Unfolds the categories and payments of the open expense, when a pick folded them.
-    private func unfold() {
-        if !app.buttons["Платёж"].waitForExistence(timeout: 2) { app.buttons["Выбрать другое"].tap() }
-        XCTAssert(app.buttons["Платёж"].waitForExistence(timeout: 5), "the categories and payments unfold")
+    /// Scrolls the open expense up until `element` can be touched, as what is under the unfolded categories.
+    private func reveal(_ element: XCUIElement) {
+        for _ in 0..<5 where !element.isHittable { app.swipeUp() }
+    }
+
+    /// Unfolds «Категория и другие настройки» of the open expense, unless they are unfolded.
+    private func unfoldMore() {
+        let more = app.buttons["more"]
+        XCTAssert(more.waitForExistence(timeout: 5))
+        if more.value as? String != "открыто" { more.tap() }
+        let open = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "открыто"), object: more)
+        XCTAssertEqual(XCTWaiter.wait(for: [open], timeout: 5), .completed, "the settings unfold")
     }
 
     /// Loads the screens from the server, opens the app again with a server that is gone, and switches back to the
