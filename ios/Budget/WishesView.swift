@@ -88,13 +88,13 @@ struct WishCard: View {
             .accessibilityIdentifier("wish-card-\(wish.id)")
             switch wish.state {
             case "bought":
-                Label("Куплено", systemImage: "checkmark").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.accent)
+                Label(wish.wish.kind == "card" ? "Погашено" : "Куплено", systemImage: "checkmark").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.accent)
             case "planned":
                 GatheredBar(total: wish.wish.amount, covered: wish.covered, parts: wish.ways.map { GatheredBar.Part(amount: $0.amount, color: $0.color) })
                 VStack(spacing: 10) {
                     ForEach(wish.ways) { way in WayLine(way: way, symbol: symbol) }
                 }
-                if wish.situation == "problem" || wish.relay != nil {
+                if wish.short > 0.5 || wish.relay != nil {
                     // What is short goes with what gathers it, beside it when they fit.
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .firstTextBaseline, spacing: 10) { shortfall; Spacer(minLength: 0); relay }
@@ -125,7 +125,7 @@ struct WishCard: View {
     }
 
     @ViewBuilder private var shortfall: some View {
-        if wish.situation == "problem" {
+        if wish.short > 0.5 {
             Text("Не хватает \(Money.text(wish.short, symbol))").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.red).fixedSize()
         }
     }
@@ -205,7 +205,7 @@ struct WishLine: View {
 
     var body: some View {
         Button(action: open) {
-            LilacRow(marker: .symbol(wish.row.muted ? "checkmark" : "sparkles", wish.row.muted ? Lilac.muted : Palette.week), title: wish.row.title,
+            LilacRow(marker: .symbol(wish.row.muted ? "checkmark" : Icons.symbol(wish.row.icon), wish.row.muted ? Lilac.muted : Palette.week), title: wish.row.title,
                      details: wish.row.details, amount: wish.row.amount, symbol: symbol, muted: wish.row.muted, first: first)
         }
         .buttonStyle(.card)

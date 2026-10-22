@@ -305,6 +305,34 @@ final class ScreensTests: XCTestCase {
         }
     }
 
+    /// Opens «Желания», where credit cards come first, the first of them with its plan, and the new wish's form with
+    /// «Кредитка» picked. It only opens and closes.
+    func testCards() throws {
+        XCTAssert(app.buttons["reserved"].waitForExistence(timeout: 15))
+        tab("Желания")
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'wish-card-'"))
+        XCTAssert(cards.firstMatch.waitForExistence(timeout: 10), "the wishes load")
+        sleep(1)
+        shot("cards")
+        // The first two, which are cards when there are any, as cards come first.
+        for index in 0..<min(2, cards.count) {
+            cards.element(boundBy: index).tap()
+            guard app.buttons["Готово"].waitForExistence(timeout: 10) else { continue }
+            sleep(2)
+            shot("card-\(index + 1)")
+            app.swipeUp()
+            shot("card-\(index + 1)-more")
+            app.buttons["Готово"].firstMatch.tap()
+            sleep(1)
+        }
+        app.buttons["Добавить желание"].firstMatch.tap()
+        if app.buttons["Кредитка"].waitForExistence(timeout: 5) {
+            app.buttons["Кредитка"].tap()
+            sleep(1)
+            shot("card-new")
+        }
+    }
+
     /// Picks two ways for the first wish, the weeks by hand and the extras for the rest, chooses the plan and takes it back.
     /// It changes data, so it runs only against a server with copied databases: TEST_RUNNER_WISHES=1.
     func testWishPlan() throws {

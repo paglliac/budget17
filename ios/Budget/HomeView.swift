@@ -595,7 +595,7 @@ struct PlanRow: View {
     }
 
     private var marker: LilacMarker {
-        if item.wish != nil { return .symbol("sparkles", item.row.muted ? Lilac.muted : Palette.week) }
+        if item.wish != nil { return .symbol(Icons.symbol(item.row.icon), item.row.muted ? Lilac.muted : Palette.week) }
         if item.row.muted { return .symbol("checkmark", Lilac.muted) }
         if let purchase = item.purchase { return purchase.kind == "required" ? .dot(Lilac.accent) : .ring(Lilac.accent) }
         return .ring(Lilac.muted)

@@ -22,6 +22,7 @@ import {
   WEEK_LIMIT,
   weekLimit,
   weekOf,
+  weeksOfMonth,
   type Envelope,
   type ExtrasLevels,
   type ExtrasState,
@@ -32,7 +33,8 @@ import {
   type Wish,
 } from '../week.ts';
 import { weekWhy, type Check, type Overspend } from '../week-why.ts';
-import { SAVED_WAY, savingsTaken, type Gathering } from '../wish-plans.ts';
+import { cardsTaken, SAVED_WAY, savingsTaken, type Gathering } from '../wish-plans.ts';
+import { CARD_MONTHS } from '../card-plans.ts';
 import type { DateString, EntityCollections } from '../zenmoney/types.ts';
 import { capitalize, dayHeading, dayMonth, dayTitle, fromToday, money, monthName, num, plural, ROUND_STEP, roundParts, timeOn, weekLabel, WEEKDAYS, WEEKDAYS_FULL } from './format.ts';
 import { extrasCard, roundExtras, weekHome } from './home.ts';
@@ -77,7 +79,7 @@ import {
   type SavedMarking,
 } from './pages/marking.ts';
 import { loadOperations, netOf, operationCategory, operationLine, operationsEmpty } from './pages/operations.ts';
-import { isBought, wayCards, wishPlan, type WishPlanView } from './pages/wishes.ts';
+import { cardsOf, isBought, wayCards, wishPlan, type WishPlanView } from './pages/wishes.ts';
 import { loadRegular, regularLine, regularTotalNote, STATUS_TONE, timeline, type Placed } from './pages/regular.ts';
 import { categoryDetails, loadBudgetSetup, loadSettingsPage } from './pages/settings.ts';
 import { bankNames, loadShopsPage, operationShop, shopForm, shopLook, type ShopForm } from './pages/shops.ts';
@@ -175,7 +177,7 @@ function expenseDays(m: Pick<Marking, 'marks' | 'purchases'>, expenses: readonly
  * A purchase of a plan, saying first whether it is required or flexible; until it is bought, what paid it follows, and
  * that it waits to be bought goes without saying. The money a wish's plan holds is a row of the wish, which opens it.
  */
-function purchaseRow(status: PurchaseStatus, current: DateString, symbol: string, saved: Pick<SavedBudget, 'wishPayments'>) {
+function purchaseRow(status: PurchaseStatus, current: DateString, symbol: string, saved: Pick<SavedBudget, 'wishPayments' | 'wishes'>) {
   if (status.purchase.wish !== undefined) return wishPurchaseRow(status, symbol, saved);
   const { purchase: p, bought, covered } = status;
   const key = `purchase-${p.id}`;
@@ -201,18 +203,20 @@ function purchaseRow(status: PurchaseStatus, current: DateString, symbol: string
 
 /**
  * Money a wish's plan holds in a week or the extras: «Желание» with what expenses set aside of it (see heldLine) until
- * an expense buys the wish, then «Куплено». It keeps the wish's sparkles, set aside or bought, only paler.
+ * an expense buys the wish, then «Куплено». It keeps the wish's sparkles, set aside or bought, only paler. A card's is
+ * «Кредитка» with its card icon and what its repayments paid of it.
  */
-function wishPurchaseRow(status: PurchaseStatus, symbol: string, saved: Pick<SavedBudget, 'wishPayments'>) {
+function wishPurchaseRow(status: PurchaseStatus, symbol: string, saved: Pick<SavedBudget, 'wishPayments' | 'wishes'>) {
   const p = status.purchase;
-  const bought = isBought(saved, p.wish!);
+  const card = saved.wishes.find((w) => w.id === p.wish)?.kind === 'card';
+  const bought = !card && isBought(saved, p.wish!);
   const line = heldLine(status, symbol);
   return {
     ...row({
       id: `purchase-${p.id}`,
       title: p.title,
-      details: ['Желание', bought ? 'куплено' : line.details].filter(Boolean).join(' · '),
-      icon: 'sparkles',
+      details: [card ? 'Кредитка' : 'Желание', bought ? 'куплено' : line.details].filter(Boolean).join(' · '),
+      icon: card ? 'card' : 'sparkles',
       color: bought || line.done ? toneColor('gray') : toneColor('yellow'),
       amount: line.amount,
       mark: p.envelope,
@@ -410,7 +414,7 @@ export function weekWhyScreen(data: EntityCollections, saved: SavedBudget, optio
  * wish's plan holds opens the wish; an expense opens its sheet; what the week allows opens its form.
  */
 function changeRows(
-  saved: Pick<SavedBudget, 'changes' | 'wishPayments'>,
+  saved: Pick<SavedBudget, 'changes' | 'wishPayments' | 'wishes'>,
   { week, current, today, symbol, summary, expenses, marking }: {
     week: DateString;
     current: DateString;
@@ -558,23 +562,26 @@ function overspendRow(o: Overspend, symbol: string) {
 
 /**
  * Where a month's income goes, as the app's month tab draws it: the month's regular payments, the budgets of its weeks,
- * the extras, what the plans of wishes take from its savings, and what is left over for savings (short of money when
+ * the extras, what the plans of wishes take from its savings and what those of cards repay from them, and what is left over for savings (short of money when
  * it is below zero). The income is what the incomes bring a month, as /income counts it; null without incomes. With
  * round figures the parts are to the hundred and add up to the income rounded.
  */
-function monthFlow(d: ReturnType<typeof loadDashboard>, saved: SavedBudget, incomes: Income[], thisMonth: MonthString) {
+function monthFlow(d: ReturnType<typeof loadDashboard>, saved: SavedBudget, incomes: Income[], thisMonth: MonthString, expenses: readonly Operation[]) {
   const exact = monthlyIncome(incomes);
   if (exact <= 0) return null;
   const month = d.extras.month;
+  const cards = new Set(saved.wishes.filter((w) => w.kind === 'card').map((w) => w.id));
+  const wishPlans = [...(saved.wishPlans ?? [])].filter(([id]) => !cards.has(id)).map(([, plan]) => ({ plan }));
   const exactParts = [
     saved.regular.filter((e) => paymentDate(e, month) !== null).reduce((sum, e) => sum + e.amount, 0),
     d.weeks.reduce((sum, w) => sum + w.limit, 0),
     MONTH_LIMIT,
-    savingsTaken([...(saved.wishPlans?.values() ?? [])].map((plan) => ({ plan })), month),
+    savingsTaken(wishPlans, month),
+    cardsTaken(cardsOf(saved, expenses), month),
   ];
   exactParts.push(exact - exactParts.reduce((sum, p) => sum + p, 0));
-  const [regular, weeks, extras, wishes, savings] = (saved.roundFigures ? roundParts(exactParts) : exactParts) as [number, number, number, number, number];
-  const income = regular + weeks + extras + wishes + savings;
+  const [regular, weeks, extras, wishes, debts, savings] = (saved.roundFigures ? roundParts(exactParts) : exactParts) as [number, number, number, number, number, number];
+  const income = regular + weeks + extras + wishes + debts + savings;
   const part = (label: string, amount: number) => ({ label, amount, share: amount / income });
   return {
     income: { label: 'Доход', amount: income, note: month === thisMonth ? 'в этом месяце' : `в ${monthName(month, 'prepositional')}` },
@@ -583,6 +590,7 @@ function monthFlow(d: ReturnType<typeof loadDashboard>, saved: SavedBudget, inco
       part('Недельные бюджеты', weeks),
       part('Доп. бюджет', extras),
       ...(wishes > 0 ? [part('На желания', wishes)] : []),
+      ...(debts > 0 ? [part('На кредитки', debts)] : []),
       part(savings >= 0 ? 'В накопления' : 'Не хватает', savings),
     ],
   };
@@ -615,7 +623,7 @@ export function monthScreen(data: EntityCollections, saved: SavedBudget, options
       return { ...row({ id: `week-${w.week}`, title: weekLabel(w.week), details: line.details, icon: 'calendar', color: toneColor(line.tone), amount: line.amount }), week: w.week };
     }),
     total,
-    flow: monthFlow(d, saved, options.incomes ?? [], thisMonth),
+    flow: monthFlow(d, saved, options.incomes ?? [], thisMonth, allExpenses(data, saved)),
     newPurchaseWeek: newExtraWeek(m.month, thisMonth, d.weeks, current),
     weekChoices: weekChoices(current),
     source: options.source,
@@ -710,7 +718,7 @@ export function spendingScreen(data: EntityCollections, saved: SavedMarking, opt
   const paymentIcon = (choice: string): IconName => {
     const e = regular.get(choice);
     if (choice.startsWith('wish-')) return 'sparkles';
-    if (choice.startsWith('save-')) return 'piggy';
+    if (choice.startsWith('save-')) return saved.wishes?.find((w) => `save-${w.id}` === choice)?.kind === 'card' ? 'card' : 'piggy';
     return e ? entryIcon(e.icon, e.title) : categoryIcon(purchases.get(choice)?.title ?? '');
   };
   const time = timeOn(o.date, o.created);
@@ -1217,10 +1225,13 @@ export function wishScreen(data: EntityCollections, saved: SavedBudget, options:
   const s = mainCurrency(data).symbol;
   const { goal, plan } = view;
   const late = plan.buyWeek > weekOf(goal.due, saved.weekStart);
+  const card = wish.kind === 'card';
   return {
     symbol: s,
     current: weekOf(today, saved.weekStart),
-    wish: { id: wish.id, title: wish.title, amount: wish.amount, due: goal.due, dueSet: wish.due !== null },
+    wish: { id: wish.id, title: wish.title, amount: wish.amount, due: goal.due, dueSet: wish.due !== null, kind: wish.kind },
+    /** What the screen calls the day, the money set aside, buying and bought: a card's are about repaying its debt. */
+    words: card ? CARD_WORDS : WISH_WORDS,
     /** The days the wish can be needed by: from tomorrow to a year ahead. */
     dueRange: { from: addDays(today, 1), to: addDays(today, 365) },
     ways: wayCards(view, saved.purchases, s),
@@ -1230,11 +1241,12 @@ export function wishScreen(data: EntityCollections, saved: SavedBudget, options:
     /** What expenses set aside for the wish. */
     saved: view.gathered.saved,
     relay: relayAction(view, s),
-    steps: planStepRows(view, saved, s),
-    buy: { label: late ? `${weekLabel(plan.buyWeek)} · позже срока` : weekLabel(plan.buyWeek), late },
+    steps: card ? cardStepRows(view, s) : planStepRows(view, saved, s),
+    buy: card ? cardBuy(view, today) : { label: late ? `${weekLabel(plan.buyWeek)} · позже срока` : weekLabel(plan.buyWeek), late },
     chosen: view.chosen,
     planned: view.planned,
     bought: view.bought,
+    ...(card ? { rate: wish.rate ?? null, result: cardResult(view, wish.rate ?? null, today, s), scenarios: scenarioChips(view, wish.rate ?? null, today, s) } : {}),
   };
 }
 
@@ -1242,8 +1254,10 @@ export function wishScreen(data: EntityCollections, saved: SavedBudget, options:
  * Every wish in one place, with its chosen plan: a card each with its day, the week it is bought, what the plan gathers
  * and the ways its money comes from, or that it has no plan; a row each for the list; and the money the plans of the
  * wishes not bought yet hold by month, each row naming its wish. Wishes go in the order they were added, the bought ones
- * last. A wish's situation is calm when its plan gathers it by its day, risk when the plan buys it later, problem when
- * the plan falls short, and action when it has no plan yet; a bought wish has none.
+ * last, and cards before wishes. A wish's situation is calm when its plan gathers it by its day, risk when the plan
+ * buys it later, problem when the plan falls short, and action when it has no plan yet; a bought wish has none. A
+ * card's is calm when its plan closes it, risk when the plan does not within CARD_MONTHS, action when it has no plan
+ * and problem when it has none past its day without interest; a card repaid has none.
  */
 export function wishesScreen(data: EntityCollections, saved: SavedBudget, options: { today: DateString; incomes: Income[] }) {
   const { today } = options;
@@ -1253,23 +1267,43 @@ export function wishesScreen(data: EntityCollections, saved: SavedBudget, option
     const view = wishPlan(data, saved, { today, id: wish.id, ways: null, incomes: options.incomes, expenses });
     return view ? [{ wish, view }] : [];
   });
-  views.sort((a, b) => Number(a.view.bought) - Number(b.view.bought));
+  views.sort((a, b) => Number(a.view.bought) - Number(b.view.bought) || Number(b.wish.kind === 'card') - Number(a.wish.kind === 'card'));
   const wishes = views.map(({ wish, view }) => {
+    const card = wish.kind === 'card';
     const state = view.bought ? 'bought' : view.planned ? 'planned' : 'none';
-    const due = wish.due === null ? null : dueLabel(wish.due);
+    const due = wish.due === null ? null : card ? `без % до ${dayMonth(wish.due)}` : dueLabel(wish.due);
     const late = view.plan.buyWeek > weekOf(view.goal.due, saved.weekStart);
-    const buy = state === 'planned' ? `купить ${weekLabel(view.plan.buyWeek)}${late ? ' · позже срока' : ''}` : null;
+    const overdue = card && state !== 'bought' && wish.due !== null && today > wish.due;
+    const closes = view.projection?.closes ?? null;
+    const cost = card ? overpayment(view.projection?.interest ?? 0, wish.rate ?? null, s) : '';
+    const buy =
+      state !== 'planned' ? null
+      : card ? (closes === null ? `не закроете за ${CARD_MONTHS / 12} года` : [`закроете в ${closingMonth(closes, today)}`, cost].filter(Boolean).join(' · '))
+      : `купить ${weekLabel(view.plan.buyWeek)}${late ? ' · позже срока' : ''}`;
     const ways = state === 'planned' ? wayCards(view, saved.purchases, s).filter((w) => w.on && w.given > 0.5) : [];
-    const kept = state === 'bought' ? null : savedWay(view.gathered);
-    const line = state === 'bought' ? 'куплено' : [due, buy ?? 'не разложено'].filter(Boolean).join(' · ');
-    const situation = state === 'bought' ? null : state === 'none' ? 'action' : view.plan.short > 0.5 ? 'problem' : late ? 'risk' : 'calm';
+    const kept = state === 'bought' ? null : savedWay(view.gathered, card);
+    // A card with a plan says when it closes, the interest it costs if it runs past its day without interest included;
+    // one without, its day, or that the interest is running.
+    const line =
+      state === 'bought' ? (card ? 'погашено' : 'куплено')
+      : card && buy ? buy
+      : overdue ? `проценты с ${dayMonth(addDays(wish.due!, 1))}`
+      : [due, buy ?? 'не разложено'].filter(Boolean).join(' · ');
+    // A card is calm when its plan closes it, whatever interest that costs (the user's rule, 2026-10-22).
+    const situation =
+      state === 'bought' ? null
+      : card ? (state === 'none' ? (overdue ? 'problem' : 'action') : closes === null ? 'risk' : 'calm')
+      : state === 'none' ? 'action'
+      : view.plan.short > 0.5 ? 'problem' : late ? 'risk' : 'calm';
+    const tone = state === 'bought' ? 'gray' : card ? 'blue' : 'yellow';
     return {
-      ...row({ id: `wish-${wish.id}`, title: wish.title, details: line, icon: 'sparkles', color: toneColor(state === 'bought' ? 'gray' : 'yellow'), amount: wish.amount, muted: state === 'bought' }),
-      wish: { id: wish.id, title: wish.title, amount: wish.amount },
-      /** none: no plan chosen; planned; bought: an expense bought it. */
+      ...row({ id: `wish-${wish.id}`, title: wish.title, details: line, icon: card ? 'card' : 'sparkles', color: toneColor(tone), amount: wish.amount, muted: state === 'bought' }),
+      wish: { id: wish.id, title: wish.title, amount: wish.amount, kind: wish.kind },
+      kind: wish.kind,
+      /** none: no plan chosen; planned; bought: an expense bought it, or a card's repayments cover its debt. */
       state,
       situation,
-      when: [due, buy].filter(Boolean).join(' · '),
+      when: card ? (state === 'none' ? line : (buy ?? '')) : [due, buy].filter(Boolean).join(' · '),
       covered: state === 'bought' ? 0 : Math.min(wish.amount, state === 'none' ? view.gathered.saved : view.gathered.covered),
       short: state === 'planned' ? view.plan.short : 0,
       /** What expenses set aside for the wish. */
@@ -1308,6 +1342,80 @@ export function wishesScreen(data: EntityCollections, saved: SavedBudget, option
   return { symbol: s, wishes, months };
 }
 
+/** What a wish's screen calls its day, the money set aside, buying it and its being bought. */
+const WISH_WORDS = { due: 'Нужно', saved: 'Отложено', buy: 'Купить', bought: 'Куплено', plan: 'Как собрать' };
+/** The same for a card: the last day without interest, what repaid it, repaying it and its being repaid. */
+const CARD_WORDS = { due: 'Без % до', saved: 'Погашено', buy: 'Погасить', bought: 'Погашено', plan: 'Как гасить' };
+
+/** The month that closes a card as a phrase goes on: в декабре, or в декабре 2027 for another year than today's. */
+function closingMonth(month: MonthString, today: DateString): string {
+  return `${monthName(month, 'prepositional')}${month.slice(0, 4) === today.slice(0, 4) ? '' : ` ${month.slice(0, 4)}`}`;
+}
+
+/** The interest a card's plan pays, in a word: «+2 400 ₽», «без %», or nothing when the card has no rate. */
+function overpayment(interest: number, rate: number | null, s: string): string {
+  if (rate === null) return '';
+  return interest > 0.5 ? `+${money(interest, s)}` : 'без %';
+}
+
+/**
+ * When a card's plan closes it and what that costs, under its ways: «Закроете в декабре» with the interest it pays;
+ * «Не закроете за 3 года» with what is still owed then; or what to do when no way is picked.
+ */
+function cardResult(view: WishPlanView, rate: number | null, today: DateString, s: string) {
+  const projection = view.projection!;
+  if (view.parts.length === 0) return { title: 'Как будете гасить?', note: 'выберите сценарий или способы', late: false };
+  if (projection.closes === null) return { title: `Не закроете за ${CARD_MONTHS / 12} года`, note: `останется ${money(view.plan.short, s)}`, late: true };
+  const note = rate === null ? 'ставка не указана' : projection.interest > 0.5 ? `переплата ≈ ${money(projection.interest, s)}` : 'без процентов';
+  return { title: `Закроете в ${closingMonth(projection.closes, today)}`, note, late: false };
+}
+
+/** The last row of a card's plan: when it closes, or that it does not. */
+function cardBuy(view: WishPlanView, today: DateString) {
+  const closes = view.projection?.closes ?? null;
+  return { label: closes === null ? 'не закроете' : `в ${closingMonth(closes, today)}`, late: closes === null };
+}
+
+/** A card's plans to pick in one tap: the month each closes it in and its interest; `on` for the one picked now. */
+function scenarioChips(view: WishPlanView, rate: number | null, today: DateString, s: string) {
+  return (view.scenarios ?? []).map((x) => ({
+    label: capitalize(monthName(x.closes)) + (x.closes.slice(0, 4) === today.slice(0, 4) ? '' : ` ${x.closes.slice(0, 4)}`),
+    note: overpayment(x.interest, rate, s),
+    ways: x.ways,
+    on: x.ways === view.picks,
+  }));
+}
+
+/**
+ * A card's plan by month: what repaid it already, then each month ahead with what it repays, what is still owed after it
+ * and the interest it adds, up to the month that closes it.
+ */
+function cardStepRows(view: WishPlanView, s: string) {
+  const { context, gathered } = view;
+  const weekStart = context.budget.weekStart;
+  const current = weekOf(context.today, weekStart);
+  const repaid = [...new Map([...gathered.held.flatMap((h) => h.paid), ...gathered.loose].map((o) => [o.id, o])).values()];
+  const done = repaid.map((o) => {
+    const week = weekOf(o.date, weekStart);
+    return { date: week, month: monthOfWeek(week), counted: o.amount, ...row({ id: `saved-${o.id}`, title: weekLabel(week), details: 'погашено', icon: 'check', color: toneColor('green'), amount: o.amount }) };
+  });
+  const ahead = (view.projection?.months ?? [])
+    .filter((m) => m.paid > 0.5 || m.interest > 0.5)
+    .map((m) => {
+      const first = weeksOfMonth(m.month, weekStart)[0] ?? current;
+      const closed = m.left < 0.5;
+      const details = [closed ? 'закрыта' : `останется ${num(m.left)}`, m.interest > 0.5 ? `проценты ${num(m.interest)}` : null].filter(Boolean).join(' · ');
+      // This month's repayment is still to come, so it goes after the line at this week.
+      return {
+        date: first <= current ? addDays(current, 1) : first,
+        month: m.month,
+        counted: m.paid,
+        ...row({ id: `month-${m.month}`, title: capitalize(monthName(m.month)), details, icon: closed ? 'check' : 'card', color: toneColor(closed ? 'green' : 'blue'), amount: m.paid }),
+      };
+    });
+  return [...done, ...ahead].sort((a, b) => a.date.localeCompare(b.date));
+}
+
 /**
  * What choosing the chosen plan's ways again does, as a button on the wish: «Добрать 1 000 ₽» when the plan lacks what
  * was not set aside, «Освободить 1 000 ₽» when more was set aside than planned. It posts `ways` to
@@ -1318,14 +1426,17 @@ function relayAction(view: WishPlanView, s: string) {
   return { label: `${view.relay.add ? 'Добрать' : 'Освободить'} ${money(view.relay.amount, s)}`, amount: view.relay.amount, add: view.relay.add, ways: view.picks };
 }
 
-/** What is set aside for a wish as the first of the ways on its card: when, and how much; null when nothing is. */
-function savedWay(gathered: Gathering) {
+/**
+ * What is set aside for a wish as the first of the ways on its card, or what repaid a card: when, and how much; null
+ * when nothing is.
+ */
+function savedWay(gathered: Gathering, card = false) {
   const savings = [...gathered.held.flatMap((h) => h.paid), ...gathered.loose].sort((a, b) => b.date.localeCompare(a.date));
   const last = savings[0];
   if (!last || gathered.saved < 0.5) return null;
   const count = new Set(savings.map((o) => o.id)).size;
   const line = count === 1 ? dayMonth(last.date) : `${count} ${plural(count, ['раз', 'раза', 'раз'])}, последний ${dayMonth(last.date)}`;
-  return { id: SAVED_WAY, title: 'Отложено', icon: 'piggy', color: 'green' satisfies Tone, line, amount: gathered.saved };
+  return { id: SAVED_WAY, title: card ? 'Погашено' : 'Отложено', icon: card ? 'check' : 'piggy', color: 'green' satisfies Tone, line, amount: gathered.saved };
 }
 
 /**
@@ -1350,7 +1461,7 @@ function planStepRows(view: WishPlanView, saved: SavedBudget, s: string) {
       const details = line.details ?? `${num(usual - p.amount)} вместо ${num(usual)}`;
       return { date: p.week, month, counted, ...row({ id, title: weekLabel(p.week), details, ...(look ?? { icon: 'calendar', color: toneColor('yellow') }), amount: line.amount, mark: 'week', muted: line.state === 'none' }) };
     }
-    const details = line.details ?? (month === buyingMonth ? 'на покупку' : 'отложить');
+    const details = line.details ?? (view.goal.kind === 'card' ? 'на погашение' : month === buyingMonth ? 'на покупку' : 'отложить');
     return {
       date: p.week,
       month,
@@ -1358,24 +1469,37 @@ function planStepRows(view: WishPlanView, saved: SavedBudget, s: string) {
       ...row({ id, title: `Дополнительные ${monthName(month, 'genitive')}`, details, ...(look ?? { icon: 'bag', color: toneColor('violet') }), amount: line.amount, mark: 'extra', muted: line.state === 'none' }),
     };
   });
+  const card = view.goal.kind === 'card';
+  /** What the plan takes from a month's savings in all, a card's repayments from them that it keeps among it. */
+  const ownSavings = (month: MonthString) => plan.steps.reduce((sum, x) => sum + (x.kind === 'savings' && x.month === month ? x.amount : 0), 0);
   const looseRows = gathered.loose.map((o) => {
     const week = weekOf(o.date, context.budget.weekStart);
     return {
       date: week,
       month: monthOfWeek(week),
       counted: o.amount,
-      ...row({ id: `saved-${o.id}`, title: weekLabel(week), details: 'отложено', icon: 'check', color: toneColor('green'), amount: o.amount, mark: o.saving?.envelope ?? 'week' }),
+      ...row({
+        id: `saved-${o.id}`,
+        title: weekLabel(week),
+        details: card ? 'погашено' : 'отложено',
+        icon: 'check',
+        color: toneColor('green'),
+        amount: o.amount,
+        mark: saved.marks?.get(o.id) ?? o.saving?.envelope ?? 'week',
+      }),
     };
   });
   const others = plan.steps.flatMap((step, i) => {
     const id = `other-${i}`;
     switch (step.kind) {
       case 'savings':
+        // A card's repayment from savings that a plan chosen anew keeps is among the money set aside already.
+        if (step.way === SAVED_WAY) return [];
         return [{
           date: plan.buyWeek,
           month: step.month,
           counted: step.amount,
-          ...row({ id, title: `Накопления ${monthName(step.month, 'genitive')}`, details: `останется ${num(context.savings(step.month) - step.amount)}`, icon: 'piggy', color: toneColor('green'), amount: step.amount, mark: 'outside' }),
+          ...row({ id, title: `Накопления ${monthName(step.month, 'genitive')}`, details: `останется ${num(context.savings(step.month) - ownSavings(step.month))}`, icon: 'piggy', color: toneColor('green'), amount: step.amount, mark: 'outside' }),
         }];
       case 'move': {
         const title = saved.purchases.find((p) => p.id === step.purchase)?.title ?? 'Покупка';

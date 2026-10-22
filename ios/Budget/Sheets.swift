@@ -219,7 +219,8 @@ struct PurchaseSheet: View {
     }
 }
 
-/// A wish: its name and amount large; one to change can go, and `deleted` then closes what it was opened from.
+/// A wish, or the debt of a credit card: its name and amount large, and which of the two it is; one to change can go,
+/// and `deleted` then closes what it was opened from.
 struct WishSheet: View {
     let wish: Wish?
     var deleted: () -> Void = {}
@@ -227,22 +228,37 @@ struct WishSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var amount = ""
+    @State private var kind = "wish"
+    @State private var rate = ""
     @State private var sender = FormSender()
+
+    private static let kinds = [
+        LilacChoiceTiles.Choice(value: "wish", title: "Желание", hint: "Купить к сроку"),
+        LilacChoiceTiles.Choice(value: "card", title: "Кредитка", hint: "Погасить без процентов"),
+    ]
 
     var body: some View {
         LilacForm(
             destructive: wish.map { wish in (label: "Удалить", action: { sender.send(session, "wishes/\(wish.id)/delete", [:]) { dismiss(); deleted() } }) },
-            primary: wish == nil ? "Хочу" : "Сохранить",
+            primary: wish != nil ? "Сохранить" : kind == "card" ? "Добавить" : "Хочу",
             busy: sender.busy,
-            save: { sender.send(session, wish.map { "wishes/\($0.id)" } ?? "wishes", ["title": title, "amount": amount]) { dismiss() } }
+            save: { sender.send(session, wish.map { "wishes/\($0.id)" } ?? "wishes", ["title": title, "amount": amount, "kind": kind, "rate": kind == "card" ? rate : ""]) { dismiss() } }
         ) {
-            LilacBigFields(title: $title, amount: $amount, placeholder: "Например, укладка для волос", symbol: "₽", errors: sender.errors)
+            LilacBigFields(title: $title, amount: $amount, placeholder: kind == "card" ? "Например, Альфа" : "Например, укладка для волос", symbol: "₽",
+                           errors: sender.errors)
+            LilacFieldLabel(text: "Что это")
+            LilacChoiceTiles(choices: Self.kinds, selection: $kind)
+            if kind == "card" {
+                LilacTextField(label: "Ставка после срока без процентов, %", text: $rate, placeholder: "34,9", error: sender.errors["rate"], keyboard: .decimal)
+            }
         }
         .presentationDetents([.medium, .large])
         .errorAlert($sender.error)
         .onAppear {
             title = wish?.title ?? ""
             amount = wish.map { Money.typing(Money.input($0.amount)) } ?? ""
+            kind = wish?.kind ?? "wish"
+            rate = wish?.rate.map { $0.rounded() == $0 ? String(Int($0)) : String($0).replacingOccurrences(of: ".", with: ",") } ?? ""
         }
     }
 }

@@ -287,6 +287,8 @@ const ADDED_COLUMNS: Array<[table: string, column: string, definition: string]> 
   ['wish', 'due', 'TEXT'],
   ['wish', 'ways', 'TEXT'],
   ['wish', 'buy_week', 'TEXT'],
+  ['wish', 'kind', "TEXT NOT NULL DEFAULT 'wish' CHECK (kind IN ('wish', 'card'))"],
+  ['wish', 'rate', 'REAL'],
 ];
 
 /**
@@ -561,19 +563,41 @@ export class Settings {
   /** Wishes in the order they were added. */
   wishes(): Wish[] {
     return this.#db
-      .prepare('SELECT id, title, amount, due FROM wish ORDER BY id')
+      .prepare('SELECT id, title, amount, due, kind, rate FROM wish ORDER BY id')
       .all()
-      .map((row) => ({ id: Number(row.id), title: String(row.title), amount: Number(row.amount), due: row.due === null ? null : String(row.due) }));
+      .map((row) => {
+        const wish: Wish = {
+          id: Number(row.id),
+          title: String(row.title),
+          amount: Number(row.amount),
+          due: row.due === null ? null : String(row.due),
+          kind: row.kind === 'card' ? 'card' : 'wish',
+        };
+        return row.rate === null ? wish : { ...wish, rate: Number(row.rate) };
+      });
   }
 
   addWish(wish: WishInput): Wish {
-    const { lastInsertRowid } = this.#db.prepare('INSERT INTO wish (title, amount) VALUES (?, ?)').run(wish.title, wish.amount);
-    return { id: Number(lastInsertRowid), ...wish, due: null };
+    const kind = wish.kind ?? 'wish';
+    const rate = wish.rate ?? null;
+    const { lastInsertRowid } = this.#db.prepare('INSERT INTO wish (title, amount, kind, rate) VALUES (?, ?, ?, ?)').run(wish.title, wish.amount, kind, rate);
+    const added: Wish = { id: Number(lastInsertRowid), title: wish.title, amount: wish.amount, due: null, kind };
+    return rate === null ? added : { ...added, rate };
   }
 
-  /** False when there is no such wish. Its plan stays as chosen. */
+  /**
+   * False when there is no such wish. Its plan stays as chosen, and so do its kind and rate when none is given; a rate
+   * of null clears it.
+   */
   updateWish(id: number, wish: WishInput): boolean {
-    return Number(this.#db.prepare('UPDATE wish SET title = ?, amount = ? WHERE id = ?').run(wish.title, wish.amount, id).changes) > 0;
+    const keepRate = wish.rate === undefined ? 1 : 0;
+    return (
+      Number(
+        this.#db
+          .prepare('UPDATE wish SET title = ?, amount = ?, kind = coalesce(?, kind), rate = CASE WHEN ? THEN rate ELSE ? END WHERE id = ?')
+          .run(wish.title, wish.amount, wish.kind ?? null, keepRate, wish.rate ?? null, id).changes,
+      ) > 0
+    );
   }
 
   /** Sets the day a wish is needed by; false when there is no such wish. Its plan stays as chosen. */

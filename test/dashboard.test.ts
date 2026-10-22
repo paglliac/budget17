@@ -30,7 +30,7 @@ function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
       { id: 2, title: 'Подарок', amount: 5_000, week: '2026-10-05', envelope: 'week', kind: 'flexible', done: true },
       { id: 3, title: 'Куртка', amount: 20_000, week: '2026-10-05', envelope: 'extra', kind: 'flexible', done: false },
     ],
-    wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500, due: null }],
+    wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500, due: null, kind: 'wish' }],
     marks: new Map(marks),
     descriptions: new Map(),
     regular: [regular({ id: 7, title: 'Школа, ЛДК', amount: 45_000, day: 7 })],
@@ -480,6 +480,17 @@ describe('submitDashboard', () => {
     assert.equal(invalid.status === 'invalid' && invalid.form.purchaseKind, 'required', 'the form comes back with the kind picked');
     const page = plan({ form: invalid.status === 'invalid' ? invalid.form : undefined }).replaceAll(' ', ' ');
     assert.match(page, /<option value="required" selected>Обязательная: лучше не трогать<\/option>/);
+  });
+
+  it('adds a credit card with its rate, says what is wrong with a rate, and keeps it when a form has none', () => {
+    using settings = new Settings(':memory:');
+    const submit = (path: string, fields: Record<string, string> = {}) => submitDashboard(settings, path, form(fields), context(settings));
+    assert.equal(submit('/wishes', { title: 'Альфа', amount: '250 000', kind: 'card', rate: '34,9' }).status, 'saved');
+    assert.deepEqual(settings.wishes().map((w) => [w.title, w.kind, w.rate]), [['Альфа', 'card', 34.9]]);
+    const invalid = submit('/wishes/1', { title: 'Альфа', amount: '250 000', kind: 'card', rate: 'много' });
+    assert.equal(invalid.status === 'invalid' && invalid.form.rateError, 'Процент годовых, например 34,9');
+    submit('/wishes/1', { title: 'Альфа', amount: '240 000' });
+    assert.deepEqual(settings.wishes().map((w) => [w.amount, w.kind, w.rate]), [[240_000, 'card', 34.9]], 'an older app’s form keeps the kind and the rate');
   });
 
   it('plans a wish into the advised week', () => {

@@ -142,7 +142,8 @@ export function paymentChoices(
     if (held && set < held.amount - 0.005) {
       choices.push({ choice: { saving: wish, held, left: held.amount - set }, rank: held.week === week ? 1 : 2, days: Math.abs(daysBetween(week, held.week)) });
     }
-    if (buying === null) continue;
+    // A card is repaid by what is set aside for it, never bought.
+    if (buying === null || wish.kind === 'card') continue;
     const days = Math.abs(daysBetween(week, buying));
     if (days <= PURCHASE_WINDOW || monthOfWeek(buying) === monthOfWeek(week)) choices.push({ choice: { wish, week: buying, left: wish.amount }, rank: buying === week ? 1 : 2, days });
   }

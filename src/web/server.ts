@@ -371,7 +371,8 @@ function submitForm(path: string, body: URLSearchParams, request: IncomingMessag
     if (result.status === 'saved') return { status: 'saved', next: backTo(request) };
     if (result.status === 'missing') return { status: 'missing', message: 'Такой записи нет' };
     const back = new URL(backTo(request), 'http://localhost');
-    return { status: 'invalid', errors: result.form.errors, page: () => dashboardPage(back.searchParams, context, result.form, back.pathname === '/plan') };
+    const errors = result.form.rateError ? { ...result.form.errors, rate: result.form.rateError } : result.form.errors;
+    return { status: 'invalid', errors, page: () => dashboardPage(back.searchParams, context, result.form, back.pathname === '/plan') };
   }
   if (path.startsWith('/review/claude/')) {
     const form = new URLSearchParams([...new URL(request.url ?? '/', 'http://localhost').searchParams, ...body]);

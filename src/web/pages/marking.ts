@@ -215,9 +215,12 @@ export function submitMarking(settings: Settings, data: EntityCollections, path:
     settings.markSpending(id, 'week');
     return { status: 'saved' };
   }
-  if (kind === 'save' && settings.wishes().some((w) => String(w.id) === target)) {
-    settings.saveForWish(id, { wish: Number(target), envelope: savingEnvelope(settings, Number(target), transaction!.date) });
-    settings.markSpending(id, 'week');
+  const saving = kind === 'save' ? settings.wishes().find((w) => String(w.id) === target) : undefined;
+  if (saving) {
+    const held = heldEnvelope(settings, saving.id, transaction!.date);
+    settings.saveForWish(id, { wish: saving.id, envelope: held ?? 'week' });
+    // A card's repayment its plan held nothing for then came from savings, outside the weeks and the extras.
+    settings.markSpending(id, saving.kind === 'card' && held === null ? 'outside' : 'week');
     return { status: 'saved' };
   }
   return { status: 'missing' };
@@ -225,12 +228,12 @@ export function submitMarking(settings: Settings, data: EntityCollections, path:
 
 /**
  * Where money set aside for a wish on `date` comes from: the envelope its plan holds money in then, the week's money
- * before the extras, or the week's money when the plan holds nothing then.
+ * before the extras; null when the plan holds nothing then, and a wish's money then comes from the week's.
  */
-function savingEnvelope(settings: Settings, wish: number, date: DateString): WishSaving['envelope'] {
+function heldEnvelope(settings: Settings, wish: number, date: DateString): WishSaving['envelope'] | null {
   const saved = { purchases: [], wishes: settings.wishes(), wishPlans: settings.wishPlans(), weekStart: settings.weekStart() };
   // Which held money is finished by today does not change where it is held, so the expense's own day does.
-  return heldFor(plannedPurchases(saved, date), wish, date)?.envelope ?? 'week';
+  return heldFor(plannedPurchases(saved, date), wish, date)?.envelope ?? null;
 }
 
 /**
@@ -456,9 +459,11 @@ export function paymentOptions(m: Marking, o: Operation, suggestion: Suggestion 
     .filter((p) => !purchaseStatus(p, others).bought)
     .map((p) => ({ value: `purchase-${p.id}`, label: `${p.title} · ${weekLabel(p.week)} · ${money(p.amount, m.symbol)}` }));
   const wishes = planned
-    .filter(({ wish }) => !isShown(`wish-${wish.id}`))
+    .filter(({ wish }) => wish.kind !== 'card' && !isShown(`wish-${wish.id}`))
     .map(({ wish, week: buying }) => ({ value: `wish-${wish.id}`, label: `${wish.title} · ${weekLabel(buying)} · ${money(wish.amount, m.symbol)}` }));
-  const savings = open.filter(({ wish }) => !isShown(`save-${wish.id}`)).map(({ wish }) => ({ value: `save-${wish.id}`, label: wish.title }));
+  const toSave = open.filter(({ wish }) => !isShown(`save-${wish.id}`)).map(({ wish }) => ({ value: `save-${wish.id}`, label: wish.title, card: wish.kind === 'card' }));
+  const savings = toSave.filter((o) => !o.card).map(({ value, label }) => ({ value, label }));
+  const repayments = toSave.filter((o) => o.card).map(({ value, label }) => ({ value, label }));
 
   return {
     choices: shown.map((c) => ({
@@ -469,10 +474,11 @@ export function paymentOptions(m: Marking, o: Operation, suggestion: Suggestion 
       suggested: paymentKey(c) === suggestedKey,
     })),
     others:
-      regular.length + purchases.length + wishes.length + savings.length > 0
+      regular.length + purchases.length + wishes.length + savings.length + repayments.length > 0
         ? [
             { label: 'Регулярные траты', options: regular },
             { label: 'Покупки', options: purchases },
+            ...(repayments.length > 0 ? [{ label: 'Погасить кредитку', options: repayments }] : []),
             ...(savings.length > 0 ? [{ label: 'Отложить на желание', options: savings }] : []),
             ...(wishes.length > 0 ? [{ label: 'Купить желание', options: wishes }] : []),
           ]
@@ -528,7 +534,8 @@ function currentPayment(m: Marking, o: Operation, others: Operation[]): PaymentC
  */
 function paymentDetail(c: PaymentChoice, week: DateString, symbol: string): string {
   if ('regular' in c) return `${dayMonth(c.date)} · ${money(c.left, symbol)}`;
-  if ('saving' in c) return c.left > 0.005 ? `отложить · ${money(c.left, symbol)}` : 'отложить';
+  const set = 'saving' in c && c.saving.kind === 'card' ? 'погасить' : 'отложить';
+  if ('saving' in c) return c.left > 0.005 ? `${set} · ${money(c.left, symbol)}` : set;
   if ('wish' in c) return `купить желание · ${money(c.left, symbol)}`;
   const plan = c.purchase.envelope === 'extra' ? 'дополнительные' : c.purchase.week === week ? 'план недели' : `план ${weekLabel(c.purchase.week)}`;
   return `${plan} · ${money(c.left, symbol)}`;

@@ -73,6 +73,14 @@ export function parseAmount(text: string): Parsed<number> {
   return { value: Number(amount) };
 }
 
+/** A card's interest in percent a year, such as 34,9 or 30 %; empty for none. */
+export function parseRate(text: string): Parsed<number | null> {
+  const rate = text.replace(/\s/g, '').replace(',', '.').replace(/%$/, '');
+  if (!rate) return { value: null };
+  if (!/^\d{1,3}(\.\d{1,2})?$/.test(rate) || Number(rate) > 200) return { error: 'Процент годовых, например 34,9' };
+  return { value: Number(rate) };
+}
+
 /** A day of the month from 1 to 31. */
 export function parseDay(text: string): Parsed<number> {
   const day = text.trim();

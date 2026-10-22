@@ -44,6 +44,8 @@ const styler = settings.addWish({ title: 'Укладка для волос', amo
 settings.setWishDue(styler.id, '2026-10-20');
 const tyres = settings.addWish({ title: 'Зимняя резина', amount: 60_000 });
 settings.setWishDue(tyres.id, '2026-11-01');
+const alfa = settings.addWish({ title: 'Альфа', amount: 50_000, kind: 'card', rate: 34.9 });
+settings.setWishDue(alfa.id, '2026-11-18');
 settings.addIncome({ title: 'Зарплата', model: 'salary', params: { salary: 200_000, advanceDay: 20, payDay: 5 } });
 settings.addIncome({ title: 'Сдача квартиры', model: 'fixed', params: { amount: 30_000, day: 1 } });
 const kids = settings.addOwnCategory('Дети');
@@ -99,6 +101,8 @@ submitWishPlan(settings, data, saved(), `/wishes/${tyres.id}/ways`, new URLSearc
 settings.saveForWish(aside.spending, { wish: tyres.id, envelope: 'week' });
 // The styler's plan gives 500 a week and falls short, so the main page has a wish short of money.
 submitWishPlan(settings, data, saved(), `/wishes/${styler.id}/ways`, new URLSearchParams({ ways: 'weeks:500' }), { today, incomes: settings.incomes() });
+// The card is repaid by 20 000 a month from the savings, so its screen tells when that closes it, with scenarios.
+submitWishPlan(settings, data, saved(), `/wishes/${alfa.id}/ways`, new URLSearchParams({ ways: 'savings:20000' }), { today, incomes: settings.incomes() });
 // An income opens to be marked too, with its categories and whether it counts.
 const income = operationsScreen(data, saved(), { today, kind: 'income' }).days.flatMap((d) => d.items)[0];
 if (!income?.spending) throw new Error('В демо-данных нет доходов');
@@ -128,6 +132,7 @@ const screens: Record<string, unknown> = {
   'budget-settings': budgetSettingsScreen(data, saved()),
   widget: widgetScreen(data, saved(), { today }),
   wish: wishScreen(data, saved(), { today, id: tyres.id, ways: null, incomes: settings.incomes() }),
+  card: wishScreen(data, saved(), { today, id: alfa.id, ways: null, incomes: settings.incomes() }),
   'wish-picking': wishScreen(data, saved(), { today, id: tyres.id, ways: 'weeks:3000,extra-2026-10:', incomes: settings.incomes() }),
   wishes: wishesScreen(data, saved(), { today, incomes: settings.incomes() }),
 };

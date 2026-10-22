@@ -51,15 +51,29 @@ export interface Purchase {
 
 export type PurchaseInput = Omit<Purchase, 'id' | 'wish'>;
 
+/**
+ * What a wish is: something to buy, or the debt of a credit card to repay by the day its interest-free days end. A
+ * card's plan holds money as a wish's does; the expenses that repay it are those set aside for it, each counted where
+ * the plan held its money when it went, and the card is repaid once they cover its debt.
+ */
+export type WishKind = 'wish' | 'card';
+
 /** Something to buy some day, by the day it is needed if the user said; the budget tells when, or how to afford it. */
 export interface Wish {
   id: number;
   title: string;
   amount: number;
   due: DateString | null;
+  kind: WishKind;
+  /** A card's interest after its days without interest, in percent a year; null when the user did not say. */
+  rate?: number | null;
 }
 
-export type WishInput = Omit<Wish, 'id' | 'due'>;
+/**
+ * A wish as the user enters it; without the kind, a new one is a wish and an edited one keeps its kind, and so with a
+ * card's rate.
+ */
+export type WishInput = Omit<Wish, 'id' | 'due' | 'kind' | 'rate'> & { kind?: WishKind; rate?: number | null };
 
 /** An expense that set money aside for a wish, from the week's money or from the extras. */
 export interface WishSaving {

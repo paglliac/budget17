@@ -56,7 +56,7 @@ function saved(marks: Array<[string, Envelope]> = []): SavedBudget {
       { id: 3, title: 'Куртка', amount: 20_000, week: '2026-10-05', envelope: 'extra', kind: 'flexible', done: false },
       { id: 4, title: 'Стрижка', amount: 1_500, week: '2026-10-19', envelope: 'week', kind: 'flexible', done: false },
     ],
-    wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500, due: null }],
+    wishes: [{ id: 1, title: 'Укладка для волос', amount: 4_500, due: null, kind: 'wish' }],
     marks: new Map(marks),
     descriptions: new Map(),
     regular: [regular({ id: 7, title: 'Школа, ЛДК', amount: 45_000, day: 7 })],
@@ -896,7 +896,7 @@ describe('api: a wish’s plan', () => {
     assert.equal(post(settings, `/wishes/${tyres.id}/due`, { due: today }), 'missing', 'a wish is needed after today');
 
     const fresh = plain(wishScreen(data(), savedOf(settings), { today, id: tyres.id, ways: null, incomes }));
-    assert.deepEqual(fresh.wish, { id: tyres.id, title: 'Резина', amount: 60_000, due: '2026-11-01', dueSet: true });
+    assert.deepEqual(fresh.wish, { id: tyres.id, title: 'Резина', amount: 60_000, due: '2026-11-01', dueSet: true, kind: 'wish' });
     assert.deepEqual(fresh.ways.map((w: { id: string }) => w.id), ['extra-2026-10', 'weeks', 'savings', 'later-2026-11']);
     assert.deepEqual([fresh.covered, fresh.short, fresh.chosen, fresh.planned], [0, 60_000, false, false]);
 
@@ -1067,6 +1067,131 @@ describe('api: a wish’s plan', () => {
         ['В накопления', 15_000],
       ],
     );
+  });
+
+  it('plans a card by how the user repays it, and tells when that closes it with the interest after its days without interest', () => {
+    using settings = new Settings(':memory:');
+    const alfa = settings.addWish({ title: 'Альфа', amount: 250_000, kind: 'card', rate: 30 });
+    settings.setWishDue(alfa.id, '2026-11-18');
+    const screen = (ways: string | null) => plain(wishScreen(data(), savedOf(settings), { today, id: alfa.id, ways, incomes }));
+    const fresh = screen(null);
+    assert.deepEqual([fresh.wish.kind, fresh.rate, fresh.words.plan], ['card', 30, 'Как гасить']);
+    assert.deepEqual(fresh.ways.map((w: { id: string; title: string; unit: string; rest: string }) => [w.id, w.title, w.unit, w.rest]), [
+      ['savings', 'Из накоплений', 'в месяц', 'все'],
+      ['extras', 'Дополнительные', 'в месяц', 'все'],
+      ['weeks', 'Ужать недели', 'с недели', 'все'],
+    ]);
+    assert.deepEqual(fresh.result, { title: 'Как будете гасить?', note: 'выберите сценарий или способы', late: false });
+    assert.deepEqual(
+      fresh.scenarios.map((x: { label: string; note: string; ways: string }) => [x.label, x.note, x.ways]),
+      [
+        ['Ноябрь', 'без %', 'savings:,extras:'],
+        ['Декабрь', '+542 ₽', 'savings:'],
+        ['Апрель 2027', '+8 290 ₽', 'savings:42000'],
+        ['Ноябрь 2027', '+29 847 ₽', 'savings:21000'],
+      ],
+      'all the savings close it soonest, and equal repayments for half a year or a year cost more interest',
+    );
+
+    const all = screen('savings:');
+    assert.deepEqual(all.result, { title: 'Закроете в декабре', note: 'переплата ≈ 542 ₽', late: false });
+    assert.equal(all.scenarios.find((x: { on: boolean }) => x.on)?.ways, 'savings:');
+    assert.deepEqual(all.steps.map((r: { title: string; details: string; amount: number }) => [r.title, r.details, r.amount]), [
+      ['Октябрь', 'останется 175 000', 75_000],
+      ['Ноябрь', 'останется 55 542 · проценты 542', 120_000],
+      ['Декабрь', 'закрыта', 55_542],
+    ]);
+    const monthly = screen('savings:42000');
+    assert.deepEqual([monthly.result.title, monthly.ways[0].line], ['Закроете в апреле 2027', 'по 42 000 ₽ · всего 258 290 ₽']);
+
+    assert.equal(post(settings, `/wishes/${alfa.id}/ways`, { ways: 'savings:' }), 'saved');
+    const flow = (month: string) =>
+      plain(monthScreen(data(), savedOf(settings), { ...budget, month, incomes })).flow.parts.slice(3).map((p: { label: string; amount: number }) => [p.label, p.amount]);
+    assert.deepEqual(flow('2026-10'), [['На кредитки', 75_000], ['В накопления', 0]]);
+    assert.deepEqual(flow('2026-12'), [['На кредитки', 55_542], ['В накопления', 19_458]]);
+    const card = plain(wishesScreen(data(), savedOf(settings), { today, incomes })).wishes[0];
+    assert.deepEqual([card.kind, card.icon, card.when, card.situation], ['card', 'card', 'закроете в декабре · +542 ₽', 'calm'], 'calm, as the plan closes it, with what it costs');
+  });
+
+  it('repays a card with the expenses linked to it: from savings they count outside the budget, and once they cover it the card is repaid', () => {
+    using settings = new Settings(':memory:');
+    const alfa = settings.addWish({ title: 'Альфа', amount: 120_000, kind: 'card', rate: 30 });
+    settings.setWishDue(alfa.id, '2026-11-18');
+    post(settings, `/wishes/${alfa.id}/ways`, { ways: 'savings:' });
+    const repaid = (...amounts: number[]): EntityCollections => ({
+      ...data(),
+      transaction: [...(data().transaction ?? []), ...amounts.map((outcome, i) => transaction({ id: `repay-${i}`, date: '2026-10-06', outcome, payee: 'Кирилл А.' }))],
+    });
+
+    const sheet = plain(spendingScreen(repaid(50_000), savedOf(settings), { today, id: 'repay-0' }));
+    assert.deepEqual(sheet.payments.others.find((g: { label: string }) => g.label === 'Погасить кредитку')?.options, [{ value: `save-${alfa.id}`, label: 'Альфа', icon: 'card' }]);
+    assert.ok(
+      sheet.payments.others.every((g: { label: string; options: Array<{ value: string }> }) => g.label === 'Погасить кредитку' || g.options.every((o) => o.value !== `save-${alfa.id}` && o.value !== `wish-${alfa.id}`)),
+      'nor is a card set aside for or bought as a wish',
+    );
+    const before = plain(weekScreen(repaid(50_000), savedOf(settings), budget)).total.amount;
+    assert.deepEqual(submitMarking(settings, repaid(50_000), `/spending/repay-0/save-${alfa.id}`, new URLSearchParams()), { status: 'saved' });
+    assert.equal(settings.spendingMarks().get('repay-0'), 'outside', 'the plan held nothing in the week, so it came from savings');
+    assert.equal(plain(weekScreen(repaid(50_000), savedOf(settings), budget)).total.amount, before + 50_000, 'and the week no longer counts it');
+
+    const part = plain(wishScreen(repaid(50_000), savedOf(settings), { today, id: alfa.id, ways: null, incomes }));
+    assert.deepEqual([part.saved, part.result.title], [50_000, 'Закроете в ноябре']);
+    assert.deepEqual(
+      part.steps.map((r: { title: string; details: string; amount: number }) => [r.title, r.details, r.amount]),
+      [['5–11 октября', 'погашено', 50_000], ['Октябрь', 'останется 45 000', 25_000], ['Ноябрь', 'закрыта', 45_000]],
+      'what October repaid already leaves it 25 000 more to give',
+    );
+    assert.deepEqual(
+      plain(monthScreen(repaid(50_000), savedOf(settings), { ...budget, month: '2026-10', incomes })).flow.parts.slice(3).map((p: { label: string; amount: number }) => [p.label, p.amount]),
+      [['На кредитки', 75_000], ['В накопления', 0]],
+    );
+
+    submitMarking(settings, repaid(50_000, 70_000), `/spending/repay-1/save-${alfa.id}`, new URLSearchParams());
+    const done = plain(wishesScreen(repaid(50_000, 70_000), savedOf(settings), { today, incomes })).wishes[0];
+    assert.deepEqual([done.state, done.details, done.situation, done.muted], ['bought', 'погашено', null, true]);
+  });
+
+  it('takes what one card repaid from a month’s savings, plan or not, out of what that month leaves another', () => {
+    using settings = new Settings(':memory:');
+    const otp = settings.addWish({ title: 'ОТП', amount: 180_000, kind: 'card' });
+    const alfa = settings.addWish({ title: 'Альфа', amount: 250_000, kind: 'card' });
+    settings.setWishDue(alfa.id, '2026-11-18');
+    const repaid: EntityCollections = { ...data(), transaction: [...(data().transaction ?? []), transaction({ id: 'otp', date: '2026-10-06', outcome: 60_000, payee: 'Кирилл А.' })] };
+    submitMarking(settings, repaid, `/spending/otp/save-${otp.id}`, new URLSearchParams());
+    const steps = plain(wishScreen(repaid, savedOf(settings), { today, id: alfa.id, ways: 'savings:', incomes })).steps;
+    assert.deepEqual([steps[0].title, steps[0].amount], ['Октябрь', 15_000], 'October leaves 75 000, of which the other card took 60 000 without a plan');
+    const flow = plain(monthScreen(repaid, savedOf(settings), { ...budget, month: '2026-10', incomes })).flow.parts;
+    assert.deepEqual(flow.slice(3).map((p: { label: string; amount: number }) => [p.label, p.amount]), [['На кредитки', 60_000], ['В накопления', 15_000]]);
+  });
+
+  it('warns of a card its plan does not close, and of one without a plan past its day', () => {
+    using settings = new Settings(':memory:');
+    const big = settings.addWish({ title: 'Большая', amount: 2_000_000, kind: 'card', rate: 30 });
+    settings.setWishDue(big.id, '2026-10-20');
+    post(settings, `/wishes/${big.id}/ways`, { ways: 'savings:20000' });
+    const otp = settings.addWish({ title: 'ОТП', amount: 180_000, kind: 'card' });
+    settings.setWishDue(otp.id, '2026-10-20');
+    const cards = (day: string) => plain(wishesScreen(data(), savedOf(settings), { today: day, incomes })).wishes;
+    assert.deepEqual(cards(today).map((w: { title: string; situation: string; details: string }) => [w.title, w.situation, w.details]), [
+      ['Большая', 'risk', 'не закроете за 3 года'],
+      ['ОТП', 'action', 'без % до 20 октября · не разложено'],
+    ]);
+    assert.deepEqual([cards('2026-10-21')[1].situation, cards('2026-10-21')[1].details], ['problem', 'проценты с 21 октября']);
+  });
+
+  it('holds a card’s money in the extras as a repayment, which an expense of the month pays', () => {
+    using settings = new Settings(':memory:');
+    const alfa = settings.addWish({ title: 'Альфа', amount: 30_000, kind: 'card' });
+    settings.setWishDue(alfa.id, '2026-10-30');
+    post(settings, `/wishes/${alfa.id}/ways`, { ways: 'extras:' });
+    const held = plain(extrasScreen(data(), savedOf(settings), budget)).plan.items.find((p: { wish: number | null }) => p.wish === alfa.id);
+    assert.deepEqual([held.title, held.details.split(' · ')[0], held.icon], ['Альфа · погасить', 'Кредитка', 'card']);
+    const sheet = plain(spendingScreen(data(), savedOf(settings), { today, id: 'transfer' }));
+    const choice = sheet.payments.choices.find((c: { choice: string }) => c.choice === `save-${alfa.id}`);
+    assert.deepEqual([choice.label, choice.detail, choice.icon], ['Альфа', 'погасить · 30 000 ₽', 'card']);
+    submitMarking(settings, data(), `/spending/transfer/save-${alfa.id}`, new URLSearchParams());
+    assert.equal(settings.spendingMarks().get('transfer'), undefined, 'a repayment the plan held money for counts where it held it');
+    assert.deepEqual([...settings.wishSavings().values()], [{ wish: alfa.id, envelope: 'extra' }]);
   });
 
   it('lets an expense buy a wish with a plan: it counts outside the budget, and the wish is bought', () => {

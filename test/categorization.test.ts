@@ -180,7 +180,7 @@ describe('paymentChoices', () => {
   });
 
   it('offers to set aside what a wish’s plan holds in the week, with what is set aside already taken off', () => {
-    const tyres = { id: 1, title: 'Шины Kia K5', amount: 60_000, due: '2026-11-28' };
+    const tyres = { id: 1, title: 'Шины Kia K5', amount: 60_000, due: '2026-11-28', kind: 'wish' as const };
     const plan = { buyWeek: '2026-11-28', steps: [{ way: 'weeks', kind: 'week', week: '2026-10-17', amount: 5_000 }] satisfies Step[] };
     const held = wishPurchases([{ wish: tyres, plan }], { today: '2026-10-18', weekStart: 5 });
     const aside = expense('Перевод', 5_000, '2026-10-17');

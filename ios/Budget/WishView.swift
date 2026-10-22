@@ -29,7 +29,7 @@ struct WishPlanSheet: View {
             .padding(.top, 10)
             Screen(path: "wish", query: ["id": String(id), "ways": ways]) { (s: WishScreen) in
                 WishPlanContent(screen: s, ways: $ways)
-                    .task(id: s.wish) { wish = Wish(id: s.wish.id, title: s.wish.title, amount: s.wish.amount) }
+                    .task(id: s.wish) { wish = Wish(id: s.wish.id, title: s.wish.title, amount: s.wish.amount, kind: s.wish.kind, rate: s.rate) }
             }
         }
         .background(LilacBackground())
@@ -55,9 +55,12 @@ struct WishPlanContent: View {
                 LilacAmount(amount: s.wish.amount, symbol: s.symbol, size: 44).padding(.top, 2)
                 DueLine(screen: s) { due in post("wishes/\(s.wish.id)/due", ["due": due]) }
                     .padding(.top, 10)
-                if let saved = s.saved, saved > 0.5 { SavedLine(amount: saved, symbol: s.symbol).padding(.top, 10) }
+                if let saved = s.saved, saved > 0.5 { SavedLine(title: s.word.saved, amount: saved, symbol: s.symbol).padding(.top, 10) }
+                if !s.bought, let scenarios = s.scenarios, !scenarios.isEmpty {
+                    ScenarioChips(scenarios: scenarios) { ways = $0 }.padding(.top, 14)
+                }
                 if !s.bought {
-                    LilacHeading("Как собрать")
+                    LilacHeading(s.word.plan ?? "Как собрать")
                     VStack(spacing: 12) {
                         ForEach(s.ways) { way in
                             WayCardView(way: way, symbol: s.symbol,
@@ -95,7 +98,7 @@ struct WishPlanContent: View {
     }
 }
 
-/// «Нужно» with the day the wish is needed by, to pick.
+/// «Нужно» with the day the wish is needed by, to pick; a card's last day without interest.
 struct DueLine: View {
     let screen: WishScreen
     let change: (String) -> Void
@@ -106,7 +109,7 @@ struct DueLine: View {
         let to = Dates.date(screen.dueRange.to) ?? Date()
         HStack(spacing: 10) {
             Image(systemName: "flag").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.accent)
-            Text("Нужно").font(.body)
+            Text(screen.word.due).font(.body)
             Spacer()
             DatePicker("", selection: Binding(get: { due }, set: { change(Dates.text($0)) }), in: from...to, displayedComponents: .date)
                 .labelsHidden()
@@ -120,15 +123,16 @@ struct DueLine: View {
     }
 }
 
-/// What expenses set aside for the wish, under its day.
+/// What expenses set aside for the wish, or repaid of a card, under its day.
 struct SavedLine: View {
+    var title = "Отложено"
     let amount: Double
     let symbol: String
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: Icons.symbol("piggy")).font(.subheadline.weight(.semibold)).foregroundStyle(Palette.color("green"))
-            Text("Отложено").font(.body)
+            Text(title).font(.body)
             Spacer()
             Text(Money.text(amount, symbol)).font(.body.weight(.semibold)).monospacedDigit()
         }
@@ -200,7 +204,7 @@ struct WayCardView: View {
                     LilacAmount(amount: moving ?? way.amount, symbol: symbol, size: 28).fixedSize()
                     if let unit = way.unit { Text(unit).font(.subheadline).foregroundStyle(Lilac.muted) }
                     Spacer()
-                    if !way.fixed { Text("остальное").font(.footnote.weight(.semibold)).foregroundStyle(Lilac.accent) }
+                    if !way.fixed { Text(way.rest ?? "остальное").font(.footnote.weight(.semibold)).foregroundStyle(Lilac.accent) }
                 }
             }
             Text(way.line).font(.subheadline).foregroundStyle(way.late ? Palette.color("orange") : Lilac.muted)
@@ -226,6 +230,35 @@ struct WayCardView: View {
     }
 }
 
+/// A card's plans to pick in one tap, side by side: the month each closes it in over the interest it costs.
+struct ScenarioChips: View {
+    let scenarios: [WishScreen.Scenario]
+    let pick: (String) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(scenarios) { scenario in
+                    Button { pick(scenario.ways) } label: {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(scenario.label).font(.subheadline.weight(.semibold))
+                            if !scenario.note.isEmpty { Text(scenario.note).font(.footnote).monospacedDigit().foregroundStyle(Lilac.muted) }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .foregroundStyle(scenario.on ? Lilac.accent : Color.primary)
+                        .background(scenario.on ? Lilac.tint : Lilac.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay { if scenario.on { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Lilac.accent.opacity(0.35), lineWidth: 1) } }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("scenario-\(scenario.ways)")
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+}
+
 /// The plan's steps by date, a line at this week between what is behind and what is ahead, then the buying itself.
 struct PlanSteps: View {
     let screen: WishScreen
@@ -237,8 +270,12 @@ struct PlanSteps: View {
             ForEach(Array(past.enumerated()), id: \.element.id) { index, step in row(step, first: index == 0) }
             if !past.isEmpty, !ahead.isEmpty { LilacTodayLine(text: "Сейчас") }
             ForEach(Array(ahead.enumerated()), id: \.element.id) { index, step in row(step, first: index == 0) }
-            LilacRow(marker: .symbol("gift", screen.buy.late ? Palette.color("orange") : Lilac.accent), title: screen.bought ? "Куплено" : "Купить",
-                     details: screen.buy.label, amount: nil, symbol: screen.symbol, chevron: false)
+            // A card's last month says it is closed, and the result under the plan when.
+            if screen.result == nil {
+                LilacRow(marker: .symbol(screen.wish.kind == "card" ? Icons.symbol("card") : "gift", screen.buy.late ? Palette.color("orange") : Lilac.accent),
+                         title: screen.bought ? screen.word.bought : screen.word.buy,
+                         details: screen.buy.label, amount: nil, symbol: screen.symbol, chevron: false)
+            }
         }
     }
 
@@ -261,19 +298,29 @@ struct Gathered: View {
         let s = screen
         let picked = s.ways.contains { $0.on }
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Собрано").font(.subheadline).foregroundStyle(Lilac.muted)
-                Spacer()
-                Text("\(Money.number(s.covered)) из \(Money.text(s.wish.amount, s.symbol))")
-                    .font(.headline.monospacedDigit())
-                    .contentTransition(.numericText(value: s.covered))
+            if let result = s.result {
+                // A card tells when the ways picked close it, and what that costs.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(result.title).font(.headline).foregroundStyle(result.late ? Lilac.red : Color.primary)
+                    if !result.note.isEmpty { Text(result.note).font(.subheadline).foregroundStyle(Lilac.muted) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("card-result")
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Собрано").font(.subheadline).foregroundStyle(Lilac.muted)
+                    Spacer()
+                    Text("\(Money.number(s.covered)) из \(Money.text(s.wish.amount, s.symbol))")
+                        .font(.headline.monospacedDigit())
+                        .contentTransition(.numericText(value: s.covered))
+                }
+                GatheredBar(total: s.wish.amount, covered: s.covered, parts: s.ways.filter { $0.on }.map { GatheredBar.Part(amount: $0.given, color: $0.color) })
             }
-            GatheredBar(total: s.wish.amount, covered: s.covered, parts: s.ways.filter { $0.on }.map { GatheredBar.Part(amount: $0.given, color: $0.color) })
-            if s.short > 0.5, picked || s.chosen {
+            if s.result == nil, s.short > 0.5, picked || s.chosen {
                 Text("Не хватает \(Money.text(s.short, s.symbol))").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.red)
             }
             if s.bought {
-                Label("Куплено", systemImage: "checkmark").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.accent)
+                Label(s.word.bought, systemImage: "checkmark").font(.subheadline.weight(.semibold)).foregroundStyle(Lilac.accent)
             } else if s.chosen {
                 if let r = s.relay, r.add {
                     LilacPrimaryButton(label: r.label, busy: busy) { relay(r) }.accessibilityIdentifier("wish-relay")

@@ -148,6 +148,10 @@ struct Wish: Decodable, Hashable {
     let id: Int
     let title: String
     let amount: Double
+    /// wish, or card for the debt of a credit card; nil from a server older than cards.
+    var kind: String? = nil
+    /// A card's interest in percent a year, if the user said.
+    var rate: Double? = nil
 }
 
 struct WeekScreen: Decodable {
@@ -897,6 +901,18 @@ struct WishScreen: Decodable {
     let chosen: Bool
     let planned: Bool
     let bought: Bool
+    /// What the screen calls the day, the money set aside, buying and bought; a card's are about repaying its debt. Nil
+    /// from a server older than cards.
+    let words: Words?
+    /// A card's interest in percent a year, if the user said.
+    let rate: Double?
+    /// A card's: when the ways picked close it and what that costs.
+    let result: CardResult?
+    /// A card's plans to pick in one tap.
+    let scenarios: [Scenario]?
+
+    /// The words of the screen, a wish's when the server sends none.
+    var word: Words { words ?? Words(due: "Нужно", saved: "Отложено", buy: "Купить", bought: "Куплено", plan: nil) }
 
     struct Goal: Decodable, Hashable {
         let id: Int
@@ -905,6 +921,33 @@ struct WishScreen: Decodable {
         let due: String
         /// The user picked the day; otherwise it is a month from now.
         let dueSet: Bool
+        /// wish or card; nil from a server older than cards.
+        var kind: String? = nil
+    }
+
+    struct Words: Decodable, Hashable {
+        let due: String
+        let saved: String
+        let buy: String
+        let bought: String
+        /// The heading over the ways: «Как собрать», «Как гасить».
+        let plan: String?
+    }
+
+    /// «Закроете в декабре» with «переплата ≈ 2 400 ₽»; `late` when the plan does not close the card.
+    struct CardResult: Decodable, Hashable {
+        let title: String
+        let note: String
+        let late: Bool
+    }
+
+    /// A plan to pick in one tap: the month it closes the card and its interest; `ways` go back as the picks.
+    struct Scenario: Decodable, Hashable, Identifiable {
+        let label: String
+        let note: String
+        let ways: String
+        let on: Bool
+        var id: String { ways }
     }
 
     struct DueRange: Decodable, Hashable {
@@ -1018,6 +1061,8 @@ struct WayCard: Decodable, Hashable, Identifiable {
     let unit: String?
     let line: String
     let late: Bool
+    /// What the amount says when the way takes all there is: «остальное», «все»; nil from an older server.
+    let rest: String?
 }
 
 /// A step of a wish's plan on its date.

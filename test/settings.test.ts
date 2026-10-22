@@ -688,7 +688,7 @@ describe('Settings', () => {
         db.exec(`INSERT INTO wish (title, amount) VALUES ('Резина Танюшке', 60000)`);
       }
       using settings = new Settings(path);
-      assert.deepEqual(settings.wishes(), [{ id: 1, title: 'Резина Танюшке', amount: 60_000, due: null }]);
+      assert.deepEqual(settings.wishes(), [{ id: 1, title: 'Резина Танюшке', amount: 60_000, due: null, kind: 'wish' }], 'a wish of a file made before cards stays a wish');
       settings.setWishDue(1, '2026-11-01');
       settings.chooseWishPlan(1, { ways: 'extra-2026-10:', buyWeek: '2026-10-31', steps: [{ way: 'extra-2026-10', kind: 'extra', week: '2026-10-10', amount: 60_000 }] });
       assert.equal(settings.wishes()[0]?.due, '2026-11-01');
@@ -698,6 +698,23 @@ describe('Settings', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('keeps the debt of a credit card as a wish of its own kind, which an edit without the kind keeps', () => {
+    using settings = new Settings(':memory:');
+    const card = settings.addWish({ title: 'Альфа', amount: 250_000, kind: 'card' });
+    settings.addWish({ title: 'Пылесос', amount: 20_000 });
+    assert.deepEqual(settings.wishes().map((w) => [w.title, w.kind]), [['Альфа', 'card'], ['Пылесос', 'wish']]);
+    settings.updateWish(card.id, { title: 'Альфа', amount: 180_000 });
+    assert.equal(settings.wishes()[0]?.kind, 'card');
+    settings.updateWish(card.id, { title: 'Альфа', amount: 180_000, rate: 34.9 });
+    assert.equal(settings.wishes()[0]?.rate, 34.9);
+    settings.updateWish(card.id, { title: 'Альфа', amount: 170_000 });
+    assert.equal(settings.wishes()[0]?.rate, 34.9, 'a form without the rate keeps it');
+    settings.updateWish(card.id, { title: 'Альфа', amount: 170_000, rate: null });
+    assert.equal(settings.wishes()[0]?.rate, undefined, 'and one with it empty clears it');
+    settings.updateWish(card.id, { title: 'Альфа', amount: 180_000, kind: 'wish' });
+    assert.equal(settings.wishes()[0]?.kind, 'wish');
   });
 
   it('moves the weeks of wishes\' plans with the first day of a week', () => {

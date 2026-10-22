@@ -10,12 +10,15 @@ import { paymentDate } from '../../regular.ts';
 import type { Settings } from '../../settings.ts';
 import { MONTH_LIMIT, monthOfWeek, weekLimit, weekOf, weeksOfMonth, type Purchase, type Wish } from '../../week.ts';
 import {
+  cardsTaken,
   combinedPlan,
   gathering,
   heldByWay,
+  isRepaid,
   keptSteps,
   parsePicks,
   picksText,
+  SAVED_WAY,
   savingsTaken,
   waysOf,
   wishFrame,
@@ -27,6 +30,7 @@ import {
   type WishGoal,
 } from '../../wish-plans.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
+import { cardPlan, cardScenarios, cardWays, type CardProjection, type CardScenario } from '../../card-plans.ts';
 import { dayMonth, money, num, plural } from '../format.ts';
 import type { Tone } from '../tones.ts';
 import { budgetOf, type SavedBudget } from './dashboard.ts';
@@ -39,7 +43,7 @@ export const WAY_STEP = 1000;
 
 /** The wish with its day, or the day it is planned for without one. */
 export function wishGoal(wish: Wish, today: DateString): WishGoal {
-  return { id: wish.id, title: wish.title, amount: wish.amount, due: wish.due ?? addDays(today, DEFAULT_DAYS) };
+  return { id: wish.id, title: wish.title, amount: wish.amount, due: wish.due ?? addDays(today, DEFAULT_DAYS), kind: wish.kind };
 }
 
 /** Whether an expense bought the wish. */
@@ -47,11 +51,23 @@ export function isBought(saved: Pick<SavedBudget, 'wishPayments'>, wishId: numbe
   return [...(saved.wishPayments?.values() ?? [])].includes(wishId);
 }
 
+
+/**
+ * The credit cards other than `except`, each with its plan and its repayments from savings, those that count outside
+ * the budget; `expenses` are all of them, as allExpenses lists them.
+ */
+export function cardsOf(saved: SavedBudget, expenses: readonly Operation[], except?: number) {
+  return saved.wishes
+    .filter((w) => w.kind === 'card' && w.id !== except)
+    .map((w) => ({ plan: saved.wishPlans?.get(w.id) ?? null, repaid: expenses.filter((o) => o.saving?.id === w.id && saved.marks?.get(o.id) === 'outside') }));
+}
+
 /**
  * The budget as a wish's plan sees it: the plans of the other wishes laid over it, the purchases its own plan moved
- * back where they were, and what each month puts into savings by the plan of the month.
+ * back where they were, and what each month puts into savings by the plan of the month, after what the other wishes'
+ * plans and the other cards take from it (cardsTaken). `expenses` are all of them, as allExpenses lists them.
  */
-export function planContext(data: EntityCollections, saved: SavedBudget, incomes: readonly Income[], today: DateString, wishId: number): PlanContext {
+export function planContext(data: EntityCollections, saved: SavedBudget, incomes: readonly Income[], today: DateString, wishId: number, expenses: readonly Operation[]): PlanContext {
   const own = saved.wishPlans?.get(wishId);
   const moved = new Map((own?.steps ?? []).flatMap((s) => (s.kind === 'move' ? [[s.purchase, s] as const] : [])));
   const purchases = saved.purchases.map((p) => {
@@ -62,11 +78,13 @@ export function planContext(data: EntityCollections, saved: SavedBudget, incomes
   const current = weekOf(today, saved.weekStart);
   const budget = budgetOf(data, { ...saved, purchases, wishPlans: others }, { today, from: addDays(current, -7) });
   const income = monthlyIncome([...incomes]);
-  const plans = [...others.values()].map((plan) => ({ plan }));
+  const cardIds = new Set(saved.wishes.filter((w) => w.kind === 'card').map((w) => w.id));
+  const plans = [...others].filter(([id]) => !cardIds.has(id)).map(([, plan]) => ({ plan }));
+  const cards = cardsOf(saved, expenses, wishId);
   const savings = (month: MonthString) => {
     const regular = saved.regular.filter((e) => paymentDate(e, month) !== null).reduce((sum, e) => sum + e.amount, 0);
     const weeks = weeksOfMonth(month, saved.weekStart).reduce((sum, w) => sum + weekLimit(saved, w), 0);
-    return income - regular - weeks - MONTH_LIMIT - savingsTaken(plans, month);
+    return income - regular - weeks - MONTH_LIMIT - savingsTaken(plans, month) - cardsTaken(cards, month);
   };
   return { budget, today, savings };
 }
@@ -94,7 +112,12 @@ export interface WishPlanView {
   chosen: boolean;
   /** A plan is chosen for the wish. */
   planned: boolean;
+  /** An expense bought the wish, or a card's repayments cover its debt. */
   bought: boolean;
+  /** A card's: month by month how its plan repays it, when that closes it and the interest it pays. */
+  projection?: CardProjection;
+  /** A card's plans to pick in one tap. */
+  scenarios?: CardScenario[];
 }
 
 /** Expenses that set money aside for a wish, newest first; `expenses` are all of them, as allExpenses lists them. */
@@ -116,12 +139,36 @@ export function wishPlan(
   const wish = saved.wishes.find((w) => w.id === options.id);
   if (!wish) return null;
   const goal = wishGoal(wish, today);
-  const context = planContext(data, saved, options.incomes, today, wish.id);
+  const expenses = options.expenses ?? allExpenses(data, saved);
+  const context = planContext(data, saved, options.incomes, today, wish.id, expenses);
   const stored = saved.wishPlans?.get(wish.id);
-  const savings = savingsOf(options.expenses ?? allExpenses(data, saved), wish.id);
+  const savings = savingsOf(expenses, wish.id);
   const on = { today, weekStart: saved.weekStart };
   const was = gathering(wish, stored ?? null, savings, on);
-  const live = combinedPlan(goal, context, parsePicks(options.ways ?? stored?.ways ?? null), keptSteps(was, stored?.steps ?? [], today, saved.weekStart));
+  if (wish.kind === 'card') {
+    // A card's plan is always as the ways picked make it from today, so it tells when the card closes as of now.
+    const kept = keptSteps(was, stored?.steps ?? [], today, saved.weekStart, 'card');
+    const rate = wish.rate ?? null;
+    const live = cardPlan(goal, rate, context, parsePicks(options.ways ?? stored?.ways ?? null), kept);
+    const picks = picksText(live.parts);
+    const chosen = stored !== undefined && (options.ways === null || picks === stored.ways);
+    return {
+      goal,
+      context,
+      parts: live.parts,
+      picks,
+      plan: chosen ? { buyWeek: stored.buyWeek, steps: stored.steps, short: live.plan.short } : live.plan,
+      fresh: live.plan,
+      gathered: chosen ? was : gathering(wish, live.plan, savings, on),
+      relay: null,
+      chosen,
+      planned: stored !== undefined,
+      bought: isRepaid(wish, was.saved),
+      projection: live.projection,
+      scenarios: cardScenarios(goal, rate, context, kept),
+    };
+  }
+  const live = combinedPlan(goal, context, parsePicks(options.ways ?? stored?.ways ?? null), keptSteps(was, stored?.steps ?? [], today, saved.weekStart, wish.kind));
   const picks = picksText(live.parts);
   const chosen = stored !== undefined && (options.ways === null || picks === stored.ways);
   const relaid = gathering(wish, live.plan, savings, on);
@@ -178,14 +225,17 @@ export function wayCards(view: WishPlanView, purchases: readonly Purchase[], s: 
   const { goal, context, parts, plan } = view;
   const { budget } = context;
   const { buyWeek, weeks } = wishFrame(goal, context);
+  const card = goal.kind === 'card';
   const usual = weeks[0] ? weekLimit(budget, weeks[0]) : 0;
-  return waysOf(goal, context).map((way) => {
+  if (card) return cardWayCards(view, s);
+  const kept = plan.steps.filter((x) => x.way === SAVED_WAY);
+  return waysOf(goal, context, kept).map((way) => {
     const part = parts.find((p) => p.way.id === way.id);
     let title = '';
     let line = '';
     switch (way.kind) {
       case 'extra':
-        title = way.month === monthOfWeek(buyWeek) ? `Дополнительные ${monthOf(way.month)}` : `Отложить в ${monthIn(way.month)}`;
+        title = card || way.month === monthOfWeek(buyWeek) ? `Дополнительные ${monthOf(way.month)}` : `Отложить в ${monthIn(way.month)}`;
         line = part ? `останется ${money(way.most - part.given, s)}` : `свободно ${money(way.most, s)}`;
         break;
       case 'flexible': {
@@ -202,13 +252,13 @@ export function wayCards(view: WishPlanView, purchases: readonly Purchase[], s: 
           : `до ${money(way.most, s)} с недели · ${weeksWord(weeks.length)}`;
         break;
       case 'savings':
-        title = 'Из накоплений';
-        line = part ? `останется ${money(way.most - part.given, s)}` : `в накоплениях ${monthOf(way.month)} ${money(way.most, s)}`;
+        title = card ? `Накопления ${monthOf(way.month)}` : 'Из накоплений';
+        line = part ? `останется ${money(way.most - part.given, s)}` : card ? `свободно ${money(way.most, s)}` : `в накоплениях ${monthOf(way.month)} ${money(way.most, s)}`;
         break;
       case 'later': {
         const first = weeksOfMonth(way.month, budget.weekStart)[0] ?? buyWeek;
-        title = 'Подождать';
-        line = part ? `купить с ${dayMonth(first)} · позже срока` : `с ${dayMonth(first)} · свободно в ${monthIn(way.month)} ${money(way.most, s)}`;
+        title = card ? 'Позже срока' : 'Подождать';
+        line = part ? `${card ? 'погасить' : 'купить'} с ${dayMonth(first)} · ${card ? 'с процентами' : 'позже срока'}` : `с ${dayMonth(first)} · свободно в ${monthIn(way.month)} ${money(way.most, s)}`;
         break;
       }
     }
@@ -226,6 +276,53 @@ export function wayCards(view: WishPlanView, purchases: readonly Purchase[], s: 
       unit: way.kind === 'weeks' ? 'с недели' : null,
       line,
       late: way.kind === 'later',
+      rest: 'остальное',
+    };
+  });
+}
+
+/**
+ * A card's ways as the app's cards: what each month leaves over and its extras, a month's worth each, all of it unless
+ * a slider says how much («все»), and the cut of each week; picked, what it gives in all.
+ */
+function cardWayCards(view: WishPlanView, s: string) {
+  const { context, parts } = view;
+  const kept = view.fresh.steps.filter((x) => x.way === SAVED_WAY);
+  const usual = weekLimit(context.budget, weekOf(context.today, context.budget.weekStart));
+  return cardWays(context, kept).map((way) => {
+    const part = parts.find((p) => p.way.id === way.id);
+    const all = part !== undefined && !part.fixed;
+    const total = part ? ` · всего ${money(part.given, s)}` : '';
+    let title = '';
+    let line = '';
+    switch (way.id) {
+      case 'savings':
+        title = 'Из накоплений';
+        line = part ? `${all ? 'всё, что остаётся' : `по ${money(part.each, s)}`}${total}` : `остаётся до ${money(way.most, s)} в месяц`;
+        break;
+      case 'extras':
+        title = 'Дополнительные';
+        line = part ? `${all ? 'всё свободное' : `по ${money(part.each, s)}`}${total}` : `до ${money(way.most, s)} в месяц`;
+        break;
+      default:
+        title = 'Ужать недели';
+        line = part ? `${num(usual - part.each)} вместо ${num(usual)}${total}` : `до ${money(way.most, s)} с недели`;
+    }
+    return {
+      id: way.id,
+      title,
+      icon: way.id === 'savings' ? 'piggy' : way.id === 'extras' ? 'bag' : 'calendar',
+      color: way.id === 'savings' ? 'green' : way.id === 'extras' ? 'violet' : 'yellow',
+      on: part !== undefined,
+      fixed: part?.fixed ?? false,
+      amount: part?.each ?? 0,
+      given: part?.given ?? 0,
+      most: way.most,
+      step: WAY_STEP,
+      unit: way.id === 'weeks' ? 'с недели' : 'в месяц',
+      line,
+      late: false,
+      rest: 'все',
     };
   });
 }

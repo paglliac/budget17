@@ -6,25 +6,31 @@
 // in the month's flow. Expenses that set money aside for the wish, such as a transfer to savings, pay what the plan
 // holds where they come; what the plan held before the buying in a week or month gone by is set aside only as far as
 // they paid it (the user's rule, 2026-10-18), and a plan chosen anew starts from what is set aside. Pure functions.
+//
+// The debt of a credit card is planned the same way, by the day its interest-free days end, with what is left over in
+// each month up to that day as a way of its own, not only the month it is repaid in, as each month's savings stand
+// alone (the user's rule, 2026-10-22). Its repayments are the expenses set aside for it; one that paid nothing the plan
+// held came from savings and takes the place of what the plan took from them.
 
-import { addDays, shiftMonth, type MonthString } from './dates.ts';
+import { addDays, monthOf, shiftMonth, type MonthString } from './dates.ts';
 import type { Operation } from './ledger.ts';
-import { monthOfWeek, pays, purchaseStatus, summarizeExtras, weekOf, weeksOfMonth, type Budget, type Purchase, type PurchaseStatus, type WeekStart, type Wish } from './week.ts';
+import { monthOfWeek, pays, purchaseStatus, summarizeExtras, weekOf, weeksOfMonth, type Budget, type Purchase, type PurchaseStatus, type WeekStart, type Wish, type WishKind } from './week.ts';
 import type { DateString } from './zenmoney/types.ts';
 
-/** A wish with the day it is needed by. */
+/** A wish with the day it is needed by: for a card, the last day without interest. */
 export interface WishGoal {
   id: number;
   title: string;
   amount: number;
   due: DateString;
+  kind?: WishKind;
 }
 
 export type WayKind = 'extra' | 'flexible' | 'weeks' | 'savings' | 'later';
 
 /** A way to put money towards a wish. */
 export interface Way {
-  /** `extra-<month>`, `flexible`, `weeks`, `savings` or `later-<month>`. */
+  /** `extra-<month>`, `flexible`, `weeks`, `savings` (`savings-<month>` for a card) or `later-<month>`. */
   id: string;
   kind: WayKind;
   /** The month whose extras or savings it takes; for the weeks and flexible purchases, the month it is bought in. */
@@ -95,7 +101,8 @@ function weeksFrom(from: DateString, to: DateString): DateString[] {
   return weeks;
 }
 
-function extrasFree(budget: Budget, month: MonthString): number {
+/** What is free in a month's extras, none when they are spent beyond their amount. */
+export function extrasFree(budget: Budget, month: MonthString): number {
   return Math.max(0, summarizeExtras(budget, month).free);
 }
 
@@ -130,17 +137,23 @@ function laterMonth(budget: Budget, month: MonthString): MonthString | null {
 
 /**
  * The ways to put money towards the wish, in this order: the extras of the months up to the day, flexible purchases
- * moved past it, a cut of the weeks, the savings of the month it is bought in, and waiting for the extras of the first
- * month after it with room. A way with nothing to give is left out.
+ * moved past it, a cut of the weeks, the savings of the month it is bought in, or of each month up to the day for a
+ * card, and waiting for the extras of the first month after it with room. A way with nothing to give is left out.
+ * What `kept` steps took from a month's savings already, as a card's repayments from them, is not there to give again.
  */
-export function waysOf(goal: WishGoal, context: PlanContext): Way[] {
+export function waysOf(goal: WishGoal, context: PlanContext, kept: readonly Step[] = []): Way[] {
   const { budget } = context;
   const { current, buyWeek, weeks, months } = wishFrame(goal, context);
   const buying = monthOfWeek(buyWeek);
   const ways: Way[] = months.map((month): Way => ({ id: `extra-${month}`, kind: 'extra', month, most: extrasFree(budget, month) }));
   ways.push({ id: 'flexible', kind: 'flexible', month: buying, most: flexibleExtras(budget, current, buyWeek).reduce((sum, p) => sum + p.amount, 0) });
   if (weeks.length > 0) ways.push({ id: 'weeks', kind: 'weeks', month: buying, most: roundUp(goal.amount / weeks.length) });
-  ways.push({ id: 'savings', kind: 'savings', month: buying, most: Math.max(0, context.savings(buying)) });
+  if (goal.kind === 'card') {
+    const taken = (month: MonthString) => kept.reduce((sum, s) => sum + (s.kind === 'savings' && s.month === month ? s.amount : 0), 0);
+    ways.push(...months.map((month): Way => ({ id: `savings-${month}`, kind: 'savings', month, most: Math.max(0, context.savings(month) - taken(month)) })));
+  } else {
+    ways.push({ id: 'savings', kind: 'savings', month: buying, most: Math.max(0, context.savings(buying)) });
+  }
   const later = laterMonth(budget, buying);
   if (later) ways.push({ id: `later-${later}`, kind: 'later', month: later, most: extrasFree(budget, later) });
   return ways.filter((way) => way.most > 0.5);
@@ -156,7 +169,7 @@ export function waysOf(goal: WishGoal, context: PlanContext): Way[] {
 export function combinedPlan(goal: WishGoal, context: PlanContext, picks: readonly WayPick[], kept: readonly Step[] = []): { plan: Plan; parts: Part[] } {
   const { budget } = context;
   const { current, buyWeek, weeks } = wishFrame(goal, context);
-  const ways = new Map(waysOf(goal, context).map((way) => [way.id, way]));
+  const ways = new Map(waysOf(goal, context, kept).map((way) => [way.id, way]));
   const seen = new Set<string>();
   const picked = picks.flatMap((pick) => {
     const way = ways.get(pick.id);
@@ -246,15 +259,16 @@ export interface ChosenPlan {
 
 /**
  * The money chosen plans hold as purchases of their wishes: one a week of the week's money and one a month of the
- * extras each, titled by the wish, with · отложить when it is set aside before the month the wish is bought in; a
- * month's extras sit in the earliest week the plan holds them in. Expenses that set money aside for the wish from the
+ * extras each, titled by the wish, with · отложить when it is set aside before the month the wish is bought in, and
+ * with · погасить for a card, which every one of them repays; a month's extras sit in the earliest week the plan holds
+ * them in. Expenses that set money aside for the wish from the
  * envelope pay them: those of the week, or of the weeks of the month (`savedIn`). What is held before the buying in a
  * week or a month gone by `today` is finished, keeping only what such expenses paid, so the rest goes back; the buying
  * week's and month's stays, as the expense that buys the wish pays it. Their ids are below zero, as no purchase of
  * settings.db has. A wish already bought keeps them, since the expense that bought it counts nowhere else.
  */
 export function wishPurchases(
-  plans: ReadonlyArray<{ wish: Pick<Wish, 'id' | 'title'>; plan: Pick<ChosenPlan, 'buyWeek' | 'steps'> }>,
+  plans: ReadonlyArray<{ wish: Pick<Wish, 'id' | 'title'> & { kind?: WishKind }; plan: Pick<ChosenPlan, 'buyWeek' | 'steps'> }>,
   { today, weekStart }: { today: DateString; weekStart: WeekStart },
 ): Purchase[] {
   const current = weekOf(today, weekStart);
@@ -277,7 +291,7 @@ export function wishPurchases(
       const weeks = weeksOfMonth(month, weekStart);
       held.set(key, {
         id: -(wish.id * 1000 + held.size + 1),
-        title: month === buyingMonth ? wish.title : `${wish.title} · отложить`,
+        title: wish.kind === 'card' ? `${wish.title} · погасить` : month === buyingMonth ? wish.title : `${wish.title} · отложить`,
         amount: step.amount,
         week: step.week,
         envelope,
@@ -306,6 +320,11 @@ export function heldFor(purchases: readonly Purchase[], wish: number, date: Date
   return held.find((p) => p.envelope === 'week') ?? held[0];
 }
 
+/** Whether a card's repayments cover its debt, given `repaid`, what they come to. */
+export function isRepaid(wish: Pick<Wish, 'amount'>, repaid: number): boolean {
+  return repaid >= wish.amount - 0.5;
+}
+
 /** Where a wish's plan stands by today with the money set aside for it. */
 export interface Gathering {
   /** What expenses set aside for the wish, whatever the plan held. */
@@ -320,18 +339,25 @@ export interface Gathering {
   loose: Operation[];
 }
 
-/** What a wish's plan gathers by today, given `savings`, the expenses that set money aside for the wish. */
+/**
+ * What a wish's plan gathers by today, given `savings`, the expenses that set money aside for the wish. A card's
+ * repayments that paid nothing the plan held came from savings, so they take the place of what the plan takes from
+ * savings rather than add to it.
+ */
 export function gathering(
-  wish: Pick<Wish, 'id' | 'title' | 'amount'>,
+  wish: Pick<Wish, 'id' | 'title' | 'amount'> & { kind?: WishKind },
   plan: Pick<ChosenPlan, 'buyWeek' | 'steps'> | null,
   savings: readonly Operation[],
   context: { today: DateString; weekStart: WeekStart },
 ): Gathering {
   const held = (plan ? wishPurchases([{ wish, plan }], context) : []).map((p) => purchaseStatus(p, savings)).sort((a, b) => a.purchase.week.localeCompare(b.purchase.week));
   const saved = savings.reduce((sum, o) => sum + o.amount, 0);
-  const taken = (plan?.steps ?? []).reduce((sum, s) => sum + (s.kind === 'savings' ? s.amount : 0), 0);
-  const covered = saved + held.reduce((sum, h) => sum + h.left, 0) + taken;
   const loose = savings.filter((o) => !held.some((h) => pays(h.purchase, o)));
+  // What a card's plan took from the savings of a month gone by was repaid then, or was not.
+  const thisMonth = monthOfWeek(weekOf(context.today, context.weekStart));
+  const planned = (plan?.steps ?? []).reduce((sum, s) => sum + (s.kind === 'savings' && (wish.kind !== 'card' || s.month >= thisMonth || s.way === SAVED_WAY) ? s.amount : 0), 0);
+  const taken = wish.kind === 'card' ? Math.max(0, planned - loose.reduce((sum, o) => sum + o.amount, 0)) : planned;
+  const covered = saved + held.reduce((sum, h) => sum + h.left, 0) + taken;
   return { saved, covered, short: Math.max(0, Math.round(wish.amount - covered)), held, loose };
 }
 
@@ -339,10 +365,10 @@ export function gathering(
  * What a new plan keeps of the one chosen before, as it stands by today: of the money held before this week, or before
  * this month for the extras, what was set aside, unless it is the buying's, which stays as planned; this week's as
  * planned, or what was set aside if more; of this month's extras, what was set aside; what the months before this one
- * took from savings; and the money set aside where no plan held it. The purchases moved are left out, as a new plan
- * moves them anew.
+ * took from savings; and the money set aside where no plan held it, which for a card is a repayment from the savings
+ * of its month. The purchases moved are left out, as a new plan moves them anew.
  */
-export function keptSteps(gathered: Pick<Gathering, 'held' | 'loose'>, steps: readonly Step[], today: DateString, weekStart: WeekStart): Step[] {
+export function keptSteps(gathered: Pick<Gathering, 'held' | 'loose'>, steps: readonly Step[], today: DateString, weekStart: WeekStart, kind: WishKind = 'wish'): Step[] {
   const current = weekOf(today, weekStart);
   const thisMonth = monthOfWeek(current);
   const kept: Step[] = [];
@@ -353,9 +379,12 @@ export function keptSteps(gathered: Pick<Gathering, 'held' | 'loose'>, steps: re
     const amount = p.done ? set : begun ? Math.max(p.amount, set) : set;
     if (amount > 0.005) kept.push({ way, kind: p.envelope, week: p.week, amount });
   }
-  kept.push(...steps.filter((s) => s.kind === 'savings' && s.month < thisMonth));
+  // A card keeps only what was repaid, not what its plan meant to take from the savings of months gone by.
+  if (kind !== 'card') kept.push(...steps.filter((s) => s.kind === 'savings' && s.month < thisMonth && s.way !== SAVED_WAY));
   for (const o of gathered.loose) {
-    if (o.saving) kept.push({ way: SAVED_WAY, kind: o.saving.envelope, week: weekOf(o.date, weekStart), amount: o.amount });
+    if (!o.saving) continue;
+    if (kind === 'card') kept.push({ way: SAVED_WAY, kind: 'savings', month: monthOf(o.date), amount: o.amount });
+    else kept.push({ way: SAVED_WAY, kind: o.saving.envelope, week: weekOf(o.date, weekStart), amount: o.amount });
   }
   return kept;
 }
@@ -380,6 +409,18 @@ export function heldByWay(gathered: Pick<Gathering, 'held'>, steps: readonly Ste
   }
   for (const s of steps) if (s.kind === 'savings') add(s.way, s.amount);
   return byWay;
+}
+
+/**
+ * What credit cards take from a month's savings: for each, what its plan takes from them, or what its repayments from
+ * savings in the month came to when more, as a card repaid without a plan, or beyond it, took from them all the same.
+ */
+export function cardsTaken(cards: ReadonlyArray<{ plan: Pick<ChosenPlan, 'steps'> | null; repaid: ReadonlyArray<Pick<Operation, 'date' | 'amount'>> }>, month: MonthString): number {
+  return cards.reduce((total, { plan, repaid }) => {
+    const planned = (plan?.steps ?? []).reduce((sum, s) => sum + (s.kind === 'savings' && s.month === month ? s.amount : 0), 0);
+    const paid = repaid.reduce((sum, o) => sum + (monthOf(o.date) === month ? o.amount : 0), 0);
+    return total + Math.max(planned, paid);
+  }, 0);
 }
 
 /** What chosen plans take from a month's savings. */

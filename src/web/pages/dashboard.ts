@@ -14,7 +14,7 @@
 import { summarizeBalances } from '../../balances.ts';
 import type { KeptChange } from '../../changes.ts';
 import { addDays, localDate, shiftMonth, type MonthString } from '../../dates.ts';
-import { amountText, parseAmount, parseTitle } from '../../input.ts';
+import { amountText, parseAmount, parseRate, parseTitle } from '../../input.ts';
 import { listOperations, type Operation } from '../../ledger.ts';
 import type { Settings } from '../../settings.ts';
 import {
@@ -37,8 +37,9 @@ import {
   type WeekStart,
   type WeekSummary,
   type Wish,
+  type WishKind,
 } from '../../week.ts';
-import { covered, gathering, stepMonth, type ChosenPlan, type Gathering } from '../../wish-plans.ts';
+import { covered, gathering, isRepaid, SAVED_WAY, stepMonth, type ChosenPlan, type Gathering } from '../../wish-plans.ts';
 import type { DateString, EntityCollections } from '../../zenmoney/types.ts';
 import { pageDocument } from '../document.ts';
 import { capitalize, dayMonth, money, monthName, num, plural, weekLabel } from '../format.ts';
@@ -111,6 +112,11 @@ export interface DashboardForm {
   envelope: 'week' | 'extra';
   /** A purchase's kind as sent. */
   purchaseKind?: PurchaseKind;
+  /** A wish's kind as sent. */
+  wishKind?: WishKind;
+  /** A card's rate as typed, and what is wrong with it. */
+  rate?: string;
+  rateError?: string;
   /** The week the purchase or the amount was sent for, as sent. */
   week: string | null;
 }
@@ -137,6 +143,8 @@ export interface DashboardData {
   wishes: Array<{ wish: Wish; advice: Advice; plan: ChosenPlan | undefined; gathered: Gathering }>;
   /** Wishes an expense bought, by id. */
   boughtWishes: ReadonlySet<number>;
+  /** The wishes that are the debts of credit cards. */
+  cards: ReadonlySet<number>;
   /** For an expense opened to mark it. */
   marking: Marking;
   /** What is open for editing: purchase-1, wish-1 or spending-<ZenMoney id>. */
@@ -204,9 +212,10 @@ export function loadDashboard(
     home: null,
     weeks: weeks.map((w) => summarizeWeek(budget, w)),
     extras: summarizeExtras(budget, month),
-    // A wish an expense bought is no longer wished for.
-    wishes: saved.wishes.filter((wish) => !bought.has(wish.id)).map(wishOf),
+    // A wish an expense bought is no longer wished for, nor a card repaid in full owed.
+    wishes: saved.wishes.map(wishOf).filter(({ wish, gathered }) => (wish.kind === 'card' ? !isRepaid(wish, gathered.saved) : !bought.has(wish.id))),
     boughtWishes: bought,
+    cards: new Set(saved.wishes.filter((w) => w.kind === 'card').map((w) => w.id)),
     marking: loadMarking(data, saved, expenses, today),
     edit: options.edit ?? null,
     form: options.form ?? null,
@@ -336,9 +345,17 @@ export function submitDashboard(
       return { status: 'saved' };
     }
     const parsed = parseEntry(body);
-    if ('errors' in parsed) return { status: 'invalid', form: { kind: 'wish', id, ...parsed, envelope: 'week', week: null } };
-    if (existing) settings.updateWish(existing.id, parsed.entry);
-    else settings.addWish(parsed.entry);
+    // A form without the kind or the rate, such as an older app's, keeps the wish's.
+    const kind: WishKind | undefined = body.has('kind') ? (body.get('kind') === 'card' ? 'card' : 'wish') : undefined;
+    const rate = body.has('rate') ? parseRate(body.get('rate') ?? '') : undefined;
+    const rateError = rate && 'error' in rate ? rate.error : undefined;
+    if ('errors' in parsed || rateError) {
+      const typed = 'errors' in parsed ? parsed : { values: { title: body.get('title') ?? '', amount: body.get('amount') ?? '' }, errors: {} };
+      return { status: 'invalid', form: { kind: 'wish', id, ...typed, envelope: 'week', week: null, wishKind: kind, rate: body.get('rate') ?? '', rateError } };
+    }
+    const entry = { ...parsed.entry, kind, ...(rate && 'value' in rate ? { rate: rate.value } : {}) };
+    if (existing) settings.updateWish(existing.id, entry);
+    else settings.addWish(entry);
     return { status: 'saved' };
   }
 
@@ -813,14 +830,15 @@ function purchaseItem(page: Page, status: PurchaseStatus): Html {
  */
 function wishPurchaseItem({ d }: Page, status: PurchaseStatus): Html {
   const p = status.purchase;
-  const bought = d.boughtWishes.has(p.wish!);
+  const card = d.cards.has(p.wish!);
+  const bought = !card && d.boughtWishes.has(p.wish!);
   const line = heldLine(status, d.symbol);
   return entryRow({
     id: `purchase-${p.id}`,
     title: p.title,
-    details: ['Желание', bought ? 'куплено' : line.details].filter(Boolean).join(' · '),
-    icon: line.state === 'set' ? 'check' : 'sparkles',
-    color: toneColor(bought || line.done ? 'gray' : 'yellow'),
+    details: [card ? 'Кредитка' : 'Желание', bought ? 'куплено' : line.details].filter(Boolean).join(' · '),
+    icon: line.state === 'set' ? 'check' : card ? 'card' : 'sparkles',
+    color: toneColor(bought || line.done ? 'gray' : card ? 'blue' : 'yellow'),
     mark: ENVELOPE_MARK[p.envelope],
     amount: line.amount,
     symbol: d.symbol,
@@ -859,14 +877,19 @@ export function purchaseActions({ purchase: p, bought }: PurchaseStatus): Array<
 function wishItem({ d, href, here }: Page, { wish, advice, plan, gathered }: DashboardData['wishes'][number]): Html {
   const key = `wish-${wish.id}`;
   const form = d.form?.kind === 'wish' && d.form.id === wish.id ? d.form : null;
+  const card = wish.kind === 'card';
+  const look = { icon: card ? ('card' as const) : ('sparkles' as const), color: toneColor(card ? 'blue' : 'yellow') };
   if (form || d.edit === key) {
     return entryForm({
       id: key,
       action: href(`/wishes/${wish.id}`),
       submitLabel: 'Сохранить',
-      icon: 'sparkles',
-      color: toneColor('yellow'),
-      fields: entryFields(form ?? { values: { title: wish.title, amount: amountText(wish.amount) }, errors: {} }, d.symbol),
+      ...look,
+      fields: [
+        ...entryFields(form ?? { values: { title: wish.title, amount: amountText(wish.amount) }, errors: {} }, d.symbol),
+        wishKindField(form?.wishKind ?? wish.kind),
+        rateField(form?.rate ?? (wish.rate == null ? '' : String(wish.rate).replace('.', ',')), form?.rateError),
+      ],
       deleteAction: href(`/wishes/${wish.id}/delete`),
       cancelHref: here(),
     });
@@ -875,12 +898,12 @@ function wishItem({ d, href, here }: Page, { wish, advice, plan, gathered }: Das
     id: key,
     title: wish.title,
     details: wishLine(wish, plan, adviceText(advice, d.current, d.symbol), d.symbol, gathered),
-    icon: 'sparkles',
-    color: toneColor('yellow'),
+    ...look,
     amount: wish.amount,
     symbol: d.symbol,
     href: here({ edit: key }),
-    actions: !plan && adviceTarget(advice) ? [{ label: 'Запланировать', action: href(`/wishes/${wish.id}/plan`) }] : [],
+    // A card is repaid by its plan, never put into a week as a purchase.
+    actions: !card && !plan && adviceTarget(advice) ? [{ label: 'Запланировать', action: href(`/wishes/${wish.id}/plan`) }] : [],
   });
 }
 
@@ -1020,7 +1043,33 @@ function newWishForm({ d, href }: Page, folded?: { id: string; cancelHref: strin
     submitLabel: 'Хочу',
     icon: 'plus',
     color: toneColor('gray'),
-    fields: entryFields(form ?? { values: { title: '', amount: '' }, errors: {} }, d.symbol, 'Например, укладка для волос'),
+    fields: [
+      ...entryFields(form ?? { values: { title: '', amount: '' }, errors: {} }, d.symbol, 'Например, укладка для волос'),
+      wishKindField(form?.wishKind ?? 'wish'),
+      rateField(form?.rate ?? '', form?.rateError),
+    ],
+  });
+}
+
+/** A card's interest after its days without interest; a wish leaves it empty. */
+function rateField(value: string, error?: string): Html {
+  return field({ label: 'Ставка кредитки, %', name: 'rate', type: 'decimal', value, placeholder: '34,9', width: 130, error });
+}
+
+/** The words for a wish's kind: something to buy, or the debt of a credit card to repay before interest. */
+export const WISH_KINDS: Record<WishKind, { label: string; hint: string }> = {
+  wish: { label: 'Желание', hint: 'Купить к сроку' },
+  card: { label: 'Кредитка', hint: 'Погасить, пока без процентов' },
+};
+
+/** Whether a wish is something to buy or a credit card's debt. */
+function wishKindField(value: WishKind): Html {
+  return selectField({
+    label: 'Тип',
+    name: 'kind',
+    value,
+    width: 270,
+    groups: [{ label: 'Что это', options: (['wish', 'card'] as const).map((k) => ({ value: k, label: `${WISH_KINDS[k].label}: ${WISH_KINDS[k].hint.toLowerCase()}` })) }],
   });
 }
 
@@ -1104,13 +1153,28 @@ export function planSummary(plan: Pick<ChosenPlan, 'steps'>, short: number, s: s
   }
   const byMonth = (kind: 'extra' | 'savings') => {
     const months = new Map<MonthString, number>();
-    for (const x of plan.steps) if (x.kind === kind) months.set(stepMonth(x), (months.get(stepMonth(x)) ?? 0) + x.amount);
+    for (const x of plan.steps) if (x.kind === kind && x.way !== SAVED_WAY) months.set(stepMonth(x), (months.get(stepMonth(x)) ?? 0) + x.amount);
     return [...months].sort(([a], [b]) => a.localeCompare(b));
   };
   for (const [month, sum] of byMonth('extra')) parts.push(`${num(sum)} из дополнительных ${monthName(month, 'genitive')}`);
-  for (const [month, sum] of byMonth('savings')) parts.push(`${num(sum)} из накоплений ${monthName(month, 'genitive')}`);
+  // A card's repayments from savings a plan chosen anew keeps are told as repaid, not as the plan.
+  for (const [month, sum] of byMonth('savings')) if (sum > 0.5) parts.push(`${num(sum)} из накоплений ${monthName(month, 'genitive')}`);
   const text = parts.join(', ');
   return short > 0.5 ? `${text}; не хватает ${money(short, s)}` : text;
+}
+
+/**
+ * A card's chosen plan in a line: the month its last repayment is in and the interest it pays over the debt, or what it
+ * lacks when it does not close the card.
+ */
+function cardSummary(wish: Wish, plan: ChosenPlan, short: number, s: string): string {
+  if (short > 0.5) return `не хватает ${money(short, s)}`;
+  const last = plan.steps.reduce<MonthString | null>((m, x) => {
+    const month = x.kind === 'move' ? null : stepMonth(x);
+    return month && (!m || month > m) ? month : m;
+  }, null);
+  const over = covered(plan.steps) - wish.amount;
+  return [last ? `закроете в ${monthName(last, 'prepositional')}` : null, wish.rate != null && over > 0.5 ? `+${money(over, s)}` : null].filter(Boolean).join(' · ');
 }
 
 /**
@@ -1118,9 +1182,13 @@ export function planSummary(plan: Pick<ChosenPlan, 'steps'>, short: number, s: s
  * day but no plan yet waits for one; without a day either, `advice` tells when it fits (see adviceText).
  */
 function wishLine(wish: Wish, plan: ChosenPlan | undefined, advice: string, s: string, gathered: Pick<Gathering, 'saved' | 'short'>): string {
-  const saved = gathered.saved > 0.5 ? `отложено ${money(gathered.saved, s)}` : null;
-  if (plan) return [wish.due ? dueLabel(wish.due) : null, planSummary(plan, gathered.short, s), saved].filter(Boolean).join(' · ');
-  return [wish.due ? `${dueLabel(wish.due)} · выбрать, как купить` : advice, saved].filter(Boolean).join(' · ');
+  const card = wish.kind === 'card';
+  const saved = gathered.saved > 0.5 ? `${card ? 'погашено' : 'отложено'} ${money(gathered.saved, s)}` : null;
+  const due = wish.due ? (card ? `без % до ${dayMonth(wish.due)}` : dueLabel(wish.due)) : null;
+  if (plan && card) return [cardSummary(wish, plan, gathered.short, s), saved].filter(Boolean).join(' · ');
+  if (plan) return [due, planSummary(plan, gathered.short, s), saved].filter(Boolean).join(' · ');
+  if (card) return [due ?? 'указать, до какого дня без процентов', 'выбрать, как погасить', saved].filter(Boolean).join(' · ');
+  return [due ? `${due} · выбрать, как купить` : advice, saved].filter(Boolean).join(' · ');
 }
 
 /** When to buy a wish; `current` is the first day of the current week. */
