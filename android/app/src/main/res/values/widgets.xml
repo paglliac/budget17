@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_week">Неделя</string>
+    <string name="widget_week_description">Сколько свободно до конца недели.</string>
+    <string name="widget_today">Сегодня</string>
+    <string name="widget_today_description">Сколько потрачено сегодня и сколько трат ждут разбора.</string>
+    <string name="widget_savings">Накопления</string>
+    <string name="widget_savings_description">Насколько доходы месяца больше расходов.</string>
+    <string name="widget_payment">Ближайший платёж</string>
+    <string name="widget_payment_description">Какой регулярный платёж следующий.</string>
+    <string name="widget_extras">Доп. бюджет</string>
+    <string name="widget_extras_description">Сколько из дополнительных останется к концу месяца.</string>
+</resources>

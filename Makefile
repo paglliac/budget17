@@ -3,10 +3,10 @@
 DB := data/zenmoney.db
 
 .DEFAULT_GOAL := help
-.PHONY: help install sync balances web claude-review resync pull-data restore-data test typecheck ios-check ios-install check
+.PHONY: help install sync balances web claude-review resync pull-data restore-data test typecheck ios-check ios-install android-check android-install check
 
 help: ## Список команд
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-13s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-15s %s\n", $$1, $$2}'
 
 install: ## Установить зависимости
 	npm install
@@ -45,4 +45,10 @@ ios-check: ## Приложение для iPhone: собирается и чит
 ios-install: ## Поставить приложение на iPhone (и переподписать раз в 7 дней)
 	@ios/install.sh
 
-check: test typecheck ios-check ## Тесты, проверка типов и приложение для iPhone
+android-check: ## Приложение для Android: собирается и читает JSON сервера
+	@android/check.sh
+
+android-install: ## Поставить приложение на Android-телефон, подключённый кабелем
+	@android/install.sh
+
+check: test typecheck ios-check android-check ## Тесты, проверка типов и приложения для iPhone и Android

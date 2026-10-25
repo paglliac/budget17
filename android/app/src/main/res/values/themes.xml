@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window under Compose: the page's warm white, so the start shows no other colour. -->
+    <style name="Theme.Budget" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/canvas</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <color name="canvas">#F7F6F3</color>
+    <color name="icon_background">#6447F8</color>
+</resources>

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Бюджет"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="false"
+        android:theme="@style/Theme.Budget">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- budget://week, sort, operations, regular and extras: the widgets' links, as on the iPhone. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="budget" />
+            </intent-filter>
+        </activity>
+        <!-- The widgets: Неделя, Сегодня, Накопления, Ближайший платёж and Доп. бюджет (see Widgets.kt). -->
+        <receiver
+            android:name=".WeekWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_week">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_week" />
+        </receiver>
+        <receiver
+            android:name=".TodayWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_today">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_today" />
+        </receiver>
+        <receiver
+            android:name=".SavingsWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_savings">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_savings" />
+        </receiver>
+        <receiver
+            android:name=".PaymentWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_payment">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_payment" />
+        </receiver>
+        <receiver
+            android:name=".ExtrasWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_extras">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_extras" />
+        </receiver>
+    </application>
+</manifest>
