@@ -4,21 +4,7 @@
 
 Порядок задач — предложение. Какую делать следующей, решает пользователь.
 
-## Как переносить экран
-
-- Swift-файл экрана и его Kotlin-файл называются одинаково, `ios/Budget/HomeView.swift` → `android/app/src/main/java/ru/apukhtin/budget/HomeScreen.kt`. Перед переносом прочитай Swift-файл целиком и раздел экрана в README («Приложение для iPhone»).
-- Модели всех экранов API уже есть в `Models.kt`, и `make android-check` проверяет, что они читают JSON каждого экрана из демо-данных. Новый экран API добавляй и в `ios/fixtures.ts`, и в `FixturesTest.kt`.
-- Экран собирается из частей `Design.kt` (`LilacRow`, `LilacSegmented`, `LilacAmount` …). Части, которых ещё нет, переноси из `ios/Budget/Design.swift` туда же, под теми же именами.
-- Экран загружает данные через `Screen<…>("путь", query)`: так он получает сохранённую копию, работу без сервера и обновление жестом вниз. Изменения отправляет `session.send(...)` или `rememberFormSender()`.
-- Листы — `LilacSheet`, переходы внутри вкладки — стек в состоянии вкладки, как `HomeRoute` в `BudgetView`, назад — `PageBar` и системная кнопка «Назад».
-- Иконки веба переводятся в Material через `WebIcons`, SF Symbols iPhone-приложения — в похожие Material-иконки.
-
-## Проверка
-
-- `make android-check` (входит в `make check`): модели читают API, приложение собирается.
-- `android/screens.sh http://localhost:<порт> <папка>` поднимает эмулятор, ставит приложение, проходит экраны и сохраняет скриншоты. Добавляй туда каждый новый экран. Сервер — свой, на порту 4340 и выше, на снимке баз телефона (`make pull-data`).
-- Для сравнения — те же экраны iPhone-приложения: `ios/screens.sh http://localhost:<порт> <папка>`.
-- `make android-install` ставит приложение на телефон по кабелю.
+Как работать с приложением, проверять его и ставить на телефон — в агенте `.claude/agents/android-developer.md` (`claude --agent android-developer`).
 
 ## Задачи
 
