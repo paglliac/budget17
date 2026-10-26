@@ -78,7 +78,10 @@ object WidgetLoader {
         val saved = session.saved<WidgetData>("widget")
         if (!fresh && saved != null && System.currentTimeMillis() - fetchedAt < 60_000) return@withLock WidgetEntry(saved.first, false)
         try {
-            WidgetEntry(session.get<WidgetData>("widget"), false).also { fetchedAt = System.currentTimeMillis() }
+            WidgetEntry(session.get<WidgetData>("widget"), false).also {
+                fetchedAt = System.currentTimeMillis()
+                LauncherSummary.changed(context)
+            }
         } catch (failure: Exception) {
             // Paler only when the server is away; what it sent last is still what it says.
             WidgetEntry(saved?.first, saved != null && failure is ApiError.Unreachable)

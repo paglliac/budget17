@@ -26,6 +26,11 @@
                 <data android:scheme="budget" />
             </intent-filter>
         </activity>
+        <!-- The week, the queue to sort and the next payment for the user's launcher; it checks the caller's signature itself. -->
+        <provider
+            android:name=".LauncherSummary"
+            android:authorities="ru.apukhtin.budget.summary"
+            android:exported="true" />
         <!-- The widgets: Неделя, Сегодня, Накопления, Ближайший платёж and Доп. бюджет (see Widgets.kt). -->
         <receiver
             android:name=".WeekWidgetReceiver"
