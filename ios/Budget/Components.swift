@@ -44,6 +44,9 @@ struct FlowLayout: Layout {
 struct Screen<Value: Decodable, Content: View>: View {
     let path: String
     var query: [String: String?] = [:]
+    /// Whether the screen is a page of its own rather than a part of a page that scrolls already, so its error scrolls
+    /// for the pull to refresh to reach it.
+    var scrolls = true
     @ViewBuilder let content: (Value) -> Content
 
     @Environment(Session.self) private var session
@@ -62,13 +65,12 @@ struct Screen<Value: Decodable, Content: View>: View {
             if let value {
                 content(value)
             } else if let error {
-                ContentUnavailableView {
-                    Label("Не удалось загрузить", systemImage: "wifi.exclamationmark")
-                } description: {
-                    Text(error)
-                } actions: {
-                    Button("Повторить") { Task { await load() } }
-                    Button("Сервер") { showServer = true }
+                if scrolls {
+                    GeometryReader { geometry in
+                        ScrollView { failure(error).frame(width: geometry.size.width, height: geometry.size.height) }
+                    }
+                } else {
+                    failure(error)
                 }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -85,6 +87,18 @@ struct Screen<Value: Decodable, Content: View>: View {
             await load()
         }
         .sheet(isPresented: $showServer) { ServerSheet() }
+    }
+
+    /// What a screen the phone has never had shows when the server does not answer.
+    private func failure(_ error: String) -> some View {
+        ContentUnavailableView {
+            Label("Не удалось загрузить", systemImage: "wifi.exclamationmark")
+        } description: {
+            Text(error)
+        } actions: {
+            Button("Повторить") { Task { await load() } }
+            Button("Сервер") { showServer = true }
+        }
     }
 
     private struct Request: Equatable {

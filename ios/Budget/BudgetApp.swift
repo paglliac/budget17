@@ -45,6 +45,8 @@ struct RootView: View {
     @State private var planWeek: String?
     /// A shop an expense opened, which «Ещё» shows on its tab of shops.
     @State private var shop: Shop?
+    /// The part «Ещё» shows.
+    @State private var morePart = MoreView.Part.regular
 
     var body: some View {
         if session.server == nil {
@@ -55,7 +57,7 @@ struct RootView: View {
                 screen(.operations) { OperationsView(filter: $filter) }
                 screen(.home) { BudgetView(openPending: openPending, openPlan: openPlan, openWishes: { tab = .wishes }, returns: homeReturns, extrasOpens: extrasOpens) }
                 screen(.plan) { PlanView(week: $planWeek) }
-                screen(.more) { MoreView(opening: $shop) }
+                screen(.more) { MoreView(part: $morePart, opening: $shop) }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 TabBar(tab: $tab, pending: session.pending, reselect: reselect)
@@ -79,7 +81,9 @@ struct RootView: View {
                 case "operations":
                     filter = .all
                     tab = .operations
-                case "regular": tab = .more
+                case "regular":
+                    morePart = .regular
+                    tab = .more
                 default:
                     tab = .home
                     homeReturns += 1

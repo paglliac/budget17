@@ -151,7 +151,14 @@ struct IncomeFlow: View {
     let flow: Flow
     let symbol: String
 
-    private let height: CGFloat = 340
+    /// A step between the parts' ends; four parts make the flow 340 high, and a month whose plans take for wishes and
+    /// cards grows by a step for each.
+    private let step: CGFloat = 69
+
+    /// Where the parts end, top to bottom, a step apart, with the income under the last.
+    private var nodeYs: [CGFloat] { flow.parts.indices.map { 31 + step * CGFloat($0) } }
+
+    private var height: CGFloat { (nodeYs.last ?? 31) + 102 }
 
     var body: some View {
         GeometryReader { geometry in
@@ -174,7 +181,7 @@ struct IncomeFlow: View {
                         path.addCurve(to: CGPoint(x: start.x, y: top), control1: CGPoint(x: middle, y: end + thickness / 2), control2: CGPoint(x: middle, y: top))
                         path.closeSubpath()
                         context.fill(path, with: .linearGradient(
-                            Gradient(colors: [Lilac.tint.opacity(0.3), Lilac.soft.opacity(0.85 - Double(index) * 0.1)]),
+                            Gradient(colors: [Lilac.tint.opacity(0.3), Lilac.soft.opacity(max(0.85 - Double(index) * 0.1, 0.3))]),
                             startPoint: CGPoint(x: start.x, y: 0), endPoint: CGPoint(x: nodeX, y: 0)
                         ))
                     }
@@ -192,22 +199,20 @@ struct IncomeFlow: View {
                     Text(flow.income.note).font(.subheadline).foregroundStyle(Lilac.muted)
                 }
                 .frame(width: w * 0.46, alignment: .leading)
-                .position(x: w * 0.23, y: height * 0.86)
+                .position(x: w * 0.23, y: height - 48)
             }
         }
         .frame(height: height)
         .accessibilityElement(children: .combine)
     }
 
-    /// Where the parts end, top to bottom, the last one lower for its wider ribbon.
-    private var nodeYs: [CGFloat] { [0.09, 0.30, 0.50, 0.70].map { $0 * height } }
+    private var maxThickness: CGFloat { 340 * 0.36 }
 
-    private var maxThickness: CGFloat { height * 0.36 }
-
-    /// The ribbons start stacked on the left, around the middle.
+    /// The ribbons start stacked on the left, around the middle of the parts.
     private var sourceTop: CGFloat {
         let positive = flow.parts.reduce(0) { $0 + max($1.share, 0) }
-        return height * 0.46 - maxThickness * min(positive, 1) / 2
+        let ys = nodeYs
+        return ((ys.first ?? 0) + (ys.last ?? 0)) / 2 + 20 - maxThickness * min(positive, 1) / 2
     }
 
     @ViewBuilder
@@ -222,12 +227,7 @@ struct IncomeFlow: View {
     private func label(_ part: Flow.Part) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(part.label).font(.caption).foregroundStyle(Lilac.muted).lineLimit(1).minimumScaleFactor(0.8)
-            Text(Money.text(part.amount, symbol))
-                .font(.system(size: 19, weight: .bold))
-                .monospacedDigit()
-                .foregroundStyle(part.amount < 0 ? Lilac.red : Color.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+            LilacAmount(amount: part.amount, symbol: symbol, size: 19, color: part.amount < 0 ? Lilac.red : Color.primary)
             if part.share > 0 {
                 Text("\(Int((part.share * 100).rounded()))%").font(.caption).foregroundStyle(Lilac.muted).monospacedDigit()
             }

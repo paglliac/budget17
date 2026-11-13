@@ -96,11 +96,13 @@ struct HomeView: View {
         .padding(.top, 6)
     }
 
-    /// A swipe across the circle steps to the next or the previous week.
+    /// A swipe across the circle steps to the next or the previous week; the current one is nil, as «Сейчас» makes it,
+    /// so the page moves on with it when a new week starts.
     private func step(_ drag: DragGesture.Value, _ s: WeekScreen) {
         let dx = drag.translation.width, dy = drag.translation.height
         guard abs(dx) > 60, abs(dx) > abs(dy) * 1.5 else { return }
-        if dx < 0, let next = s.next { go(next) } else if dx > 0 { go(s.prev) }
+        let target = dx < 0 ? s.next : s.prev
+        if let target { go(target == s.current ? nil : target) }
     }
 
     private func go(_ target: String?) {

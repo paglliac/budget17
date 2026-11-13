@@ -272,7 +272,7 @@ final class ScreensTests: XCTestCase {
             let back = optional.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             back.press(forDuration: 0.05, thenDragTo: back.withOffset(CGVector(dx: 240, dy: 0)))
         }
-        app.buttons["filter-Все"].tap()
+        allFilter().tap()
 
         tab("Ещё")
         pill("Регулярные").tap()
@@ -567,6 +567,20 @@ final class ScreensTests: XCTestCase {
     }
 
     /// A sheet or a part of a screen by its identifier.
+    /// «Все» among the operations' filters, brought back into view: the strip centres the picked filter, which pushes
+    /// «Все» past its left edge when the filters' numbers make them wide.
+    private func allFilter() -> XCUIElement {
+        let all = app.buttons["filter-Все"]
+        let screen = app.windows.firstMatch.frame
+        for _ in 0..<3 where !screen.contains(all.frame) {
+            let filters = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'filter-'")).allElementsBoundByIndex
+            guard let shown = filters.first(where: { screen.contains($0.frame) }) else { break }
+            let from = shown.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 300, dy: 0)))
+        }
+        return all
+    }
+
     private func sheet(_ identifier: String) -> XCUIElement {
         app.descendants(matching: .any)[identifier].firstMatch
     }

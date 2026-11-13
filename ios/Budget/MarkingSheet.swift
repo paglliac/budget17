@@ -84,7 +84,8 @@ struct MarkingSheet: View {
         .background(LilacBackground())
         .presentationDetents([.large])
         .errorAlert($error)
-        .sensoryFeedback(.selection, trigger: applying)
+        // One tick when a choice is made, none when the server's answer or a step in the queue clears it.
+        .sensoryFeedback(.selection, trigger: applying) { _, new in new != nil }
         .sensoryFeedback(.success, trigger: saved)
         .onChange(of: writing) { if !writing { saveDescription() } }
         .onDisappear { saveDescription() }

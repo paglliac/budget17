@@ -42,8 +42,8 @@ typecheck: ## Проверка типов
 ios-check: ## Приложение для iPhone: собирается и читает JSON сервера
 	@ios/check.sh
 
-ios-install: ## Поставить приложение на iPhone (и переподписать раз в 7 дней)
-	@ios/install.sh
+ios-install: ## Поставить приложение на iPhone (и переподписать раз в 7 дней); PHONE="iPhone Tatka" — на этот
+	@ios/install.sh "$(PHONE)"
 
 android-check: ## Приложение для Android: собирается и читает JSON сервера
 	@android/check.sh

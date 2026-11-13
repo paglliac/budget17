@@ -821,7 +821,7 @@ struct LilacInlineAction: View {
                 .foregroundStyle(Lilac.accent)
                 .background(Lilac.tint, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.card)
         .padding(.top, 4)
     }
 }

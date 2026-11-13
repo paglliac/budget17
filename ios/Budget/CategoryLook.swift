@@ -1,3 +1,4 @@
+import CryptoKit
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
@@ -26,8 +27,9 @@ struct CategoryDisc: View {
     }
 }
 
-/// A photo of the server, such as a category's, loaded with the access token and kept while the app runs; the path
-/// carries the photo's version, so a kept one is never stale. Until it comes, what is under it shows.
+/// A photo of the server, such as a category's or a shop's logo, loaded with the access token and kept on the phone; the
+/// path carries the photo's version, so a kept one is never stale. Until it comes, what is under it shows, also when the
+/// path changes to another photo, so the one before does not stay in its place.
 struct RemotePhoto: View {
     let path: String
     @Environment(Session.self) private var session
@@ -44,22 +46,37 @@ struct RemotePhoto: View {
                 if let image { image.resizable().scaledToFill() }
             }
             .clipped()
-            .task(id: path) { image = await PhotoCache.shared.image(path, session.client) }
+            .task(id: path) {
+                image = PhotoCache.shared.kept(path)
+                if image == nil { image = await PhotoCache.shared.image(path, session.client) }
+            }
     }
 }
 
-/// Photos already loaded, by path; the system's cache keeps them on the phone too, for when the server is away.
+/// Photos already loaded, by path: in memory while the app runs and in files on the phone, for when the server is away.
 final class PhotoCache {
     static let shared = PhotoCache()
     private var images: [String: Image] = [:]
+    private let folder = URL.cachesDirectory.appending(path: "photos", directoryHint: .isDirectory)
 
     func kept(_ path: String) -> Image? { images[path] }
 
     func image(_ path: String, _ client: APIClient?) async -> Image? {
         if let image = images[path] { return image }
-        guard let client, let data = try? await client.photo(path), let image = Self.image(data) else { return nil }
+        let file = folder.appending(path: Self.fileName(path))
+        var data = try? Data(contentsOf: file)
+        if data == nil, let client, let loaded = try? await client.photo(path) {
+            data = loaded
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try? loaded.write(to: file, options: .atomic)
+        }
+        guard let data, let image = Self.image(data) else { return nil }
         images[path] = image
         return image
+    }
+
+    private static func fileName(_ path: String) -> String {
+        SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func image(_ data: Data) -> Image? {

@@ -5,9 +5,10 @@ import SwiftUI
 struct MoreView: View {
     enum Part: Hashable { case regular, income, categories, shops }
 
+    /// The part shown; the root keeps it, so the link of the payment's widget opens «Регулярные».
+    @Binding var part: Part
     /// A shop an expense opened, which «Магазины» shows.
     @Binding var opening: Shop?
-    @State private var part = Part.regular
     @State private var showSettings = false
 
     var body: some View {
@@ -104,7 +105,7 @@ struct ServerPanel: View {
                     }
                 }
                 if let syncedAt = session.syncedAt {
-                    LilacPanelLine(title: "Обновлено") { Text(syncedAt.formatted(.relative(presentation: .named))).foregroundStyle(Lilac.muted) }
+                    LilacPanelLine(title: "Обновлено") { Text(Dates.moment(syncedAt)).foregroundStyle(Lilac.muted).monospacedDigit() }
                 }
                 Button {
                     Task { await session.sync() }

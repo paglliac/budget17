@@ -112,14 +112,14 @@ struct OperationsView: View {
         if s.categoryTitle != nil || s.query != nil {
             FlowLayout(spacing: 8) {
                 if let title = s.categoryTitle {
-                    Button { category = nil } label: { chipLabel(title, systemImage: "xmark") }.buttonStyle(.plain)
+                    Button { category = nil } label: { chipLabel(title, systemImage: "xmark") }.buttonStyle(.card)
                 }
                 if let q = s.query {
                     Button {
                         query = nil
                         search = ""
                     } label: { chipLabel("«\(q)»", systemImage: "xmark") }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.card)
                 }
             }
             .padding(.top, 14)
@@ -244,7 +244,7 @@ struct PendingList: View {
     @State private var accepted = 0
 
     var body: some View {
-        Screen(path: "uncategorized", query: ["month": month]) { (s: UncategorizedScreen) in
+        Screen(path: "uncategorized", query: ["month": month], scrolls: false) { (s: UncategorizedScreen) in
             let queue = s.pending.flatMap { $0.items.map(\.spending) }
             VStack(alignment: .leading, spacing: 0) {
                 LilacSummary(label: s.total.label, amount: s.total.amount, symbol: s.symbol, note: s.total.note, size: 30).padding(.top, 16)
@@ -253,14 +253,15 @@ struct PendingList: View {
                     LilacTimelineGroup(title: day.title, subtitle: day.subtitle, first: index == 0, last: index == s.pending.count - 1) {
                         ForEach(Array(day.items.enumerated()), id: \.element.id) { index, item in
                             // A tap on the row opens it; «Принять» is a button of its own inside the row.
-                            LilacRow(marker: .expense(item.row, dot: Lilac.red), title: item.row.title, details: item.row.details, amount: item.row.amount, symbol: s.symbol,
-                                     first: index == 0) {
-                                if let suggestion = item.suggestion {
-                                    LilacInlineAction(label: "Принять") { accept(item.spending, suggestion.choice) }
+                            Button { sheet = .spending(item.spending, queue: queue) } label: {
+                                LilacRow(marker: .expense(item.row, dot: Lilac.red), title: item.row.title, details: item.row.details, amount: item.row.amount, symbol: s.symbol,
+                                         first: index == 0) {
+                                    if let suggestion = item.suggestion {
+                                        LilacInlineAction(label: "Принять") { accept(item.spending, suggestion.choice) }
+                                    }
                                 }
                             }
-                            .onTapGesture { sheet = .spending(item.spending, queue: queue) }
-                            .accessibilityAddTraits(.isButton)
+                            .buttonStyle(.card)
                             .accessibilityIdentifier(item.id)
                         }
                     }
