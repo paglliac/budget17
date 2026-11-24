@@ -72,7 +72,7 @@ import {
 
 /** How many weeks ahead a week can be opened and planned. */
 export const PLAN_AHEAD = 52;
-/** Weeks a purchase can be put into from its form: this one and the next ones. */
+/** Weeks on either side of today offered when adding or moving a purchase. */
 const WEEK_CHOICES = 13;
 
 /**
@@ -994,8 +994,9 @@ function newPurchaseForm({ d, href }: Page, week: DateString, envelope: 'week' |
     fields: [
       ...entryFields(form ?? { values: { title: '', amount: '' }, errors: {} }, d.symbol, envelope === 'extra' ? 'Например, куртка' : 'Например, ботинки'),
       kindField(form?.purchaseKind ?? 'flexible'),
+      weekField({ current: d.current }, form?.week ?? week),
     ],
-    hidden: { week, envelope },
+    hidden: { envelope },
   });
 }
 
@@ -1016,14 +1017,14 @@ function kindField(value: PurchaseKind): Html {
   });
 }
 
-/** A choice of the week, this one and the next ones by month, with `value` among them even when it is out of range. */
-function weekField({ current }: Page, value: DateString): Html {
+/** A choice of past, current and future weeks by month, including the selected week outside the usual range. */
+function weekField({ current }: Pick<Page, 'current'>, value: DateString): Html {
   return selectField({ label: 'Неделя', name: 'week', value, width: 210, groups: weekChoices(current, value) });
 }
 
-/** Weeks a purchase can go into, this one and the next ones, by month, with `value` among them even when out of range. */
+/** Purchase weeks, including past weeks for expenses entered after the event and the selected week at any date. */
 export function weekChoices(current: DateString, value?: DateString): Array<{ label: string; options: Array<{ value: DateString; label: string }> }> {
-  const weeks = Array.from({ length: WEEK_CHOICES }, (_, i) => addDays(current, 7 * i));
+  const weeks = Array.from({ length: WEEK_CHOICES * 2 }, (_, i) => addDays(current, 7 * (i - WEEK_CHOICES)));
   if (value && !weeks.includes(value)) weeks.push(value);
   weeks.sort();
   const months = weeks.map(monthOfWeek).filter((m, i, all) => all.indexOf(m) === i);

@@ -25,7 +25,7 @@ import {
 } from '../src/web/api.ts';
 import { Settings } from '../src/settings.ts';
 import { weekLevel } from '../src/web/home.ts';
-import type { SavedBudget } from '../src/web/pages/dashboard.ts';
+import { budgetOf, submitDashboard, type SavedBudget } from '../src/web/pages/dashboard.ts';
 import { submitMarking } from '../src/web/pages/marking.ts';
 import { submitWishPlan } from '../src/web/pages/wishes.ts';
 import { account, regular, RUB, tag, transaction, user } from './fixtures.ts';
@@ -130,7 +130,7 @@ describe('api', () => {
     assert.deepEqual([jacket.title, jacket.mark, jacket.color], ['Куртка', 'extra', 'violet'], 'a purchase from the extras is in its week’s plan too');
     assert.deepEqual([school.title, school.details, school.mark, school.regular, school.muted], ['Школа, ЛДК', 'регулярная · 7 октября', 'outside', 7, false]);
     assert.equal('wishes' in week, false, 'the wishes have a tab of their own');
-    assert.equal(week.weekChoices[0].options[0].label, 'Эта неделя');
+    assert.equal(week.weekChoices.flatMap((g: { options: Array<{ value: string; label: string }> }) => g.options).find((o: { value: string }) => o.value === week.current)?.label, 'Эта неделя');
   });
 
   it('pales a regular payment paid in full, as a purchase bought', () => {
@@ -1218,5 +1218,43 @@ describe('api: a wish’s plan', () => {
 
     submitMarking(settings, data(), '/spending/transfer/unlink', new URLSearchParams());
     assert.equal(plain(wishesScreen(data(), savedOf(settings), { today, incomes })).wishes[0].state, 'planned');
+  });
+});
+
+
+describe('backdated purchase choices in the app', () => {
+  it('keeps the shown old week selectable when adding a purchase', () => {
+    const week = plain(weekScreen(data(), saved(), { ...budget, week: '2025-09-29' }));
+    assert.ok(week.weekChoices.flatMap((g: { options: Array<{ value: string }> }) => g.options).some((o: { value: string }) => o.value === week.week));
+  });
+});
+
+
+describe('a trip entered after the weekend', () => {
+  it('groups several expenses across weeks under a backdated extra purchase and restores their weekly budgets', () => {
+    using settings = new Settings(':memory:');
+    settings.setWeekStart(5);
+    const at = '2026-11-23';
+    const trip = { ...data(), transaction: [
+      transaction({ id: 'hotel', date: '2026-11-20', outcome: 30_000, payee: 'Hotel' }),
+      transaction({ id: 'ski', date: '2026-11-21', outcome: 20_000, payee: 'Ski' }),
+    ] };
+    const state = (): SavedBudget => ({ ...saved(), purchases: settings.purchases(), regular: [], wishes: [], weekStart: 5, purchasePayments: settings.purchasePayments() });
+    const screen = (week: string) => weekScreen(trip, state(), { ...budget, today: at, week });
+    assert.equal(screen('2026-11-14').total.amount, 15_000);
+    assert.equal(screen('2026-11-21').total.amount, 25_000);
+    assert.deepEqual(submitDashboard(settings, '/purchases', new URLSearchParams({ title: 'Шерегеш', amount: '50000', week: '2026-11-14', envelope: 'extra' }), { today: at, budget: () => budgetOf(trip, state(), { today: at }) }), { status: 'saved' });
+    const purchase = settings.purchases()[0]!;
+    assert.equal(purchase.week, '2026-11-14');
+    for (const id of ['hotel', 'ski']) {
+      const sheet = spendingScreen(trip, state(), { today: at, id })!;
+      assert.ok(JSON.stringify(sheet.payments).includes(`purchase-${purchase.id}`));
+      assert.deepEqual(submitMarking(settings, trip, `/spending/${id}/purchase-${purchase.id}`, new URLSearchParams()), { status: 'saved' });
+    }
+    assert.equal(screen('2026-11-14').total.amount, 45_000);
+    assert.equal(screen('2026-11-21').total.amount, 45_000);
+    const extras = extrasScreen(trip, state(), { ...budget, today: at, month: '2026-11' });
+    assert.equal(extras.spent.amount, 50_000);
+    assert.equal(extras.free.amount, 50_000);
   });
 });

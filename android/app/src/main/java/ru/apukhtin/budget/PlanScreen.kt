@@ -72,9 +72,9 @@ fun PlanView(week: String?, go: (String?) -> Unit) {
     BudgetSheets(sheet) { sheet = null }
 }
 
-/** A new purchase from a week's page: into that week, or into the current one when it is over. */
+/** A new purchase from a week's page keeps the shown week, including one that is over. */
 fun newPurchase(s: WeekScreen, envelope: String) =
-    PurchaseDraft(null, if (s.phase == "past") s.current else s.week, envelope, s.weekChoices, emptyList(), s.symbol)
+    PurchaseDraft(null, s.week, envelope, s.weekChoices, emptyList(), s.symbol)
 
 /**
  * What a week's plan holds: what is reserved, required and flexible, with the purchases from the week's money, then the

@@ -120,9 +120,9 @@ struct ModeSwitch: View {
 }
 
 extension PurchaseDraft {
-    /// A new purchase from a week's page: into that week, or into the current one when it is over.
+    /// A new purchase belongs to the shown week, including a past one for expenses entered after the event.
     static func new(_ s: WeekScreen, envelope: String) -> PurchaseDraft {
-        PurchaseDraft(purchase: nil, week: s.phase == "past" ? s.current : s.week, envelope: envelope, choices: s.weekChoices, actions: [], symbol: s.symbol)
+        PurchaseDraft(purchase: nil, week: s.week, envelope: envelope, choices: s.weekChoices, actions: [], symbol: s.symbol)
     }
 }
 

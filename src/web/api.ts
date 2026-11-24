@@ -329,7 +329,7 @@ export function weekScreen(data: EntityCollections, saved: SavedBudget, options:
     limit: { amount: w.limit, usual: WEEK_LIMIT },
     days: expenseDays(d.marking, w.spending, today),
     plan: [...w.purchases.map((p) => purchaseRow(p, current, d.symbol, saved)), ...w.regular.map((r) => regularPaymentRow(r, d.symbol))],
-    weekChoices: weekChoices(current),
+    weekChoices: weekChoices(current, w.week),
     source: options.source,
     canSync: options.canSync,
   };
@@ -399,7 +399,7 @@ export function weekWhyScreen(data: EntityCollections, saved: SavedBudget, optio
     check: check.length > 0 ? { title: 'Проверь траты', rows: check } : null,
     reminders,
     empty: changes.length + check.length + reminders.length === 0 ? 'Ни крупных трат, ни перерасходов' : null,
-    weekChoices: weekChoices(current),
+    weekChoices: weekChoices(current, shown),
     /** What the week allows and the usual amount, for the form of what the week allows; posted as on the week tab. */
     limit: { amount: d.week.limit, usual: WEEK_LIMIT },
   };
@@ -625,7 +625,7 @@ export function monthScreen(data: EntityCollections, saved: SavedBudget, options
     total,
     flow: monthFlow(d, saved, options.incomes ?? [], thisMonth, allExpenses(data, saved)),
     newPurchaseWeek: newExtraWeek(m.month, thisMonth, d.weeks, current),
-    weekChoices: weekChoices(current),
+    weekChoices: weekChoices(current, newExtraWeek(m.month, thisMonth, d.weeks, current)),
     source: options.source,
     canSync: options.canSync,
   };
@@ -690,7 +690,7 @@ export function extrasScreen(data: EntityCollections, saved: SavedBudget, option
     })),
     plan: { label: 'В плане', amount: m.planned, items: extrasPlan(exact).map((p) => purchaseRow(p, current, d.symbol, saved)) },
     newPurchaseWeek: newExtraWeek(m.month, thisMonth, d.weeks, current),
-    weekChoices: weekChoices(current),
+    weekChoices: weekChoices(current, newExtraWeek(m.month, thisMonth, d.weeks, current)),
     source: options.source,
   };
 }

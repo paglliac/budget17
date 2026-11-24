@@ -5,7 +5,7 @@ import { Settings } from '../src/settings.ts';
 import type { Envelope } from '../src/week.ts';
 import type { EntityCollections } from '../src/zenmoney/types.ts';
 import { createHref } from '../src/web/pages/chrome.ts';
-import { budgetOf, loadDashboard, renderDashboard, submitDashboard, type SavedBudget } from '../src/web/pages/dashboard.ts';
+import { budgetOf, loadDashboard, renderDashboard, submitDashboard, weekChoices, type SavedBudget } from '../src/web/pages/dashboard.ts';
 import { account, regular, RUB, tag, transaction, user } from './fixtures.ts';
 
 const today = '2026-10-06';
@@ -322,7 +322,7 @@ describe('dashboard', () => {
 
     assert.ok(page.includes('В ноябре на дополнительные осталось 85 000 ₽ из 100 000 ₽. По неделям запланировано 3 500 ₽ из 180 000 ₽.'));
     assert.ok(page.includes('впереди · в плане 3 500 ₽ · свободно') && page.includes('Пальто'));
-    assert.ok(page.includes('name="week" value="2026-11-02"'), 'new extras go into the first week of the month');
+    assert.ok(page.includes('<option value="2026-11-02" selected>'), 'new extras go into the first week of the month');
     assert.ok(page.includes('href="/?view=month&amp;month=2026-11&amp;edit=purchase-5"'), 'an entry opens in the month it is in');
     assert.ok(render({ view: 'month', month: '2028-01' }).includes('В октябре'), 'a month more than a year ahead falls back to this one');
   });
@@ -343,7 +343,7 @@ describe('dashboard', () => {
     const planned = plan({ week: '2026-11-02' }, budget);
     assert.ok(planned.includes('Стрижка') && !planned.includes('Завершить'), 'nothing paid it yet');
     assert.ok(planned.includes('регулярная · 7 ноября'));
-    assert.ok(plan({ week: '2026-11-02', edit: 'new-purchase' }, budget).includes('name="week" value="2026-11-02"'), 'a new purchase goes into the week shown');
+    assert.ok(plan({ week: '2026-11-02', edit: 'new-purchase' }, budget).includes('<option value="2026-11-02" selected>'), 'a new purchase goes into the week shown');
     assert.ok(render({ week: '2026-11-09' }, budget).includes('Неделя впереди, в плане пока ничего: свободны все 45 000 ₽.'));
   });
 
@@ -505,5 +505,22 @@ describe('submitDashboard', () => {
       ['Укладка', '2026-10-12', 'week'],
     ]);
 
+  });
+});
+
+
+describe('backdated purchases', () => {
+  it('offers past weeks while keeping the current and future choices', () => {
+    const choices = weekChoices('2026-11-21').flatMap((g) => g.options);
+    assert.ok(choices.some((o) => o.value === '2026-11-14'));
+    assert.equal(choices.find((o) => o.value === '2026-11-21')?.label, 'Эта неделя');
+    assert.equal(choices.find((o) => o.value === '2026-11-28')?.label, 'Следующая неделя');
+    assert.ok(weekChoices('2026-11-21', '2025-01-04').flatMap((g) => g.options).some((o) => o.value === '2025-01-04'));
+  });
+
+  it('lets a new purchase choose a past week on the web', () => {
+    const page = plan({ edit: 'new-purchase' });
+    assert.match(page, /<select[^>]*name="week"/);
+    assert.ok(page.includes('<option value="2026-09-28"'));
   });
 });
